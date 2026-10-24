@@ -20,7 +20,7 @@ Inno Setup 安装器识别到旧 Qualcomm `ACPI\QCOM043A` GPU 家族（Adreno 68
 
 降噪模式由圆形按钮选择，下方显示细分选项；均衡器频段、预设和可保存方案数由设备决定。修改自定义 EQ 后选择“保存并启用”。耳塞贴合度测试需要双耳正确佩戴。黄金听感下拉框选择本机向导保存及耳机当前完整读回的方案；没有方案时先打开设置向导。校准中可以取消；断连、摘下耳机、关闭窗口等情况会停止测试。
 
-关闭主界面后后台继续运行，右键托盘可打开主界面或退出。直接启动 `backend/HeyMelody.Host.exe` 只启动后台。本版本不添加登录自启或开盖弹窗。Demo 的合成控件集合只供布局检查，不代表丹拿版实机能力。
+关闭主界面后后台继续运行，右键托盘可打开主界面或退出。托盘退出会让主界面、设备管理器、贴合度测试与黄金听感共同完成确认和安全停止，再一起结束；取消退出恢复可用窗口，正式退出后旧组件不会自行拉起新后台。直接启动 `backend/HeyMelody.Host.exe` 只启动后台。本版本不添加登录自启或开盖弹窗。Demo 的合成控件集合只供布局检查，不代表丹拿版实机能力。
 
 `ResourceBundles`、各程序 DLL、原生渲染库、`backend` 和 `licenses` 都是运行所需文件，请保留完整目录。资源来自用户提供的欢律 APK、已验证的官方资源包和单独提供的 X4 图片，版权及源摘要见 `SOURCE-NOTES.md`、`PACKAGE-NOTICES.json`、`ResourceBundles/provenance.json` 和 `licenses/upstream/Extracted-Earphone-Resources-NOTICE.txt`。
 

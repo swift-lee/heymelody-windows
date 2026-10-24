@@ -104,6 +104,18 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Build-Client.ps1 -Test
 
 内置资源仅包含欢律的 85 个耳机产品 ID。这是目录覆盖数量；未知 codec、缺少 SPP 或仅外部控制路由的功能会被禁用，目录条目本身不是硬件验证结论。跨窗口并发、校准流程、手机同时操作、休眠恢复及特定硬件的渲染仍需相应范围的实测证据。
 
+托盘退出的定向检查使用隔离命名管道和启动替身，覆盖晚接入、断管、动态投票、队列拥堵、取消恢复、跨 Bridge 与原后台周期绑定：
+
+```powershell
+dotnet run --project tests/HeyMelody.Client.Tests -c Release -- --exit-lifecycle-tests
+dotnet run --project tests/HeyMelody.Host.Tests -c Release -- --exit-tests
+dotnet run --project tests/HeyMelody.App.Tests -c Release -- --native-exit-smoke
+dotnet run --project tests/HeyMelody.DeviceManager.Tests -c Release -- --native-exit-smoke
+dotnet run --project tests/HeyMelody.Calibration.UI.Tests -c Release -- --native-exit-smoke
+```
+
+三个 native 入口仅启动软件绘制的假服务窗口，不使用实际 Host 或耳机、不获取截图。Diagnostics 默认检查还覆盖子组件启动门与历史日志路径／SHA 保留。原生窗口、模拟通信及 ARM64 静态结果仍须分别报告。
+
 ## 发布与包校验
 
 仅在任务涉及构建发布包时执行。脚本默认版本为 0.9.2，`-Version` 同时选择程序集与包版本，本 Filament 试验默认生成自包含 Windows x64 目录和 ZIP；本地生成产物不等于向 GitHub 发布：

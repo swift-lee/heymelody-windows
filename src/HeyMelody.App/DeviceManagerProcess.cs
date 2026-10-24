@@ -46,7 +46,7 @@ internal sealed class DeviceManagerProcess : IDeviceManagerProcess
             start.FileName = "dotnet";
             start.ArgumentList.Add(dll);
         }
-        using var process = Process.Start(start) ?? throw new IOException("无法启动设备管理组件。");
+        using var process = StartPreparedProcess(start, token);
         var errors = DrainAsync(process.StandardError);
         try
         {
@@ -66,6 +66,9 @@ internal sealed class DeviceManagerProcess : IDeviceManagerProcess
             throw;
         }
     }
+
+    internal static Process StartPreparedProcess(ProcessStartInfo start, CancellationToken token)
+        => ClientBridge.StartOwnedComponent(start, token);
 
     private static async Task DrainAsync(StreamReader reader)
     {

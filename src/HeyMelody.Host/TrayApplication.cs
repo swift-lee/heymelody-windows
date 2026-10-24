@@ -56,9 +56,16 @@ internal sealed class TrayApplication : Application
             _server.ExitApproved += async () =>
             {
                 _exiting = true;
-                await Dispatcher.UIThread.InvokeAsync(() => _monitor.Dispose());
-                await _server.DisposeAsync();
-                await Dispatcher.UIThread.InvokeAsync(() => { _tray.Dispose(); desktop.Shutdown(); });
+                try { await Dispatcher.UIThread.InvokeAsync(() => _monitor.Dispose()); }
+                catch (Exception error) { DiagnosticLog.Error("host.lifecycle", "monitorDisposeFailed", "Windows observers could not finish cleanup", error); }
+                try { await _server.DisposeAsync(); }
+                catch (Exception error) { DiagnosticLog.Error("host.lifecycle", "pipeDisposeFailed", "Backend pipe could not finish cleanup", error); }
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    try { _tray.Dispose(); }
+                    catch (Exception error) { DiagnosticLog.Error("host.lifecycle", "trayDisposeFailed", "Tray icon could not finish cleanup", error); }
+                    desktop.Shutdown();
+                });
             };
             desktop.ShutdownRequested += (_, args) =>
             {

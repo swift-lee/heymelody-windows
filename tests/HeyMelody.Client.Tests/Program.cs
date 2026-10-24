@@ -12,6 +12,12 @@ string scratch = Path.Combine(Path.GetTempPath(), "HeyMelody-ClientTests-" + Gui
 Directory.CreateDirectory(scratch);
 try
 {
+    if (args.Length > 0 && args[0] == "--exit-lifecycle-tests")
+    {
+        int exitChecks = await ExitRaceChecks.RunAsync();
+        Console.WriteLine($"Exit lifecycle checks passed: {exitChecks}; only fake pipes and launchers used.");
+        return 0;
+    }
     if (args is ["--diagnostics-tests"])
     {
         await DiagnosticBridgeTests.RunAsync(Test, scratch);

@@ -12,7 +12,9 @@ internal static class Program
         if (args is ["--ui-preview"]) DeviceManagerApp.Preview = true;
         else if (args.Length != 0) return 2;
         if (!DeviceManagerApp.Preview && !OperatingSystem.IsWindows()) return 2;
+        if (!DeviceManagerApp.Preview && DiagnosticRuntime.IsBoundLaunchExpired) return 1;
         using var diagnostics = DeviceManagerApp.Preview ? null : DiagnosticRuntime.InitializeClient(DiagnosticComponents.DeviceManager);
+        if (!DeviceManagerApp.Preview && DiagnosticRuntime.IsBoundLaunchExpired) return 1;
         try { return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args); }
         catch (Exception error) { DiagnosticLog.Error("DeviceManager", "process.failed", "Device manager failed", error); return 2; }
     }

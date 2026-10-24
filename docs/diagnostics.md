@@ -59,6 +59,7 @@ GUI、Host 和 worker 使用可空诊断关联 ID 贯通请求，业务响应仍
 ```powershell
 dotnet run --project tests/HeyMelody.Diagnostics.Tests -c Release
 dotnet run --project tests/HeyMelody.App.Tests -c Release -- --diagnostic-settings-tests
+dotnet run --project tests/HeyMelody.Diagnostics.Tests -c Release -- --log-retention-tests
 ```
 
 测试使用临时配置、模拟协议和隔离子进程；打开目录动作注入替身，不操作 Explorer 或耳机。新增界面只检查设置和告警区域。原始日志可能包含长行，审查时先统计尺寸，再提取事件和字段，不整篇上传。

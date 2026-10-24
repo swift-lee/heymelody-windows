@@ -231,11 +231,13 @@ internal static class CalibrationBackendTests
             Check((await client.Request(new() { Id = 1, Operation = "subscribe", Role = "calibration" })).Success, "Component role unavailable");
             Check((await client.Request(new() { Id = 2, Operation = "getCalibration", CalibrationHandle = ready.Handle })).Success, "Component could not claim operation");
             var exit = server.RequestExitAsync(); var vote = await client.ReadUntil(message => message.Event?.Kind == "requestExit");
-            Check((await client.Request(new() { Id = 3, Operation = "exitVote", ExitRequestId = vote.Event!.ExitRequestId, Approved = false })).Success, "Component veto rejected");
+            Check((await client.Request(new() { Id = 3, Operation = "exitVote", BackendInstanceId = fixture.Backend.InstanceId, ExitRequestId = vote.Event!.ExitRequestId, Approved = false })).Success, "Component veto rejected");
             await client.ReadUntil(message => message.Event?.Kind == "exitCancelled"); await exit.WaitAsync(TimeSpan.FromSeconds(3));
             Check(!approved && fixture.Workers[0].Cancels == 0, "Veto shut down Host or stopped measurement");
             exit = server.RequestExitAsync(); vote = await client.ReadUntil(message => message.Event?.Kind == "requestExit");
-            Check((await client.Request(new() { Id = 4, Operation = "exitVote", ExitRequestId = vote.Event!.ExitRequestId, Approved = true })).Success, "Component approval rejected");
+            Check((await client.Request(new() { Id = 4, Operation = "exitVote", BackendInstanceId = fixture.Backend.InstanceId, ExitRequestId = vote.Event!.ExitRequestId, Approved = true })).Success, "Component approval rejected");
+            var stopping = await client.ReadUntil(message => message.Event?.Kind == "stopping");
+            await client.Send(new() { Id = 5, Operation = "stoppingAck", BackendInstanceId = fixture.Backend.InstanceId, ExitRequestId = stopping.Event!.ExitRequestId });
             await exit.WaitAsync(TimeSpan.FromSeconds(3));
             Check(approved && fixture.Workers[0].Cancels == 1, "Approved exit did not stop component operation");
         });
@@ -322,7 +324,8 @@ internal static class CalibrationBackendTests
         internal static async Task<PipeClient> Connect(string name)
         { var pipe = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly); await pipe.ConnectAsync(3000); return new(pipe); }
         internal async Task<BackendMessage> Request(BackendRequest request)
-        { await _writer.WriteLineAsync(JsonSerializer.Serialize(request, RpcWire.Json)); return await ReadUntil(message => message.Kind == "response" && message.Id == request.Id); }
+        { await Send(request); return await ReadUntil(message => message.Kind == "response" && message.Id == request.Id); }
+        internal Task Send(BackendRequest request) => _writer.WriteLineAsync(JsonSerializer.Serialize(request, RpcWire.Json));
         internal async Task<BackendMessage> ReadUntil(Func<BackendMessage, bool> match)
         {
             for (int attempt = 0; attempt < 40; attempt++)

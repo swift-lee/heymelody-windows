@@ -18,6 +18,8 @@ public static class DiagnosticBackendLauncher
 
     public static void Start()
     {
+        if (DiagnosticRuntime.HasBoundLaunch)
+            throw new IOException("此窗口属于原后台运行周期，不能重新启动后台；请从主界面重新打开。");
         var executable = Path.Combine(AppContext.BaseDirectory, "backend", "HeyMelody.Host.exe");
         if (!File.Exists(executable)) executable = Path.Combine(AppContext.BaseDirectory, "HeyMelody.Host.exe");
         var start = new ProcessStartInfo { FileName = executable, UseShellExecute = false, CreateNoWindow = true,

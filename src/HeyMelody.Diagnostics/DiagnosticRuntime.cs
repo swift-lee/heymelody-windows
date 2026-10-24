@@ -3,10 +3,11 @@ using System.Text.Json;
 
 namespace HeyMelody.Diagnostics;
 
-public static class DiagnosticRuntime
+public static partial class DiagnosticRuntime
 {
     public static IDisposable InitializeHost()
     {
+        _ignoreLaunchBinding = true;
         DiagnosticLog.InitializeIdentity(DiagnosticComponents.Host, "backend");
         using var current = Process.GetCurrentProcess();
         var session = new DiagnosticSessionInfo
@@ -43,14 +44,16 @@ public static class DiagnosticRuntime
 
     public static IDisposable InitializeWorker(string role)
     {
+        _ignoreLaunchBinding = true;
         DiagnosticLog.InitializeIdentity(DiagnosticComponents.Host, role, reportToStandardError: true);
         return Join(ensureBackend: false);
     }
 
     public static IDisposable InitializeClient(string component, Action? startBackend = null, Func<bool>? backendRunning = null)
     {
+        if (component == DiagnosticComponents.Main) _ignoreLaunchBinding = true;
         DiagnosticLog.InitializeIdentity(component, "main");
-        return Join(ensureBackend: true, startBackend, backendRunning);
+        return Join(ensureBackend: !HasBoundLaunch, startBackend, backendRunning);
     }
 
     private static IDisposable Join(bool ensureBackend, Action? startBackend = null, Func<bool>? backendRunning = null)
@@ -66,12 +69,13 @@ public static class DiagnosticRuntime
             do
             {
                 var session = ReadReady();
-                if (session is not null && TryOpenOwner(session, out var owner))
+                if (session is not null && MatchesLaunchOwner(session) && TryOpenOwner(session, out var owner))
                 {
                     pendingOwner = owner;
                     pendingLease = new RuntimeLease(session, owner, false);
                     pendingOwner = null;
                     if (!pendingLease.TryConfigure()) { pendingLease.Dispose(); return new RuntimeLease(null, null, false); }
+                    _joinedOwner = session;
                     if (session.Failure is not null) DiagnosticLog.ReportExternalFailure(session.Failure);
                     DiagnosticLog.Info("Runtime", "bootstrap.completed", "Logging initialized before UI/rendering",
                         new { startedAtUtc = started, elapsedMilliseconds = timer.Elapsed.TotalMilliseconds });
@@ -154,7 +158,11 @@ public static class DiagnosticRuntime
                 return true;
             }
         }
-        private void OwnerExited(object? sender, EventArgs args) => Dispose();
+        private void OwnerExited(object? sender, EventArgs args)
+        {
+            Dispose();
+            if (HasBoundLaunch) PublishBoundOwnerExited();
+        }
         public void Dispose()
         {
             lock (_gate)

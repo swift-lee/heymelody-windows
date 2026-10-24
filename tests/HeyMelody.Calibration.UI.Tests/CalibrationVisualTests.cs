@@ -260,9 +260,14 @@ internal static class CalibrationVisualTests
                 Check(service.ExitApprovals is [("exit-failed", false)] && window.IsVisible && !service.Disposed,
                     "A background exit request receives false and leaves the window open when STOP fails.");
                 service.Push(new BackendEvent { Kind = "requestExit", ExitRequestId = "exit-retry" });
+                await Until(() => service.ExitApprovals.Count == 2);
+                Check(service.ExitApprovals is [("exit-failed", false), ("exit-retry", true)] && service.Cancels == 3 &&
+                    window.IsVisible && !service.Disposed,
+                    "A retried background exit receives true only after a confirmed STOP and waits for the final decision.");
+                service.Push(new BackendEvent { Kind = "stopping", BackendInstanceId = "fixture", ExitRequestId = "exit-retry" });
                 await Until(() => !window.IsVisible);
-                Check(service.ExitApprovals is [("exit-failed", false), ("exit-retry", true)] && service.Cancels == 3 && service.Disposed,
-                    "A retried background exit receives true only after a confirmed STOP, then closes the window.");
+                Check(service.Cancels == 3 && service.Disposed,
+                    "Final stopping closes the window and disposes its service without issuing another STOP.");
             }
             finally { if (window.IsVisible) { service.StopFailuresRemaining = 0; window.Close(); await Until(() => !window.IsVisible); } }
             return true;

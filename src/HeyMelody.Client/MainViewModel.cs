@@ -95,6 +95,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     public bool IsRefreshing => _refreshing;
     public bool HasActivity => Busy || IsRefreshing;
     public bool Closing => _closing || _closeRequested;
+    public bool CloseCommitted => _closing;
     public bool UpdatingState => _displaying;
     public DialogCoordinator Dialogs { get; }
     public bool HasVerifiedSnapshot => IsVerifiedControl(_liveSnapshot)
@@ -653,7 +654,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         {
             if (EqDirty && !IsDemoSelected && !_preview && !_backendExitApproved && !await ConfirmAsync("关闭客户端", "均衡器还有未保存的调整，确定关闭吗？")) return false;
             _closing = true; _lifetime.Cancel(); NotifyState();
-            await DisposeAsync(); return true;
+            try { await DisposeAsync(); }
+            catch (Exception error) { HeyMelody.Diagnostics.DiagnosticLog.Warning("client.lifecycle", "closeCleanupFailed", "Close was approved; cleanup failure must not leave a disabled window", error); }
+            return true;
         }
         finally { _closeDialogRunning = false; if (!_closing) _closeRequested = false; NotifyState(); }
     }
@@ -668,9 +671,22 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private async Task DisposeCoreAsync()
     {
         _closing = true; _lifetime.Cancel();
-        await ResumeInterruptedReconnectAsync();
-        try { await _service.DisposeAsync(); } catch { }
-        await _operations.WhenIdle;
+        var terminal = _backendStopping || _service is ClientBridge { IsStopping: true };
+        if (!terminal) await ResumeInterruptedReconnectAsync();
+        else _reconnectPaused = null;
+        try
+        {
+            var disposal = _service.DisposeAsync().AsTask();
+            if (terminal) await disposal.WaitAsync(TimeSpan.FromSeconds(2));
+            else await disposal;
+        }
+        catch (Exception error) { HeyMelody.Diagnostics.DiagnosticLog.Warning("client.lifecycle", "disposeServiceFailed", "Client cleanup could not finish normally", error); }
+        try
+        {
+            if (terminal) await _operations.WhenIdle.WaitAsync(TimeSpan.FromSeconds(2));
+            else await _operations.WhenIdle;
+        }
+        catch (Exception error) { HeyMelody.Diagnostics.DiagnosticLog.Warning("client.lifecycle", "disposeOperationsEnded", "Stopped waiting for operations during backend shutdown", error); }
         ClearDeviceManagement();
         _devices = _devices.Where(device => !IsDemoDevice(device)).ToArray();
         if (IsDemoSelected) { _selectedDevice = null; _sessionIdentity = null; ResetSelection(); }

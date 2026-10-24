@@ -10,5 +10,6 @@
   <ItemGroup>
     <Compile Include="../HeyMelody.App.Tests/NativeRenderingProbe.cs" Link="NativeRenderingProbe.cs" />
     <Compile Include="../HeyMelody.ModelPreview.Tests/NativeWindowCapture.cs" Link="NativeWindowCapture.cs" />
+    <Compile Include="../Shared/NativeWindowLifetimeHarness.cs" Link="NativeWindowLifetimeHarness.cs" />
   </ItemGroup>
 </Project>

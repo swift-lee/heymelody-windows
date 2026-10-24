@@ -216,13 +216,15 @@ internal static class BackendTests
             var mismatch = await ReadUntil(m => m.Id == 2); Check(mismatch.ErrorCode == "versionMismatch");
             var exiting = server.RequestExitAsync();
             var requestExit = await ReadUntil(m => m.Event?.Kind == "requestExit");
-            await writer.WriteLineAsync(JsonSerializer.Serialize(new BackendRequest { Id = 3, Operation = "exitVote", ExitRequestId = requestExit.Event!.ExitRequestId, Approved = false }, RpcWire.Json));
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new BackendRequest { Id = 3, Operation = "exitVote", BackendInstanceId = backend.InstanceId, ExitRequestId = requestExit.Event!.ExitRequestId, Approved = false }, RpcWire.Json));
             Check((await ReadUntil(m => m.Id == 3)).Success);
             await ReadUntil(m => m.Event?.Kind == "exitCancelled"); await exiting;
             Check(backend.Select(snapshotId).Identity == snapshotId);
             exiting = server.RequestExitAsync(); requestExit = await ReadUntil(m => m.Event?.Kind == "requestExit");
-            await writer.WriteLineAsync(JsonSerializer.Serialize(new BackendRequest { Id = 4, Operation = "exitVote", ExitRequestId = requestExit.Event!.ExitRequestId, Approved = true }, RpcWire.Json));
-            Check((await Read()).Id == 4); Check((await Read()).Event?.Kind == "stopping"); await exiting;
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new BackendRequest { Id = 4, Operation = "exitVote", BackendInstanceId = backend.InstanceId, ExitRequestId = requestExit.Event!.ExitRequestId, Approved = true }, RpcWire.Json));
+            Check((await Read()).Id == 4); var stopping = (await Read()).Event; Check(stopping?.Kind == "stopping");
+            await writer.WriteLineAsync(JsonSerializer.Serialize(new BackendRequest { Id = 5, Operation = "stoppingAck", BackendInstanceId = backend.InstanceId, ExitRequestId = stopping!.ExitRequestId }, RpcWire.Json));
+            await exiting;
             async Task<BackendMessage> Read() => JsonSerializer.Deserialize<BackendMessage>(
                 await lines.ReadLineAsync(CancellationToken.None).AsTask().WaitAsync(TimeSpan.FromSeconds(3)) ?? throw new IOException(), RpcWire.Json)!;
             async Task<BackendMessage> ReadUntil(Func<BackendMessage, bool> match)

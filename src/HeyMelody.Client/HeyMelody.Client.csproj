@@ -9,6 +9,7 @@
     <ProjectReference Include="../HeyMelody.Diagnostics/HeyMelody.Diagnostics.csproj" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <InternalsVisibleTo Include="HeyMelody.Client.Tests" />
+    <InternalsVisibleTo Include="HeyMelody.Host.Tests" />
     <InternalsVisibleTo Include="HeyMelody.App.Tests" />
   </ItemGroup>
 </Project>

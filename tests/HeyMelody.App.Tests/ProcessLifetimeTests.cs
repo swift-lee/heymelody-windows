@@ -23,6 +23,17 @@ internal static class ProcessLifetimeTests
 
     public static async Task RunAsync()
     {
+        using (var cancelled = new CancellationTokenSource())
+        {
+            cancelled.Cancel();
+            var prepared = new ProcessStartInfo(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "missing.exe"));
+            try
+            {
+                using var unexpected = DeviceManagerProcess.StartPreparedProcess(prepared, cancelled.Token);
+                throw new InvalidOperationException("A cancelled launch must not start a prepared child process.");
+            }
+            catch (OperationCanceledException) when (cancelled.IsCancellationRequested) { }
+        }
         using var editor = Process.Start(StartInfo(EditorMode))
             ?? throw new IOException("Unable to start the isolated editor fixture.");
         Process? backend = null;
