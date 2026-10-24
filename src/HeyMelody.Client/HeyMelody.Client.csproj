@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../HeyMelody.Contracts/HeyMelody.Contracts.csproj" />
+    <ProjectReference Include="../HeyMelody.Diagnostics/HeyMelody.Diagnostics.csproj" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <InternalsVisibleTo Include="HeyMelody.Client.Tests" />
     <InternalsVisibleTo Include="HeyMelody.App.Tests" />

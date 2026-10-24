@@ -19,6 +19,7 @@
 | `src/HeyMelody.Calibration`、`src/HeyMelody.Calibration.UI` | 校准流程及界面；输入绑定设备版本，操作受每设备租约约束 |
 | `src/HeyMelody.Protocol`、`src/HeyMelody.Control`、`src/HeyMelody.Daily`、`src/HeyMelody.Probe` | 协议、设置工作流、日常状态与只读探测 |
 | `src/HeyMelody.Contracts`、`src/HeyMelody.Client` | 跨进程契约与客户端通信 |
+| `src/HeyMelody.Diagnostics` | 一次后台周期的统一 Debug JSONL、会话引导、故障状态与原始协议记录，见[诊断日志](diagnostics.md) |
 | `src/HeyMelody.Resources`、`src/HeyMelody.Devices`、`src/HeyMelody.Artwork` | 资源解析、设备能力与外观资源 |
 | `src/HeyMelody.Windows` | Windows 平台接口；`OfflineChecks` 是独立检查入口 |
 | `src/HeyMelody.Audio`、`src/HeyMelody.Experiments` | 早期驱动与音频实验，另有依赖和历史验证范围 |

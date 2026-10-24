@@ -9,6 +9,7 @@ using FluentAvalonia.UI.Windowing;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Ui;
 using HeyMelodyWindows.Windowing;
+using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.Calibration.UI;
 
@@ -20,9 +21,10 @@ public sealed class CalibrationApplication : Application
     {
         if (args is not ["--handle", var handle] || string.IsNullOrWhiteSpace(handle) || handle.Length > 128 || !OperatingSystem.IsWindows()) return 2;
         Kind = kind; Handle = handle;
-        try { return AppBuilder.Configure<CalibrationApplication>().UsePlatformDetect().UseHeyMelodyRendering().UseHeyMelodyTypography()
-            .LogToTrace().StartWithClassicDesktopLifetime(args); }
-        catch { return 2; }
+        using var diagnostics = DiagnosticRuntime.InitializeClient(kind == "fit" ? DiagnosticComponents.FitTest : DiagnosticComponents.HearingSetup);
+        try { return AppBuilder.Configure<CalibrationApplication>().UsePlatformDetect().UseHeyMelodyDiagnostics()
+            .UseHeyMelodyRendering().UseHeyMelodyTypography().StartWithClassicDesktopLifetime(args); }
+        catch (Exception error) { DiagnosticLog.Error("Calibration.UI", "process.failed", "Calibration application failed", error); return 2; }
     }
     public override void Initialize()
     {
@@ -69,6 +71,7 @@ public sealed class CalibrationWindow : FAAppWindow
         Width = 520; Height = 720; MinWidth = 400; MinHeight = 520; CanResize = true; ShowAsDialog = true;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         var view = new CalibrationView(_model); Content = view;
+        UiDiagnosticLogging.AttachDiagnosticNotice(this);
         view.CloseRequested += () => { Close(); return Task.CompletedTask; };
         if (_events is not null) _events.EventReceived += OnEvent;
         Opened += async (_, _) =>

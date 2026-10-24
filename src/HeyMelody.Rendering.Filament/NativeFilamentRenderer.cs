@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
+using HeyMelody.Diagnostics;
 
 namespace HeyMelody.Rendering.Filament;
 
@@ -14,6 +15,8 @@ public sealed class NativeFilamentRendererFactory : IFilamentRendererFactory
     {
         FilamentBackendPolicy.Validate(backend);
         cancellationToken.ThrowIfCancellationRequested();
+        using var operation = DiagnosticLog.BeginOperation(DiagnosticLog.CurrentCorrelationId);
+        DiagnosticLog.Debug("Filament.Renderer", "createRequested", "Creating the explicitly selected model renderer.", new { backend });
         var runtimeStarted = Stopwatch.GetTimestamp();
         var (api, payload) = PrepareRuntime(backend);
         var runtimeMilliseconds = Stopwatch.GetElapsedTime(runtimeStarted).TotalMilliseconds;
@@ -32,11 +35,14 @@ public sealed class NativeFilamentRendererFactory : IFilamentRendererFactory
                 renderer.Dispose();
                 cancellationToken.ThrowIfCancellationRequested();
             }
+            DiagnosticLog.Info("Filament.Renderer", "created", "Native model renderer created.",
+                new { backend, timings = renderer.CreationTimings });
             return renderer;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-        catch
+        catch (Exception error)
         {
+            DiagnosticLog.Error("Filament.Renderer", "createFailed", "The selected native renderer failed; no backend is substituted.", error, new { backend });
             NativeBackendProbe.Shared.Invalidate(payload, backend);
             throw;
         }
@@ -63,6 +69,7 @@ public sealed class NativeFilamentRendererFactory : IFilamentRendererFactory
         catch (Exception error) when (error is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException
             or PlatformNotSupportedException or IOException or UnauthorizedAccessException)
         {
+            DiagnosticLog.Error("Filament.Runtime", "unavailable", "The packaged native runtime could not be prepared.", error, new { backend });
             throw new FilamentRendererException("The packaged Filament rendering components are missing or incompatible.",
                 FilamentFailureKind.ComponentUnavailable, FilamentFailureStage.RuntimeLoading, backend, innerException: error);
         }
@@ -103,12 +110,16 @@ internal sealed unsafe class NativeFilamentRenderer : IFilamentRenderer
     public void LoadModel(FilamentModelData model)
     {
         ArgumentNullException.ThrowIfNull(model);
+        DiagnosticLog.Debug("Filament.Renderer", "modelLoadStarted", "Loading the verified model into the native renderer.",
+            new { backend = _backend, model.Sha256, bytes = model.Bytes.Length });
         lock (_gate)
         {
             ThrowIfDisposed();
             using var pin = model.Bytes.Pin();
             Check(_api.LoadModel(_handle, (nint)pin.Pointer, (ulong)model.Bytes.Length, model.Sha256), FilamentFailureStage.ModelLoading);
         }
+        DiagnosticLog.Info("Filament.Renderer", "modelLoaded", "Native model loading completed.",
+            new { backend = _backend, model.Sha256, bytes = model.Bytes.Length });
     }
 
     public void Configure(FilamentRenderConfiguration configuration)
@@ -181,6 +192,7 @@ internal sealed unsafe class NativeFilamentRenderer : IFilamentRenderer
             _disposed = true;
             // hm_destroy joins the worker and drains outstanding GPU readback callbacks.
             _handle.Dispose();
+            DiagnosticLog.Debug("Filament.Renderer", "disposed", "The native renderer worker and readback callbacks have drained.", new { backend = _backend });
         }
     }
 
@@ -188,12 +200,15 @@ internal sealed unsafe class NativeFilamentRenderer : IFilamentRenderer
     {
         if (result >= 0) return;
         NativeBackendProbe.Shared.Invalidate(_payload, _backend);
-        throw new FilamentRendererException(_api.Error(_handle.DangerousGetHandle()),
+        var message = _api.Error(_handle.DangerousGetHandle());
+        DiagnosticLog.Error("Filament.Renderer", "nativeResultFailed", message, data: new { backend = _backend, stage, result });
+        throw new FilamentRendererException(message,
             result == -5 ? FilamentFailureKind.InvalidModel : FilamentFailureKind.RuntimeFailure, stage, _backend, result);
     }
     private FilamentRendererException RuntimeError(string message)
     {
         NativeBackendProbe.Shared.Invalidate(_payload, _backend);
+        DiagnosticLog.Error("Filament.Renderer", "runtimeFailed", message, data: new { backend = _backend });
         return new(message, FilamentFailureKind.RuntimeFailure, FilamentFailureStage.Rendering, _backend);
     }
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
@@ -257,6 +272,8 @@ internal sealed class NativeBindings
     internal readonly DiagnosticsDelegate GetDiagnostics;
     internal readonly DestroyDelegate Destroy;
     private readonly ErrorDelegate _getError;
+    // Native callbacks can outlive a renderer and must stay rooted for this module's process lifetime.
+    private static readonly NativeLogDelegate NativeLogConsumer = ReceiveNativeLog;
 
     private NativeBindings()
     {
@@ -266,6 +283,8 @@ internal sealed class NativeBindings
         var runtime = NativeRuntimeResolver.ResolveCurrent();
         _libraryPath = NativeRuntimeResolver.FindLibraryPath(AppContext.BaseDirectory, runtime);
         _libraryHash = NativeProbePayload.HashFile(_libraryPath);
+        DiagnosticLog.Debug("Filament.Runtime", "loading", "Loading the exact packaged native runtime.",
+            new { path = _libraryPath, sha256 = _libraryHash, runtime });
         _module = NativeLibrary.Load(_libraryPath);
         try
         {
@@ -279,9 +298,15 @@ internal sealed class NativeBindings
             GetDiagnostics = Export<DiagnosticsDelegate>("hm_get_diagnostics");
             Destroy = Export<DestroyDelegate>("hm_destroy");
             _getError = Export<ErrorDelegate>("hm_get_last_error");
+            var setLogCallback = Export<SetLogCallbackDelegate>("hm_set_log_callback");
+            setLogCallback(DiagnosticLog.IsEnabled ? NativeLogConsumer : null, 0);
+            DiagnosticLog.Info("Filament.Runtime", "loaded", "Native ABI and required logging export verified.",
+                new { path = _libraryPath, sha256 = _libraryHash, abi, logCallbackExport = "hm_set_log_callback" });
         }
-        catch
+        catch (Exception error)
         {
+            DiagnosticLog.Error("Filament.Runtime", "loadFailed", "Native runtime initialization or required export resolution failed.", error,
+                new { path = _libraryPath, sha256 = _libraryHash });
             NativeLibrary.Free(_module);
             throw;
         }
@@ -300,7 +325,28 @@ internal sealed class NativeBindings
         var probePath = NativeRuntimeResolver.FindProbePath(_libraryPath);
         var manifest = NativeRuntimeResolver.FindManifestPath(_libraryPath);
         var manifestHash = NativeProbePayload.HashFile(manifest);
-        return new(probePath, string.Join(':', _libraryPath, _libraryHash, NativeProbePayload.HashFile(probePath), manifestHash));
+        var probeHash = NativeProbePayload.HashFile(probePath);
+        DiagnosticLog.Debug("Filament.Runtime", "payloadVerified", "Native library, probe and manifest identities verified.",
+            new { library = _libraryPath, librarySha256 = _libraryHash, probePath, probeSha256 = probeHash, manifest, manifestSha256 = manifestHash });
+        return new(probePath, string.Join(':', _libraryPath, _libraryHash, probeHash, manifestHash));
+    }
+
+    internal static unsafe void ReceiveNativeLog(uint level, nint message, uint length, nint user)
+    {
+        try
+        {
+            if (!DiagnosticLog.IsEnabled || message == 0 || length > int.MaxValue) return;
+            var bytes = new ReadOnlySpan<byte>((void*)message, (int)length);
+            var severity = level switch
+            {
+                1 => DiagnosticLevel.Information, 2 => DiagnosticLevel.Warning,
+                3 => DiagnosticLevel.Error, 4 => DiagnosticLevel.Critical, _ => DiagnosticLevel.Debug
+            };
+            // Both strings are copied now: Filament frees the source message as soon as its callback returns.
+            DiagnosticLog.Write(severity, "Filament.Native", "nativeLog", Encoding.UTF8.GetString(bytes),
+                new { nativeLevel = level, byteLength = length, utf8Hex = Convert.ToHexString(bytes) });
+        }
+        catch { /* A diagnostic consumer must never throw back into unmanaged render or driver threads. */ }
     }
 
     private T Export<T>(string name) where T : Delegate => Marshal.GetDelegateForFunctionPointer<T>(NativeLibrary.GetExport(_module, name));
@@ -314,6 +360,8 @@ internal sealed class NativeBindings
     }
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] internal delegate uint AbiDelegate();
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] internal delegate void NativeLogDelegate(uint level, nint message, uint length, nint user);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] internal delegate void SetLogCallbackDelegate(NativeLogDelegate? callback, nint user);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] internal delegate int CreateDelegate(in NativeCreateOptions options, out nint renderer);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] internal delegate int LoadModelDelegate(RendererHandle renderer, nint glb, ulong length, [MarshalAs(UnmanagedType.LPUTF8Str)] string sha256);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)] internal delegate int ConfigureDelegate(RendererHandle renderer, in NativeConfiguration configuration);

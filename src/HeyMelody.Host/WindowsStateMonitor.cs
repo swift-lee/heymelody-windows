@@ -10,6 +10,8 @@ using global::Windows.Devices.Radios;
 using global::Windows.Foundation;
 using global::Windows.Storage.Streams;
 
+using HeyMelody.Diagnostics;
+
 namespace HeyMelodyWindows.Host;
 
 /// <summary>OS callbacks and BLE observations never perform synchronous SDP or native enumeration.</summary>
@@ -39,6 +41,7 @@ internal sealed class WindowsStateMonitor(BackendSupervisor supervisor) : IDispo
     public async Task StartAsync()
     {
         if (!OperatingSystem.IsWindows()) return;
+        DiagnosticLog.Debug("host.monitor", "starting", "Starting Windows Bluetooth and power observers");
         supervisor.ScanDemandChanged += OnScanDemand;
         // The catalog may be known already; scanning itself starts below, once the radio state is.
         lock (_observerSync) _scanWanted = supervisor.HasScanDemand();
@@ -47,7 +50,11 @@ internal sealed class WindowsStateMonitor(BackendSupervisor supervisor) : IDispo
             _power = new PowerMessageWindow(OnSuspend);
             if (!_power.IsRegistered) supervisor.ReportHealth("休眠状态通知暂不可用；蓝牙状态监听继续运行。");
         }
-        catch (Exception) { supervisor.ReportHealth("休眠状态通知暂不可用；蓝牙状态监听继续运行。"); }
+        catch (Exception error)
+        {
+            DiagnosticLog.Error("host.monitor", "powerObserverFailed", "Power state observer could not start", error);
+            supervisor.ReportHealth("休眠状态通知暂不可用；蓝牙状态监听继续运行。");
+        }
         try
         {
             var selector = BluetoothDevice.GetDeviceSelectorFromPairingState(true);
@@ -55,11 +62,18 @@ internal sealed class WindowsStateMonitor(BackendSupervisor supervisor) : IDispo
                 ["System.Devices.Aep.DeviceAddress", "System.Devices.Aep.IsConnected"], DeviceInformationKind.AssociationEndpoint);
             _devices.Added += Added; _devices.Updated += Updated; _devices.Removed += Removed;
             _devices.EnumerationCompleted += (_, _) => { lock (_observerSync) _deviceFailures = 0; ScheduleCatalog(); };
-            _devices.Stopped += (_, _) => RestartDeviceWatcher();
+            _devices.Stopped += (_, _) =>
+            {
+                DiagnosticLog.Debug("host.monitor", "deviceWatcherStopped", "Windows paired-device watcher stopped");
+                RestartDeviceWatcher();
+            };
             _devices.Start();
         }
-        catch (Exception)
-        { supervisor.ReportHealth("蓝牙设备事件监听暂不可用；已连接耳机的状态监听继续运行。"); RestartDeviceWatcher(); }
+        catch (Exception error)
+        {
+            DiagnosticLog.Error("host.monitor", "deviceWatcherStartFailed", "Windows paired-device watcher could not start", error);
+            supervisor.ReportHealth("蓝牙设备事件监听暂不可用；已连接耳机的状态监听继续运行。"); RestartDeviceWatcher();
+        }
         try
         {
             var radios = await Radio.GetRadiosAsync();
@@ -68,8 +82,9 @@ internal sealed class WindowsStateMonitor(BackendSupervisor supervisor) : IDispo
                 { _radios.Add(radio); radio.StateChanged += RadioChanged; }
             UpdateRadio();
         }
-        catch (Exception)
+        catch (Exception error)
         {
+            DiagnosticLog.Error("host.monitor", "radioEnumerationFailed", "Windows Bluetooth radios could not be read", error);
             supervisor.ReportHealth("无法读取蓝牙开关状态；已连接耳机的状态监听继续运行。");
             lock (_observerSync) _radioChecked = true;
             StartAdvertisements();
@@ -132,13 +147,18 @@ internal sealed class WindowsStateMonitor(BackendSupervisor supervisor) : IDispo
                 else if (_radioChecked) StartAdvertisements();
             }
         }
-        catch (Exception) { }
+        catch (Exception error)
+        { DiagnosticLog.Error("host.monitor", "scanDemandFailed", "Bluetooth scan demand update failed", error); }
     }
     private void RadioChanged(Radio sender, object args)
     {
         if (_disposed) return;
         try { UpdateRadio(); }
-        catch (Exception) { supervisor.ReportHealth("无法读取蓝牙开关状态；已连接耳机的状态监听继续运行。"); }
+        catch (Exception error)
+        {
+            DiagnosticLog.Error("host.monitor", "radioChangedFailed", "Bluetooth radio state update failed", error);
+            supervisor.ReportHealth("无法读取蓝牙开关状态；已连接耳机的状态监听继续运行。");
+        }
     }
     private void UpdateRadio()
     {
@@ -153,6 +173,7 @@ internal sealed class WindowsStateMonitor(BackendSupervisor supervisor) : IDispo
                 var changed = _radioAvailable != available; _radioAvailable = available;
                 if (changed)
                 {
+                    DiagnosticLog.Debug("host.monitor", "radioChanged", "Bluetooth radio availability changed", new { available });
                     supervisor.SetRadioAvailable(state); _advertisementFailures = _deviceFailures = 0;
                     if (state) RestartDeviceWatcher();
                 }
@@ -186,8 +207,11 @@ internal sealed class WindowsStateMonitor(BackendSupervisor supervisor) : IDispo
                             if (_devices.Status is DeviceWatcherStatus.Created or DeviceWatcherStatus.Stopped or DeviceWatcherStatus.Aborted)
                                 _devices.Start();
                         }
-                        catch (Exception)
-                        { supervisor.ReportHealth("蓝牙设备事件监听暂不可用；已连接耳机的状态监听继续运行。"); RestartDeviceWatcher(); }
+                        catch (Exception error)
+                        {
+                            DiagnosticLog.Error("host.monitor", "deviceWatcherRestartFailed", "Windows paired-device watcher could not restart", error);
+                            supervisor.ReportHealth("蓝牙设备事件监听暂不可用；已连接耳机的状态监听继续运行。"); RestartDeviceWatcher();
+                        }
                     }
                 }
                 catch (OperationCanceledException) { }
@@ -227,13 +251,22 @@ internal sealed class WindowsStateMonitor(BackendSupervisor supervisor) : IDispo
                     TypedEventHandler<BluetoothLEAdvertisementWatcher, BluetoothLEAdvertisementReceivedEventArgs> received =
                         (_, args) => Advertisement(generation, startedAt, args);
                     TypedEventHandler<BluetoothLEAdvertisementWatcher, BluetoothLEAdvertisementWatcherStoppedEventArgs> stopped =
-                        (_, _) => AdvertisementFailed(generation);
+                        (_, args) =>
+                        {
+                            DiagnosticLog.Debug("host.monitor", "advertisementWatcherStopped", "BLE advertisement watcher stopped",
+                                new { generation, args.Error });
+                            AdvertisementFailed(generation);
+                        };
                     watcher.Received += received; watcher.Stopped += stopped;
                     scans.Add(new(watcher, received, stopped));
                 }
                 foreach (var scan in scans) scan.Watcher.Start();
             }
-            catch (Exception) { AdvertisementFailed(generation); }
+            catch (Exception error)
+            {
+                DiagnosticLog.Error("host.monitor", "advertisementWatcherStartFailed", "BLE advertisement watchers could not start", error, new { generation });
+                AdvertisementFailed(generation);
+            }
         }
     }
     private void AdvertisementFailed(long generation)
@@ -290,6 +323,8 @@ internal sealed class WindowsStateMonitor(BackendSupervisor supervisor) : IDispo
                 using var reader = DataReader.FromBuffer(manufacturer.Data);
                 if (reader.UnconsumedBufferLength > 4096) continue;
                 var data = new byte[reader.UnconsumedBufferLength]; reader.ReadBytes(data);
+                DiagnosticLog.Bytes("host.monitor", "advertisementReceived", data,
+                    new { manufacturer.CompanyId, args.BluetoothAddress, args.BluetoothAddressType, args.Timestamp, args.RawSignalStrengthInDBm, generation });
                 if (!OppoAdvertisementParser.TryParse(manufacturer.CompanyId, data, out var parsed) || parsed is null
                     || !parsed.TryResolveAddress(args.BluetoothAddress, args.BluetoothAddressType == BluetoothAddressType.Public, out var address)) continue;
                 lock (_observerSync)
@@ -304,7 +339,8 @@ internal sealed class WindowsStateMonitor(BackendSupervisor supervisor) : IDispo
                 }
             }
         }
-        catch (Exception) { }
+        catch (Exception error)
+        { DiagnosticLog.Error("host.monitor", "advertisementFailed", "BLE advertisement processing failed", error, new { generation }); }
     }
     private void StopAdvertisements()
     {
@@ -321,6 +357,7 @@ internal sealed class WindowsStateMonitor(BackendSupervisor supervisor) : IDispo
         lock (_observerSync)
         {
             if (_suspended == suspended) return;
+            DiagnosticLog.Debug("host.monitor", "suspendChanged", "Windows suspend state changed", new { suspended });
             _suspended = suspended; _advertisementFailures = _deviceFailures = 0;
             if (suspended)
             {
@@ -356,7 +393,8 @@ internal sealed class WindowsStateMonitor(BackendSupervisor supervisor) : IDispo
                     await Task.Delay(200, _lifetime.Token);
                     lock (_refreshSync) _catalogDirty = false;
                     try { await supervisor.RefreshCatalogAsync(_lifetime.Token); }
-                    catch (Exception) when (!_lifetime.IsCancellationRequested) { }
+                    catch (Exception error) when (!_lifetime.IsCancellationRequested)
+                    { DiagnosticLog.Error("host.monitor", "catalogRefreshFailed", "Scheduled Bluetooth catalog refresh failed", error); }
                     lock (_refreshSync) if (!_catalogDirty) return;
                 }
             }
@@ -410,7 +448,11 @@ internal sealed class PowerMessageWindow : IDisposable
                 if (wparam == 4) _suspend(true);
                 else if (wparam is 7 or 18) _suspend(false);
             }
-            catch (Exception) { } // Never let a managed exception cross the native window procedure.
+            catch (Exception error)
+            {
+                DiagnosticLog.Error("host.monitor", "powerNotificationFailed", "Windows power notification callback failed", error,
+                    new { message, wparam = (ulong)wparam });
+            } // Never let a managed exception cross the native window procedure.
         }
         return _previous == 0 ? DefWindowProc(window, message, wparam, lparam) : CallWindowProc(_previous, window, message, wparam, lparam);
     }

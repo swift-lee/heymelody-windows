@@ -11,4 +11,5 @@
     <Compile Remove="OfflineChecks/**/*.cs" />
     <InternalsVisibleTo Include="HeyMelody.Windows.OfflineChecks" />
   </ItemGroup>
+  <ItemGroup><ProjectReference Include="../HeyMelody.Diagnostics/HeyMelody.Diagnostics.csproj" /></ItemGroup>
 </Project>

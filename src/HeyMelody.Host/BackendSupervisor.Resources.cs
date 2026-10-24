@@ -3,6 +3,8 @@ using System.Text;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Resources;
 
+using HeyMelody.Diagnostics;
+
 namespace HeyMelodyWindows.Host;
 
 internal sealed partial class BackendSupervisor
@@ -42,7 +44,11 @@ internal sealed partial class BackendSupervisor
     {
         try { await _resources!.RefreshAsync(token: _lifetime.Token); }
         catch (OperationCanceledException) { }
-        catch (Exception) { ReportHealth("在线资源暂时不可用，继续使用已有资源。"); }
+        catch (Exception error)
+        {
+            DiagnosticLog.Error("host.resources", "refreshFailed", "Background resource refresh failed", error);
+            ReportHealth("在线资源暂时不可用，继续使用已有资源。");
+        }
     }
     private void ResourcesChanged(object? sender, ResourceChangedEventArgs args)
     {
@@ -87,7 +93,11 @@ internal sealed partial class BackendSupervisor
             finally { _resourceGate.Release(); }
         }
         catch (OperationCanceledException) { }
-        catch (Exception) { ReportHealth("资源已下载，将在连接恢复后重新应用。"); }
+        catch (Exception error)
+        {
+            DiagnosticLog.Error("host.resources", "adoptionFailed", "Downloaded resources could not be adopted", error);
+            ReportHealth("资源已下载，将在连接恢复后重新应用。");
+        }
     }
     private async Task AdoptResourcesAsync(bool catalogChanged, CancellationToken token)
     {

@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using HeyMelodyWindows.Protocol;
 
+using HeyMelody.Diagnostics;
+
 namespace HeyMelodyWindows.Calibration;
 
 /// <summary>One device workflow, using the caller's existing Bluetooth reader.</summary>
@@ -164,7 +166,7 @@ public sealed partial class CalibrationEngine : IAsyncDisposable
     private async Task CleanupAsync()
     {
         try { using var timeout = new CancellationTokenSource(_timings.CommandTimeout * 3); await StopOwnedAsync(timeout.Token); }
-        catch (Exception) { /* Unacknowledged ownership remains set so Cancel can retry STOP. */ }
+        catch (Exception error) { DiagnosticLog.Error("Calibration", "cleanup.stop-unconfirmed", "Calibration cleanup could not confirm all owned detectors stopped; ownership remains retained.", error, State); }
     }
     private async Task EndFailedRunAsync(CancellationTokenSource run, Exception error)
     {
@@ -192,6 +194,9 @@ public sealed partial class CalibrationEngine : IAsyncDisposable
     }
     private async Task<Packet> RequestAsync(ushort command, byte[] payload, CancellationToken token, bool requireSuccess = true)
     {
+        using var operation = DiagnosticLog.BeginOperation(DiagnosticLog.CurrentCorrelationId);
+        DiagnosticLog.Bytes("Calibration", "request.payload", payload,
+            new { command = $"0x{command:X4}", requireSuccess, State.Generation, State.Workflow, State.Stage });
         token.ThrowIfCancellationRequested();
         if (!_context.Commands.Contains(command)) throw new NotSupportedException($"耳机未声明所需的控制命令。");
         if (!_transport.IsConnected) throw new IOException("耳机连接已断开。");
@@ -201,9 +206,22 @@ public sealed partial class CalibrationEngine : IAsyncDisposable
         Packet reply;
         try { reply = await _transport.RequestAsync(command, payload, timeout.Token).WaitAsync(timeout.Token); }
         catch (OperationCanceledException) when (!_lifetime.IsCancellationRequested && timeout.IsCancellationRequested)
-        { throw new TimeoutException($"耳机响应超时，请检查连接后重试。"); }
-        if (reply.Command != (command | 0x8000)) throw new FormatException("耳机返回了不符合当前测试的数据。");
-        if (requireSuccess) CalibrationCodecs.RequireSuccess(reply.Payload);
+        {
+            DiagnosticLog.Warning("Calibration", "request.timeout", "The submitted calibration command reached its bounded deadline.",
+                data: new { command = $"0x{command:X4}", timeout = _timings.CommandTimeout, State.Generation });
+            throw new TimeoutException($"耳机响应超时，请检查连接后重试。");
+        }
+        catch (Exception error)
+        { DiagnosticLog.Error("Calibration", "request.failed", "The calibration transport request failed.", error, new { command = $"0x{command:X4}", State.Generation }); throw; }
+        DiagnosticLog.Bytes("Calibration", "response.payload", reply.Payload,
+            new { command = $"0x{command:X4}", responseCommand = $"0x{reply.Command:X4}", reply.Sequence, State.Generation });
+        try
+        {
+            if (reply.Command != (command | 0x8000)) throw new FormatException("耳机返回了不符合当前测试的数据。");
+            if (requireSuccess) CalibrationCodecs.RequireSuccess(reply.Payload);
+        }
+        catch (Exception error)
+        { DiagnosticLog.Error("Calibration", "response.invalid", "The calibration response failed validation.", error, new { command = $"0x{command:X4}", responseCommand = $"0x{reply.Command:X4}", reply.Sequence, payloadLength = reply.Payload.Length }); throw; }
         token.ThrowIfCancellationRequested();
         if (!_transport.IsConnected) throw new IOException("耳机连接已断开。");
         return reply;
@@ -274,6 +292,8 @@ public sealed partial class CalibrationEngine : IAsyncDisposable
     private sealed class CalibrationInterruptedException : Exception;
     private void OnNotification(Packet packet)
     {
+        DiagnosticLog.Bytes("Calibration", "notification.payload", packet.Payload,
+            new { command = $"0x{packet.Command:X4}", packet.Sequence, State.Generation, State.Stage });
         try
         {
             if (_run?.IsCancellationRequested != false || State.Stage is CalibrationStage.Cancelled or CalibrationStage.Failed) return;
@@ -292,7 +312,7 @@ public sealed partial class CalibrationEngine : IAsyncDisposable
                 else if (State.Stage == CalibrationStage.Interrupted && State.RawStatus == 5) Interrupt(6, true);
             }
         }
-        catch (Exception error) { NotificationFailed(error); }
+        catch (Exception error) { DiagnosticLog.Error("Calibration", "notification.invalid", "A calibration notification failed parsing or dispatch.", error, new { command = $"0x{packet.Command:X4}", packet.Sequence, payloadLength = packet.Payload.Length }); NotificationFailed(error); }
     }
     private void HandleDetectionState(HearingState state)
     {
@@ -353,6 +373,7 @@ public sealed partial class CalibrationEngine : IAsyncDisposable
     }
     private void Fail(Exception error)
     {
+        DiagnosticLog.Error("Calibration", "workflow.failed", "The calibration workflow reported a failure.", error, State);
         if (State.Stage == CalibrationStage.Failed && error is OperationCanceledException
             || error is OperationCanceledException && State.Stage is CalibrationStage.Cancelling or CalibrationStage.Cancelled) return;
         Update(s => s with { Stage = error is OperationCanceledException ? CalibrationStage.Cancelled : CalibrationStage.Failed,
@@ -365,14 +386,15 @@ public sealed partial class CalibrationEngine : IAsyncDisposable
     {
         CalibrationSnapshot snapshot;
         lock (_stateGate) { _state = transform(_state) with { Revision = ++_revision }; snapshot = _state; }
+        DiagnosticLog.Debug("Calibration", "state.changed", "The calibration state changed.", snapshot);
         if (Changed is { } observers)
             foreach (Action<CalibrationSnapshot> observer in observers.GetInvocationList())
-                try { observer(snapshot); } catch (Exception) { /* Observers cannot terminate the shared read pump. */ }
+                try { observer(snapshot); } catch (Exception error) { DiagnosticLog.Error("Calibration", "observer.failed", "A calibration observer failed; the read pump continues.", error, new { snapshot.Generation, snapshot.Revision }); }
     }
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        try { await CancelAsync(); } catch (Exception) { }
+        try { await CancelAsync(); } catch (Exception error) { DiagnosticLog.Error("Calibration", "dispose.cancel-failed", "Calibration cleanup during disposal failed.", error, State); }
         _lifetime.Cancel(); _transport.Notification -= OnNotification; _transport.Disconnected -= OnDisconnected;
         _run?.Dispose(); _lifetime.Dispose();
     }

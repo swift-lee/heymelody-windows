@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using HeyMelodyWindows.Protocol;
+using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.Calibration;
 
@@ -18,7 +19,9 @@ public sealed class CalibrationHistoryStore(string directory)
     public async Task<IReadOnlyList<CalibrationHistoryEntry>> ReadAsync(string stableKey, CancellationToken token = default)
     {
         await _gate.WaitAsync(token);
-        try { return await ReadCoreAsync(stableKey, token); } finally { _gate.Release(); }
+        try { var entries = await ReadCoreAsync(stableKey, token); DiagnosticLog.Debug("Calibration.History", "history.read", "Read calibration history.", new { stableKey, directory = _directory, entries }); return entries; }
+        catch (Exception error) { DiagnosticLog.Error("Calibration.History", "history.read-failed", "Calibration history read failed.", error, new { stableKey, directory = _directory }); throw; }
+        finally { _gate.Release(); }
     }
     public async Task CheckSaveAsync(CalibrationHistoryEntry entry, int? replacementUid = null, CancellationToken token = default)
     {
@@ -28,6 +31,7 @@ public sealed class CalibrationHistoryStore(string directory)
     }
     public async Task SaveAsync(CalibrationHistoryEntry entry, CancellationToken token = default, int? replacementUid = null)
     {
+        DiagnosticLog.Debug("Calibration.History", "history.save-requested", "Saving a calibration profile history entry.", new { entry, replacementUid, directory = _directory });
         Validate(entry); await _gate.WaitAsync(token);
         try
         {
@@ -35,7 +39,9 @@ public sealed class CalibrationHistoryStore(string directory)
             Directory.CreateDirectory(_directory); string path = GetPath(entry.StableKey), temporary = path + ".tmp";
             await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(entries, Json), new UTF8Encoding(false), token);
             File.Move(temporary, path, true);
+            DiagnosticLog.Info("Calibration.History", "history.saved", "Calibration history was saved.", new { entry.StableKey, entry.Uid, replacementUid, path });
         }
+        catch (Exception error) { DiagnosticLog.Error("Calibration.History", "history.save-failed", "Calibration history save failed.", error, new { entry.StableKey, entry.Uid, replacementUid, directory = _directory }); throw; }
         finally { _gate.Release(); }
     }
     private static CalibrationHistoryEntry[] Prepare(IReadOnlyList<CalibrationHistoryEntry> existing, CalibrationHistoryEntry entry, int? replacementUid)
@@ -56,7 +62,9 @@ public sealed class CalibrationHistoryStore(string directory)
             string path = GetPath(stableKey), temporary = path + ".tmp";
             await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(entries, Json), new UTF8Encoding(false), token);
             File.Move(temporary, path, true);
+            DiagnosticLog.Info("Calibration.History", "history.deleted", "Deleted the requested calibration history entry.", new { stableKey, uid, path });
         }
+        catch (Exception error) { DiagnosticLog.Error("Calibration.History", "history.delete-failed", "Calibration history delete failed.", error, new { stableKey, uid, directory = _directory }); throw; }
         finally { _gate.Release(); }
     }
     private async Task<IReadOnlyList<CalibrationHistoryEntry>> ReadCoreAsync(string stableKey, CancellationToken token)

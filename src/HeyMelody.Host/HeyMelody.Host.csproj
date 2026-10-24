@@ -26,9 +26,11 @@
     <AvaloniaResource Include="../HeyMelody.App/Assets/HeyMelody.ico" Link="Assets/HeyMelody.ico" />
     <!-- The tray menu is drawn by Avalonia and shares the UI typography; rendering is set up in Program.RunTray (software only). -->
     <Compile Include="../HeyMelody.App/Typography.cs" Link="Shared/Typography.cs" />
+    <Compile Include="../HeyMelody.App/UiDiagnosticLogging.cs" Link="Shared/UiDiagnosticLogging.cs" />
     <ProjectReference Include="../HeyMelody.Windows/HeyMelody.Windows.csproj" />
     <ProjectReference Include="../HeyMelody.Daily/HeyMelody.Daily.csproj" />
     <ProjectReference Include="../HeyMelody.Contracts/HeyMelody.Contracts.csproj" />
+    <ProjectReference Include="../HeyMelody.Diagnostics/HeyMelody.Diagnostics.csproj" />
     <ProjectReference Include="../HeyMelody.Resources/HeyMelody.Resources.csproj" />
     <ProjectReference Include="../HeyMelody.Calibration/HeyMelody.Calibration.csproj" />
   </ItemGroup>

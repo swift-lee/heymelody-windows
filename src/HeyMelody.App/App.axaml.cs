@@ -33,6 +33,7 @@ public partial class App : Application
                 desktop.MainWindow = window;
             }
             else desktop.MainWindow = Program.TakeStartupService() is { } service ? new MainWindow(service) : new MainWindow();
+            if (!Program.IsModelDemo) UiDiagnosticLogging.AttachDiagnosticNotice(desktop.MainWindow);
             desktop.Exit += (_, _) => DeviceVisuals.DisposeResources();
         }
         base.OnFrameworkInitializationCompleted();

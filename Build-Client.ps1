@@ -38,7 +38,7 @@ if (Test-Path -LiteralPath $existingPackageCache -PathType Container) {
 if (-not $SkipTests -and -not $FinalizeOnly) {
     & dotnet run --project (Join-Path $root 'src/HeyMelody.Windows/OfflineChecks/HeyMelody.Windows.OfflineChecks.csproj') -c Release '-p:CopyDebugSymbolFilesFromPackages=false' @restoreProperties
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed: HeyMelody.Windows.OfflineChecks' }
-    foreach ($project in @('HeyMelody.Protocol.Tests', 'HeyMelody.Resources.Tests', 'HeyMelody.Calibration.Tests', 'HeyMelody.Calibration.UI.Tests', 'HeyMelody.Devices.Tests', 'HeyMelody.Control.Tests', 'HeyMelody.Daily.Tests', 'HeyMelody.Probe.Tests', 'HeyMelody.Host.Tests', 'HeyMelody.Client.Tests', 'HeyMelody.App.Tests', 'HeyMelody.DeviceManager.Tests', 'HeyMelody.Rendering.Filament.Tests')) {
+    foreach ($project in @('HeyMelody.Diagnostics.Tests', 'HeyMelody.Protocol.Tests', 'HeyMelody.Resources.Tests', 'HeyMelody.Calibration.Tests', 'HeyMelody.Calibration.UI.Tests', 'HeyMelody.Devices.Tests', 'HeyMelody.Control.Tests', 'HeyMelody.Daily.Tests', 'HeyMelody.Probe.Tests', 'HeyMelody.Host.Tests', 'HeyMelody.Client.Tests', 'HeyMelody.App.Tests', 'HeyMelody.DeviceManager.Tests', 'HeyMelody.Rendering.Filament.Tests')) {
         & dotnet run --project (Join-Path $root ('tests/' + $project + '/' + $project + '.csproj')) -c Release '-p:CopyDebugSymbolFilesFromPackages=false' @restoreProperties
         if ($LASTEXITCODE -ne 0) { throw ('Tests failed: ' + $project) }
     }
@@ -238,6 +238,8 @@ foreach ($architecture in $targetArchitectures) {
         hearingSetupSha256 = (Get-FileHash -LiteralPath (Join-Path $app 'HeyMelody.HearingSetup.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
         resourceIndexSha256 = (Get-FileHash -LiteralPath (Join-Path $app 'ResourceBundles/artwork.json') -Algorithm SHA256).Hash.ToLowerInvariant()
         hostResourceBundles = 'gui'
+        guiDiagnosticsSha256 = (Get-FileHash -LiteralPath (Join-Path $app 'HeyMelody.Diagnostics.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
+        hostDiagnosticsSha256 = (Get-FileHash -LiteralPath (Join-Path $hostOutput 'HeyMelody.Diagnostics.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
         hostSha256 = (Get-FileHash -LiteralPath (Join-Path $hostOutput 'HeyMelody.Host.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
         hardwareExecutionVerified = $false; validationScope = 'build-only; see VALIDATION.json for actual execution evidence'
         modelRenderer = $nativeVerification
@@ -256,7 +258,7 @@ if ($ValidationPath) {
     }
     Copy-Item -LiteralPath $ValidationPath -Destination (Join-Path $stage 'VALIDATION.json')
 }
-$manifest = [ordered]@{ schemaVersion = 2; version = $Version; builtAtUtc = [DateTime]::UtcNow.ToString('o'); builds = $builds; modelRenderer = 'Filament'; nativeArm64ExecutionVerified = $false; validationScope = 'build-only unless an exact-version execution receipt is supplied' }
+$manifest = [ordered]@{ schemaVersion = 2; version = $Version; builtAtUtc = [DateTime]::UtcNow.ToString('o'); builds = $builds; modelRenderer = 'Filament'; diagnosticLogging = 'one-host-session-debug-jsonl-v1'; nativeArm64ExecutionVerified = $false; validationScope = 'build-only unless an exact-version execution receipt is supplied' }
 $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $stage 'manifest.json') -Encoding UTF8
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $archive, [System.IO.Compression.CompressionLevel]::Optimal, $false)

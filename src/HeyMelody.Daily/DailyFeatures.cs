@@ -2,6 +2,8 @@ using System.Text.Json;
 using HeyMelodyWindows.Devices;
 using HeyMelodyWindows.Protocol;
 
+using HeyMelody.Diagnostics;
+
 namespace HeyMelodyWindows.Daily;
 
 public sealed partial class DailyClient
@@ -214,8 +216,10 @@ public sealed partial class DailyClient
             else return Reject(result, "未知设置请求。");
             await SendAndObserveAsync(command, payload, target, result, token); return Finish(result);
         }
-        catch (Exception)
+        catch (Exception error)
         {
+            DiagnosticLog.Error("Daily", "feature.apply-failed", "The feature setting operation failed without replay.", error,
+                new { id, value, text, result.SubmissionAttempted });
             result.FailureKind = DailyApplyFailure.TransportUnknown;
             result.Error = "设置过程未完整确认；已提交的请求不会自动重发。"; return Finish(result);
         }

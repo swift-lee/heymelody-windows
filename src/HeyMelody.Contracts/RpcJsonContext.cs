@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using HeyMelody.Diagnostics;
 using HeyMelodyWindows.App;
 
 namespace HeyMelodyWindows.Host;
@@ -14,6 +15,8 @@ namespace HeyMelodyWindows.Host;
 [JsonSerializable(typeof(BackendMessage))]
 [JsonSerializable(typeof(BackendEvent))]
 [JsonSerializable(typeof(BackendSubscription))]
+[JsonSerializable(typeof(DiagnosticFailure))]
+[JsonSerializable(typeof(DiagnosticFailure[]))]
 [JsonSerializable(typeof(RpcRequest))]
 [JsonSerializable(typeof(RpcResponse))]
 [JsonSerializable(typeof(UiSnapshot))]

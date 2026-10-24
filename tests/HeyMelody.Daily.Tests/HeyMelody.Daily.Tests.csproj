@@ -4,4 +4,5 @@
     <ProjectReference Include="../../src/HeyMelody.Daily/HeyMelody.Daily.csproj" />
     <ProjectReference Include="../../src/HeyMelody.Resources/HeyMelody.Resources.csproj" />
   </ItemGroup>
+  <ItemGroup><ProjectReference Include="../../src/HeyMelody.Diagnostics/HeyMelody.Diagnostics.csproj" /></ItemGroup>
 </Project>

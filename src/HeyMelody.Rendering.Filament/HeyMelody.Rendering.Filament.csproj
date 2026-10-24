@@ -6,6 +6,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../HeyMelody.Diagnostics/HeyMelody.Diagnostics.csproj" />
     <InternalsVisibleTo Include="HeyMelody.App.Tests" />
     <InternalsVisibleTo Include="HeyMelody.ModelPreview.Tests" />
     <InternalsVisibleTo Include="HeyMelody.Rendering.Filament.Tests" />

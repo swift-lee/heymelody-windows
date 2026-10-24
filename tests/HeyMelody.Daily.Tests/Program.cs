@@ -5,6 +5,12 @@ using HeyMelodyWindows.Daily;
 using HeyMelodyWindows.Devices;
 using HeyMelodyWindows.Protocol;
 
+if (args.Contains("--diagnostics-tests"))
+{
+    Console.WriteLine($"{await DiagnosticLoggingTests.RunAsync()} daily diagnostic tests passed.");
+    return;
+}
+
 int passed = 0;
 void Check(bool test, string message = "assertion") { if (!test) throw new Exception(message); }
 void Bad(Action test) { try { test(); } catch (FormatException) { return; } throw new Exception("expected strict rejection"); }

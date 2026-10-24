@@ -1,4 +1,5 @@
 #include "hm_filament.h"
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <fstream>
@@ -11,6 +12,10 @@
 #include <vector>
 
 namespace {
+std::atomic<uint32_t> log_messages{0};
+void HM_CALL log_message(uint32_t level, const char* message, uint32_t length, void*) {
+    if (level == HM_LOG_DEBUG && message && length) log_messages.fetch_add(1);
+}
 std::string error(hm_renderer* renderer) {
     std::vector<char> bytes(hm_get_last_error(renderer,nullptr,0));
     hm_get_last_error(renderer,bytes.data(),static_cast<uint32_t>(bytes.size()));
@@ -46,6 +51,9 @@ hm_frame_info await_frame(hm_renderer* renderer,uint64_t after,std::vector<uint8
 
 int main(int argc,char** argv) {
     if(hm_get_abi_version()!=HM_FILAMENT_ABI_VERSION)return 1;
+    hm_set_log_callback(log_message, nullptr);
+    if (log_messages.load() != 1) return 1;
+    hm_set_log_callback(nullptr, nullptr);
     if(argc<2) {
         hm_create_options invalid{sizeof(invalid),16,16,0};
         hm_renderer* raw = nullptr;

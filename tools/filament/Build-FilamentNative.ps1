@@ -272,6 +272,7 @@ try {
     $manifest = [ordered]@{
         schemaVersion = 2; abiVersion = $lock.abiVersion; filamentCommit = $lock.commit; rid = $RuntimeIdentifier
         supportedBackends = @($backends); defaultBackend = $backends[0]
+        logCallbackExport = 'hm_set_log_callback'
         materials = [ordered]@{ path = $materialRelative; sha256 = $materialHash; supportedBackends = @($backends) }
         builtAtUtc = [DateTime]::UtcNow.ToString('o')
         files = @($files | Sort-Object | ForEach-Object { [ordered]@{ path = $_; sha256 = (Get-FileHash -LiteralPath (Join-Path $runtime $_) -Algorithm SHA256).Hash.ToLowerInvariant() } })

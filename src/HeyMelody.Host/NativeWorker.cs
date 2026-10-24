@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using HeyMelody.Diagnostics;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Windows;
 
@@ -10,6 +11,7 @@ namespace HeyMelodyWindows.Host;
 internal sealed class WorkerRequest
 {
     public long Id { get; set; }
+    public string? DiagnosticCorrelationId { get; set; }
     public string Operation { get; set; } = "";
     public ulong Address { get; set; }
     public string Identity { get; set; } = "";
@@ -68,6 +70,7 @@ internal static class NativeWorker
         {
             var line = JsonSerializer.Serialize(message, HostWire.Json);
             if (line.Length > RpcWire.MaximumLineCharacters) throw new InvalidDataException();
+            DiagnosticLog.Info("worker.rpc", "send", "Sending worker RPC record", new { line });
             await outputGate.WaitAsync(lifetime.Token);
             try { await Console.Out.WriteLineAsync(line); await Console.Out.FlushAsync(); }
             finally { outputGate.Release(); }
@@ -100,7 +103,9 @@ internal static class NativeWorker
             var input = new RpcLineReader(Console.OpenStandardInput());
             while (await input.ReadLineAsync(lifetime.Token) is { } line)
             {
+                DiagnosticLog.Info("worker.rpc", "receive", "Received worker RPC record", new { line });
                 var request = JsonSerializer.Deserialize<WorkerRequest>(line, HostWire.Json) ?? throw new InvalidDataException();
+                using var operation = DiagnosticLog.BeginOperation(request.DiagnosticCorrelationId);
                 if (request.Id <= lastId) throw new InvalidDataException();
                 lastId = request.Id;
                 var response = new WorkerMessage { Id = request.Id };
@@ -134,14 +139,22 @@ internal static class NativeWorker
                     };
                     response.Success = true; response.Data = JsonSerializer.SerializeToElement(data, HostWire.Json);
                 }
-                catch (Exception error) { response.Success = false; response.Error = error is InvalidOperationException or ArgumentException ? error.Message : "设备未能完成操作，请检查连接后重试。"; }
+                catch (Exception error)
+                {
+                    DiagnosticLog.Error("worker.rpc", "operationFailed", "Worker operation failed", error, new { request.Id, request.Operation });
+                    response.Success = false; response.Error = error is InvalidOperationException or ArgumentException ? error.Message : "设备未能完成操作，请检查连接后重试。";
+                }
                 await WriteAsync(response);
                 if (request.Operation == "shutdown") break;
             }
             return 0;
             async Task<bool> ShutdownAsync() { await service.DisconnectAsync(CancellationToken.None); return true; }
         }
-        catch (Exception) { return 1; }
+        catch (Exception failure)
+        {
+            DiagnosticLog.Error("worker.lifecycle", "failed", "Worker failed", failure);
+            return 1;
+        }
         finally { await service.DisposeCalibrationAsync(); lifetime.Cancel(); snapshots.Writer.TryComplete(); calibrations.Writer.TryComplete(); spectra.Writer.TryComplete(); try { await Task.WhenAll(publishing, publishingCalibration, publishingSpectrum); } catch { } }
     }
 
@@ -154,7 +167,11 @@ internal static class NativeWorker
             if (line.Length > RpcWire.MaximumLineCharacters) return 1;
             await Console.Out.WriteLineAsync(line); await Console.Out.FlushAsync(); return 0;
         }
-        catch (Exception) { return 1; }
+        catch (Exception failure)
+        {
+            DiagnosticLog.Error("worker.catalog", "failed", "Catalog worker failed", failure);
+            return 1;
+        }
     }
 
     internal static ProcessStartInfo StartInfo(string mode)
@@ -193,8 +210,10 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
 {
     private readonly SemaphoreSlim _commands = new(1), _writes = new(1);
     private readonly CancellationTokenSource _lifetime = new();
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<long, TaskCompletionSource<WorkerMessage>> _pending = new();
+    private sealed record PendingReply(TaskCompletionSource<WorkerMessage> Completion, string? CorrelationId);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<long, PendingReply> _pending = new();
     private Process? _process;
+    private Task _stderr = Task.CompletedTask;
     private IDisposable? _energy;
     private long _nextId;
     private int _stopped;
@@ -212,6 +231,8 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
 
     private async Task<T> RequestAsync<T>(WorkerRequest request, CancellationToken token)
     {
+        using var operation = DiagnosticLog.BeginOperation(DiagnosticLog.CurrentCorrelationId);
+        request.DiagnosticCorrelationId = DiagnosticLog.CurrentCorrelationId;
         await _commands.WaitAsync(token);
         bool submitted = false;
         try
@@ -220,24 +241,26 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
             if (_process is null)
             {
                 _process = Process.Start(startFactory?.Invoke() ?? NativeWorker.StartInfo("--worker")) ?? throw new IOException();
+                DiagnosticLog.Info("host.worker", "started", "Peer worker started", new { _process.Id });
                 // The tray's current energy mode applies to the new worker at once and follows later changes until Stop.
                 // Publish before reading _stopped; Stop sets _stopped before it takes _energy. Both sides use full-fence exchanges,
                 // so at least one sees the other, and the exchange lets exactly one of them dispose the attachment.
                 Interlocked.Exchange(ref _energy, HostEnergy.Controller?.Attach(_process));
                 if (Volatile.Read(ref _stopped) != 0) Interlocked.Exchange(ref _energy, null)?.Dispose();
-                _ = DrainErrorsAsync(_process.StandardError);
-                _ = ReadAsync(_process.StandardOutput.BaseStream);
+                _stderr = RunBackground(() => WorkerDiagnosticReader.DrainAsync(_process.StandardError, "worker", _process.Id));
+                _ = RunBackground(() => ReadAsync(_process.StandardOutput.BaseStream));
             }
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
             deadline.CancelAfter(testBudget ?? TimeSpan.FromSeconds(request.Operation == "apply" ? 120 : 75));
             request.Id = Interlocked.Increment(ref _nextId);
             var completion = new TaskCompletionSource<WorkerMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _pending[request.Id] = completion;
+            _pending[request.Id] = new(completion, request.DiagnosticCorrelationId);
             await _writes.WaitAsync(deadline.Token);
             try
             {
                 var line = JsonSerializer.Serialize(request, HostWire.Json);
                 if (line.Length > RpcWire.MaximumLineCharacters) throw new InvalidDataException();
+                DiagnosticLog.Info("host.worker", "send", "Sending worker RPC record", new { line });
                 submitted = true;
                 await _process.StandardInput.WriteLineAsync(line.AsMemory(), deadline.Token);
                 await _process.StandardInput.FlushAsync(deadline.Token);
@@ -249,8 +272,10 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
             return response.Data.Value.Deserialize<T>(HostWire.Json) ?? throw new InvalidDataException();
         }
         catch (InvalidOperationException) { throw; }
-        catch (Exception)
+        catch (Exception failure)
         {
+            DiagnosticLog.Error("host.worker", "requestFailed", "Worker RPC did not complete", failure,
+                new { request.Id, request.Operation, submitted });
             Stop();
             if (request.Operation == "apply") return (T)(object)new UiApplyResult
             {
@@ -271,58 +296,85 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
             var lines = new RpcLineReader(output);
             while (await lines.ReadLineAsync(_lifetime.Token) is { } line)
             {
-                var message = JsonSerializer.Deserialize<WorkerMessage>(line, HostWire.Json) ?? throw new InvalidDataException();
+                WorkerMessage message;
+                try { message = JsonSerializer.Deserialize<WorkerMessage>(line, HostWire.Json) ?? throw new InvalidDataException(); }
+                catch (Exception failure)
+                {
+                    DiagnosticLog.Error("host.worker", "invalidRecord", "Received an invalid worker RPC record", failure, new { line });
+                    throw;
+                }
+                string? correlation = message.Kind == "response" && _pending.TryGetValue(message.Id, out var matching)
+                    ? matching.CorrelationId : null;
+                using var operation = correlation is { } id ? DiagnosticLog.BeginOperation(id) : DiagnosticLog.SuspendOperation();
+                DiagnosticLog.Info("host.worker", "receive", "Received worker RPC record", new { line });
                 if (message.Kind == "snapshot" && message.Snapshot is { } snapshot) SnapshotChanged?.Invoke(snapshot);
                 else if (message.Kind == "calibration" && message.Calibration is { } calibration) CalibrationChanged?.Invoke(calibration);
                 else if (message.Kind == "calibrationSpectrum" && message.CalibrationSpectrum is { } spectrum) CalibrationSpectrumChanged?.Invoke(spectrum);
-                else if (message.Kind == "response" && _pending.TryRemove(message.Id, out var pending)) pending.TrySetResult(message);
+                else if (message.Kind == "response" && _pending.TryRemove(message.Id, out var pending)) pending.Completion.TrySetResult(message);
                 else throw new InvalidDataException();
             }
         }
-        catch (Exception) { }
+        catch (Exception failure)
+        { DiagnosticLog.Warning("host.worker", "receiveEnded", "Worker receive channel ended", failure); }
         finally { Stop(); }
     }
-
-    private static async Task DrainErrorsAsync(TextReader reader)
-    { var buffer = new char[2048]; try { while (await reader.ReadAsync(buffer) > 0) { } } catch { } }
 
     private void Stop()
     {
         if (Interlocked.Exchange(ref _stopped, 1) != 0) return;
+        DiagnosticLog.Info("host.worker", "stopped", "Peer worker stopped", new { processId = _process?.Id });
         _lifetime.Cancel();
         Interlocked.Exchange(ref _energy, null)?.Dispose();
-        foreach (var pending in _pending.Values) pending.TrySetException(new IOException("设备后台已中断。"));
+        foreach (var pending in _pending.Values) pending.Completion.TrySetException(new IOException("设备后台已中断。"));
         var process = _process;
         try { if (process is { HasExited: false }) process.Kill(entireProcessTree: true); } catch { }
         Unavailable?.Invoke();
     }
     private int _disposing;
+    private static Task RunBackground(Func<Task> action) => Task.Run(async () =>
+    {
+        using var operation = DiagnosticLog.SuspendOperation();
+        await action();
+    });
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposing, 1) != 0) return;
         if (_stopped == 0 && _process is { HasExited: false })
         {
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            try { await RequestAsync<bool>(new() { Operation = "shutdown" }, deadline.Token); } catch { }
+            try
+            {
+                await RequestAsync<bool>(new() { Operation = "shutdown" }, deadline.Token);
+                await _process.WaitForExitAsync(deadline.Token);
+            }
+            catch { }
         }
-        Stop(); _process?.Dispose();
+        Stop();
+        try { await _stderr.WaitAsync(TimeSpan.FromSeconds(2)); } catch { }
+        _process?.Dispose();
     }
 
     internal static async Task<IReadOnlyList<BluetoothCandidate>> EnumerateAsync(CancellationToken token)
     {
         using var process = Process.Start(NativeWorker.StartInfo("--catalog-worker")) ?? throw new IOException();
         using var energy = HostEnergy.Controller?.Attach(process);
-        _ = DrainErrorsAsync(process.StandardError);
+        DiagnosticLog.Info("host.worker", "catalogStarted", "Catalog worker started", new { process.Id });
+        var stderr = WorkerDiagnosticReader.DrainAsync(process.StandardError, "catalog-worker", process.Id);
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(token);
         budget.CancelAfter(TimeSpan.FromSeconds(75));
         try
         {
             var line = await new RpcLineReader(process.StandardOutput.BaseStream).ReadLineAsync(budget.Token) ?? throw new IOException();
+            DiagnosticLog.Info("host.worker", "catalogReceive", "Received catalog worker RPC record", new { line });
             var result = JsonSerializer.Deserialize<List<BluetoothCandidate>>(line, HostWire.Json) ?? throw new InvalidDataException();
             await process.WaitForExitAsync(budget.Token);
             if (process.ExitCode != 0 || result.Count > 4096) throw new IOException();
             return result;
         }
-        finally { try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { } }
+        finally
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
+            try { await stderr.WaitAsync(TimeSpan.FromSeconds(2)); } catch { }
+        }
     }
 }

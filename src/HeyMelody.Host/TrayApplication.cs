@@ -7,6 +7,7 @@ using Avalonia.Threading;
 using FluentAvalonia.Styling;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Ui;
+using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.Host;
 
@@ -37,6 +38,7 @@ internal sealed class TrayApplication : Application
             _energyPolicy = new(TimeProvider.System); _energy = new(_energyPolicy, new WindowsProcessEnergy());
             HostEnergy.Controller = _energy; _selfEnergy = _energy.Attach(_self = Process.GetCurrentProcess());
             _supervisor = new(); _server = new(_supervisor, energy: _energyPolicy); _monitor = new(_supervisor);
+            _supervisor.AttachDiagnostics();
             var menu = new NativeMenu();
             var open = new NativeMenuItem("打开主界面");
             void OpenMain() { try { _server.ActivateMain(true); } catch { _supervisor.ReportHealth("无法打开主界面，请重启软件或重新安装。"); } }
@@ -76,7 +78,11 @@ internal sealed class TrayApplication : Application
     private async Task StartAsync()
     {
         try { await _monitor!.StartAsync(); await _supervisor!.InitializeAsync(CancellationToken.None); }
-        catch (Exception) { _supervisor!.ReportHealth("无法初始化蓝牙设备监听，请检查蓝牙状态。托盘继续运行。"); }
+        catch (Exception error)
+        {
+            DiagnosticLog.Error("Host", "backend.initializeFailed", "Bluetooth backend initialization failed", error);
+            _supervisor!.ReportHealth("无法初始化蓝牙设备监听，请检查蓝牙状态。托盘继续运行。");
+        }
         ShowDevices(_supervisor!.Devices());
     }
 

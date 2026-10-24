@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Headless;
 using HeyMelodyWindows.Host;
 using HeyMelodyWindows.Ui;
+using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.App;
 
@@ -13,7 +14,7 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
-        using var loadTrace = ModelLoadTrace.Start();
+        using var loadTrace = args.Length == 0 && OperatingSystem.IsWindows() ? null : ModelLoadTrace.Start();
         if (args.FirstOrDefault() == "--model-loading-benchmark") return ModelLoadingBenchmark.Run(args);
         if (args.Length > 0 && args[0] == "--3d-demo")
         {
@@ -32,6 +33,8 @@ internal static class Program
         if (args.Length != 0) { Console.Error.WriteLine(Usage); return 2; }
         if (OperatingSystem.IsWindows())
         {
+            using var diagnostics = DiagnosticRuntime.InitializeClient(DiagnosticComponents.Main);
+            using var normalLoadTrace = ModelLoadTrace.Start();
             using var mainInstance = new Mutex(initiallyOwned: false, BackendEndpoint.MainMutexName);
             var ownsMain = false;
             try
@@ -41,13 +44,22 @@ internal static class Program
                 if (!ownsMain)
                 {
                     try { ActivateExistingAsync().GetAwaiter().GetResult(); return 0; }
-                    catch { return 2; }
+                    catch (Exception activationError)
+                    {
+                        DiagnosticLog.Error("App", "activation.failed", "Failed to activate the existing main window", activationError);
+                        return 2;
+                    }
                 }
                 // Connecting (and launching a stopped tray) overlaps Avalonia's start-up instead of waiting for Opened.
                 var service = new ClientBridge();
                 service.BeginConnect();
                 _startupService = service;
-                return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+                try { return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args); }
+                catch (Exception startupError)
+                {
+                    DiagnosticLog.Error("App", "process.failed", "Main application failed", startupError);
+                    throw;
+                }
             }
             finally { if (ownsMain) mainInstance.ReleaseMutex(); }
         }
@@ -68,7 +80,7 @@ internal static class Program
     }
 
     public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<App>()
-        .UsePlatformDetect().UseHeyMelodyRendering().UseHeyMelodyTypography().LogToTrace();
+        .UsePlatformDetect().UseHeyMelodyDiagnostics().UseHeyMelodyRendering().UseHeyMelodyTypography();
 
     public static AppBuilder BuildHeadlessApp()
     {

@@ -1,4 +1,6 @@
 using System.Buffers.Binary;
+using HeyMelody.Diagnostics;
+
 namespace HeyMelodyWindows.Protocol;
 
 public sealed record Packet(ushort Command, byte Sequence, byte[] Payload);
@@ -47,6 +49,10 @@ public static class PacketEncoder
 /// <summary>Incremental OPOv1 stream decoder. Malformed data throws a static-message FormatException and resets all buffered state. The caller must close the affected session.</summary>
 public sealed class PacketDecoder
 {
+    private static long _nextDiagnosticId;
+    private readonly long _diagnosticId = Interlocked.Increment(ref _nextDiagnosticId);
+    private long _receivedBytes, _consumedBytes;
+    private int? _diagnosticDeclaredPayloadLength, _diagnosticActualMessageLength;
     public const int MaximumFrameBytes = 12388;
     public const int MaximumMessageBytes = ushort.MaxValue + 5;
     private readonly List<byte> _frame = new();
@@ -74,11 +80,15 @@ public sealed class PacketDecoder
     }
     public IReadOnlyList<Packet> Feed(ReadOnlySpan<byte> bytes)
     {
+        DiagnosticLog.Bytes("Protocol", "decode.input", bytes,
+            new { decoderId = _diagnosticId, streamOffset = _receivedBytes });
+        _receivedBytes += bytes.Length;
         var result = new List<Packet>();
         try
         {
             foreach (byte value in bytes)
             {
+                _consumedBytes++;
                 if (_frame.Count == 0)
                 {
                     if (value != 0xAA) throw Malformed("frame-start");
@@ -98,26 +108,29 @@ public sealed class PacketDecoder
                 {
                     ProcessFrame(result);
                     _frame.Clear(); _expectedFrameSize = _length = _lengthBytes = 0;
+                    _diagnosticDeclaredPayloadLength = _diagnosticActualMessageLength = null;
                 }
                 if (_frame.Count > MaximumFrameBytes) throw Malformed("frame-length");
             }
             return result;
         }
-        catch (FormatException) { Reset(); throw; }
+        catch (FormatException error) { RecordFailure("decode.failed", error); Reset(); throw; }
     }
     public bool HasIncompleteMessage => _frame.Count != 0 || _fragmenting;
 
     /// <summary>Checks stream EOF. A partial frame or unfinished fragment sequence fails and resets buffered state.</summary>
     public void Complete()
     {
-        bool incomplete = HasIncompleteMessage;
-        Reset();
-        if (incomplete) throw Malformed("incomplete-message");
+        if (!HasIncompleteMessage) { Reset(); return; }
+        try { throw Malformed("incomplete-message"); }
+        catch (FormatException error)
+        { RecordFailure("decode.incomplete-eof", error); Reset(); throw; }
     }
 
     public void Reset()
     {
         _frame.Clear(); _message.Clear(); _expectedFrameSize = _length = _lengthBytes = _nextFsn = 0; _fragmenting = false;
+        _diagnosticDeclaredPayloadLength = _diagnosticActualMessageLength = null;
     }
     private void ProcessFrame(List<Packet> output)
     {
@@ -160,13 +173,18 @@ public sealed class PacketDecoder
     }
     private void AddDecoded(List<Packet> output, Packet packet)
     {
+        DiagnosticLog.Bytes("Protocol", "packet.decoded", packet.Payload,
+            new { decoderId = _diagnosticId, command = $"0x{packet.Command:X4}", packet.Sequence });
         _packetDecoded?.Invoke(packet);
         output.Add(packet);
     }
     private Packet ParseInner(ReadOnlySpan<byte> bytes, bool allowCompatibility = false)
     {
+        _diagnosticActualMessageLength = bytes.Length;
+        _diagnosticDeclaredPayloadLength = null;
         if (bytes.Length < 5) throw Malformed("inner-length");
         int declared = BinaryPrimitives.ReadUInt16LittleEndian(bytes[3..]);
+        _diagnosticDeclaredPayloadLength = declared;
         if (bytes.Length != 5 + declared)
         {
             // The layout reconstructed from Air4 Pro v125 sends status + a known LE ushort codec,
@@ -178,6 +196,9 @@ public sealed class PacketDecoder
                 && bytes[5] == 0 && bytes[6] is 1 or 2 or 8 && bytes[7] == 0;
             if (!knownReply || _allowCodecReplyCompatibility?.Invoke(bytes[2]) != true)
                 throw Malformed("inner-length", BinaryPrimitives.ReadUInt16LittleEndian(bytes), bytes[2]);
+            DiagnosticLog.Warning("Protocol", "codec.compatibility-used", "Accepted the verified codec reply length compatibility layout.",
+                data: new { decoderId = _diagnosticId, command = "0x8114", sequence = bytes[2], declaredLength = declared,
+                    actualPayloadLength = bytes.Length - 5, actualMessageLength = bytes.Length });
         }
         return new(BinaryPrimitives.ReadUInt16LittleEndian(bytes), bytes[2], bytes[5..].ToArray());
     }
@@ -189,5 +210,22 @@ public sealed class PacketDecoder
         if (command.HasValue) failure.Data["HeyMelody.Protocol.ResponseCommand"] = command.Value;
         if (sequence.HasValue) failure.Data["HeyMelody.Protocol.ResponseSequence"] = sequence.Value;
         return failure;
+    }
+    private void RecordFailure(string eventName, Exception error)
+    {
+        if (!DiagnosticLog.IsEnabled) return;
+        var context = new { decoderId = _diagnosticId, receivedBytes = _receivedBytes, consumedBytes = _consumedBytes,
+            bufferedFrameLength = _frame.Count, expectedFrameLength = _expectedFrameSize, declaredFrameLength = _length,
+            bufferedMessageLength = _message.Count,
+            declaredMessagePayloadLength = _diagnosticDeclaredPayloadLength ?? (_message.Count >= 5 ? (int?)(_message[3] | _message[4] << 8) : null),
+            actualMessageLength = _diagnosticActualMessageLength,
+            actualMessagePayloadLength = _diagnosticActualMessageLength is int actualLength ? (int?)Math.Max(0, actualLength - 5)
+                : _message.Count >= 5 ? _message.Count - 5 : null,
+            fragmenting = _fragmenting, nextFragmentSequence = _nextFsn,
+            failureReason = error.Data["HeyMelody.Protocol.FrameFailure"], responseCommand = error.Data["HeyMelody.Protocol.ResponseCommand"],
+            responseSequence = error.Data["HeyMelody.Protocol.ResponseSequence"] };
+        DiagnosticLog.Bytes("Protocol", "decode.buffered-frame", _frame.ToArray(), context);
+        DiagnosticLog.Bytes("Protocol", "decode.buffered-message", _message.ToArray(), context);
+        DiagnosticLog.Error("Protocol", eventName, "Protocol decoding failed before buffered state was reset.", error, context);
     }
 }

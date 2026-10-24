@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
+using HeyMelody.Diagnostics;
 
 namespace HeyMelody.Rendering.Filament;
 
@@ -76,7 +77,11 @@ internal sealed class NativeBackendProbe(INativeBackendProbeRunner runner)
             lock (_gate)
             {
                 if (_successes.Contains(key))
+                {
+                    DiagnosticLog.Debug("Filament.Probe", "cacheHit", "A successful probe for the exact native payload/backend is cached.",
+                        new { backend, payload.ExecutablePath, payload.Identity });
                     return new(FilamentProbeDisposition.Cached, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                }
                 if (!_inflight.TryGetValue(key, out operation!))
                 {
                     operation = new(_generations.GetValueOrDefault(key));
@@ -84,6 +89,8 @@ internal sealed class NativeBackendProbe(INativeBackendProbeRunner runner)
                     ownsStart = true;
                 }
             }
+            DiagnosticLog.Debug("Filament.Probe", ownsStart ? "started" : "joined", "Waiting for the shared backend probe.",
+                new { backend, payload.ExecutablePath, payload.Identity, operation.Generation });
             if (ownsStart) _ = RunProbeAsync(payload, backend, key, operation);
             NativeProbeResult result;
             try
@@ -111,17 +118,25 @@ internal sealed class NativeBackendProbe(INativeBackendProbeRunner runner)
     {
         NativeProbeResult result = default;
         Exception? failure = null;
+        var started = Stopwatch.GetTimestamp();
         try
         {
             result = await runner.RunAsync(payload.ExecutablePath, backend, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception error)
         {
+            DiagnosticLog.Error("Filament.Probe", "runnerFailed", "The backend probe runner failed.", error,
+                new { backend, payload.ExecutablePath, payload.Identity });
             failure = error is Win32Exception or IOException or UnauthorizedAccessException
                 ? new FilamentRendererException("The Filament backend probe component could not be started.",
                     FilamentFailureKind.ComponentUnavailable, FilamentFailureStage.Probe, backend, innerException: error)
                 : error;
         }
+        DiagnosticLog.Write(failure is null && result.Succeeded ? DiagnosticLevel.Information : DiagnosticLevel.Warning,
+            "Filament.Probe", "completed", "Backend probe completed.",
+            new { backend, payload.ExecutablePath, payload.Identity, result.ExitCode, result.TimedOut,
+                durationMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                summaryOutputCharacters = result.StandardOutput?.Length ?? 0, summaryErrorCharacters = result.StandardError?.Length ?? 0 });
         lock (_gate)
         {
             // Retain an invalidated operation until its child exits: a new generation cannot overlap it.
@@ -141,6 +156,8 @@ internal sealed class NativeBackendProbe(INativeBackendProbeRunner runner)
             var reason = result.TimedOut ? "timed out after 30 seconds" : $"exited with code {result.ExitCode}";
             var detail = string.Join("\n", new[] { result.StandardError.Trim(), result.StandardOutput.Trim() }
                 .Where(value => value.Length != 0));
+            DiagnosticLog.Error("Filament.Probe", "unavailable", detail,
+                data: new { backend, result.ExitCode, result.TimedOut });
             throw new FilamentRendererException($"The {backend} backend probe {reason}. {detail}".Trim(),
                 FilamentFailureKind.BackendUnavailable, FilamentFailureStage.Probe, backend);
         }
@@ -154,6 +171,8 @@ internal sealed class NativeBackendProbe(INativeBackendProbeRunner runner)
             _successes.Remove(key);
             _generations[key] = _generations.GetValueOrDefault(key) + 1;
         }
+        DiagnosticLog.Debug("Filament.Probe", "cacheInvalidated", "The native payload/backend must be probed again before reuse.",
+            new { backend, payload.ExecutablePath, payload.Identity });
     }
 
     private sealed class ProbeOperation(long generation)
@@ -189,10 +208,13 @@ internal sealed class NativeBackendProbeProcess(TimeSpan? timeout = null) : INat
         };
         start.ArgumentList.Add("--backend");
         start.ArgumentList.Add(FilamentBackendPolicy.Argument(backend));
+        DiagnosticLog.Debug("Filament.Probe", "processStarting", "Starting the hidden native backend probe.",
+            new { executablePath, backend, timeoutMilliseconds = _timeout.TotalMilliseconds });
         using var process = new Process { StartInfo = start };
         if (!process.Start()) throw new IOException("The backend probe process did not start.");
-        var output = ReadBoundedAsync(process.StandardOutput);
-        var error = ReadBoundedAsync(process.StandardError);
+        DiagnosticLog.Debug("Filament.Probe", "processStarted", "Native backend probe process started.", new { executablePath, backend, process.Id });
+        var output = CaptureOutputAsync(process.StandardOutput.BaseStream, "stdout", executablePath, backend, process.Id);
+        var error = CaptureOutputAsync(process.StandardError.BaseStream, "stderr", executablePath, backend, process.Id);
         using var deadline = new CancellationTokenSource(_timeout);
         using var stopping = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
         bool timedOut = false;
@@ -202,6 +224,8 @@ internal sealed class NativeBackendProbeProcess(TimeSpan? timeout = null) : INat
         }
         catch (OperationCanceledException)
         {
+            DiagnosticLog.Warning("Filament.Probe", "processStopping", "Stopping the owned backend probe after cancellation or timeout.",
+                data: new { executablePath, backend, process.Id, callerCancelled = cancellationToken.IsCancellationRequested });
             KillOwnedProcess(process);
             await DrainAfterKillAsync(process).ConfigureAwait(false);
             if (cancellationToken.IsCancellationRequested)
@@ -215,16 +239,36 @@ internal sealed class NativeBackendProbeProcess(TimeSpan? timeout = null) : INat
         return new(process.HasExited ? process.ExitCode : -1, logs.Output, logs.Error, timedOut);
     }
 
-    private static async Task<string> ReadBoundedAsync(StreamReader reader)
+    internal static async Task<string> CaptureOutputAsync(Stream reader, string streamName, string executablePath,
+        FilamentBackend backend, int? processId = null)
     {
         var text = new StringBuilder();
-        var buffer = new char[1024];
+        var buffer = new byte[4096];
+        var characters = new char[Encoding.UTF8.GetMaxCharCount(buffer.Length)];
+        var decoder = Encoding.UTF8.GetDecoder();
+        long offset = 0;
         int read;
         while ((read = await reader.ReadAsync(buffer).ConfigureAwait(false)) != 0)
         {
-            var count = Math.Min(read, MaximumLogCharacters - text.Length);
-            if (count > 0) text.Append(buffer, 0, count);
+            var decoded = decoder.GetChars(buffer, 0, read, characters, 0, flush: false);
+            if (DiagnosticLog.IsEnabled)
+                DiagnosticLog.Debug("Filament.Probe", streamName, new string(characters, 0, decoded),
+                    new { executablePath, backend, processId, byteOffset = offset, byteLength = read,
+                        utf8Hex = Convert.ToHexString(buffer.AsSpan(0, read)) });
+            offset += read;
+            var count = Math.Min(decoded, MaximumLogCharacters - text.Length);
+            if (count > 0) text.Append(characters, 0, count);
         }
+        var remaining = decoder.GetChars([], 0, 0, characters, 0, flush: true);
+        if (remaining > 0)
+        {
+            var decoded = new string(characters, 0, remaining);
+            DiagnosticLog.Debug("Filament.Probe", streamName + ".decodeEnd", decoded,
+                new { executablePath, backend, processId, byteOffset = offset });
+            text.Append(characters, 0, Math.Min(remaining, MaximumLogCharacters - text.Length));
+        }
+        DiagnosticLog.Debug("Filament.Probe", streamName + ".end", "Probe stream drained.",
+            new { executablePath, backend, processId, bytes = offset, summaryCharacters = text.Length });
         return text.ToString();
     }
 
@@ -250,6 +294,7 @@ internal sealed class NativeBackendProbeProcess(TimeSpan? timeout = null) : INat
         }
         catch (Exception exception) when (exception is TimeoutException or IOException or ObjectDisposedException)
         {
+            DiagnosticLog.Warning("Filament.Probe", "streamDrainIncomplete", "A native probe stream could not be completely drained.", exception);
             // Only owned probe streams are involved. Observe any late failures after their handles close.
             _ = Task.WhenAll(output, error).ContinueWith(task => _ = task.Exception,
                 CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);

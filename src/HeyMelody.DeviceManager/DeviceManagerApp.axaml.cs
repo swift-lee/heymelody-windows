@@ -25,6 +25,7 @@ public partial class DeviceManagerApp : Application
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             desktop.MainWindow = new DeviceManagerWindow(Preview
                 ? new PreviewDeviceManagementService() : new ClientBridge(), Preview);
+            if (!Preview) UiDiagnosticLogging.AttachDiagnosticNotice(desktop.MainWindow);
         }
         base.OnFrameworkInitializationCompleted();
     }

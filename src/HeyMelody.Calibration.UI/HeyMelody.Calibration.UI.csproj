@@ -16,6 +16,7 @@
     <Compile Include="../HeyMelody.App/Typography.cs" Link="Shared/Typography.cs" />
     <Compile Include="../HeyMelody.App/UiMetrics.cs" Link="Shared/UiMetrics.cs" />
     <Compile Include="../HeyMelody.App/SmoothScrolling.cs" Link="Shared/SmoothScrolling.cs" />
+    <Compile Include="../HeyMelody.App/UiDiagnosticLogging.cs" Link="Shared/UiDiagnosticLogging.cs" />
     <AvaloniaXaml Include="../HeyMelody.App/Styles/HeyMelodyTheme.axaml" Link="Styles/HeyMelodyTheme.axaml" />
     <InternalsVisibleTo Include="HeyMelody.Calibration.UI.Tests" />
     <AvaloniaResource Include="../HeyMelody.App/Assets/HeyMelody.ico" Link="Assets/HeyMelody.ico" />

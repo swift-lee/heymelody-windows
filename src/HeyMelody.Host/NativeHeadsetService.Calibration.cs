@@ -2,6 +2,8 @@ using HeyMelodyWindows.App;
 using HeyMelodyWindows.Calibration;
 using HeyMelodyWindows.Protocol;
 
+using HeyMelody.Diagnostics;
+
 namespace HeyMelodyWindows.Host;
 
 public sealed partial class NativeHeadsetService
@@ -34,7 +36,11 @@ public sealed partial class NativeHeadsetService
         if (CalibrationAvailable("hearing"))
         {
             try { await ReadHearingProfilesAsync(token); }
-            catch (Exception) when (!token.IsCancellationRequested) { _hearingProfiles = []; }
+            catch (Exception error) when (!token.IsCancellationRequested)
+            {
+                DiagnosticLog.Error("host.hearing", "profileInitializationFailed", "Initial hearing profiles could not be read", error);
+                _hearingProfiles = [];
+            }
         }
     }
     private void OnHearingNotification(Packet packet)
@@ -67,7 +73,12 @@ public sealed partial class NativeHeadsetService
                         await ReadHearingProfilesAsync(lifetime.Token);
                         await client.RefreshAsync(Daily.DailyRefreshScope.Features, lifetime.Token);
                     }
-                    catch (Exception) { /* Keep existing profiles; an explicit refresh can retry the GET. */ }
+                    catch (Exception error)
+                    {
+                        if (error is not OperationCanceledException)
+                            DiagnosticLog.Error("host.hearing", "notificationRefreshFailed", "Hearing notification refresh failed; existing profiles remain", error);
+                        /* Keep existing profiles; an explicit refresh can retry the GET. */
+                    }
                 }
             });
         }
@@ -274,7 +285,8 @@ public sealed partial class NativeHeadsetService
                 profiles.Insert(0, new(current.Uid, current.Name.Length > 0 ? current.Name : "耳机中的当前配置", true, complete));
             }
         }
-        catch (Exception) when (!token.IsCancellationRequested) { }
+        catch (Exception error) when (!token.IsCancellationRequested)
+        { DiagnosticLog.Error("host.hearing", "currentProfileFailed", "Current hearing profile could not be read", error); }
         _hearingProfiles = profiles;
         return profiles;
     }

@@ -2,8 +2,21 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
+
+namespace {
+std::mutex log_mutex;
+void HM_CALL log_native(uint32_t level, const char* message, uint32_t length, void*) {
+    std::lock_guard lock(log_mutex);
+    auto& stream = level >= HM_LOG_WARNING ? std::cerr : std::cout;
+    stream << "Filament[" << level << "] ";
+    stream.write(message, length);
+    if (!length || message[length - 1] != '\n') stream << '\n';
+    stream.flush();
+}
+}
 
 int main(int argc, char** argv) {
     if (argc != 3 || std::string(argv[1]) != "--backend") {
@@ -18,6 +31,7 @@ int main(int argc, char** argv) {
         std::cerr << "Filament native ABI mismatch\n";
         return 3;
     }
+    hm_set_log_callback(log_native, nullptr);
     hm_create_options options{sizeof(options), 16, 16, requested};
     hm_renderer* raw = nullptr;
     const int32_t result = hm_create(&options, &raw);

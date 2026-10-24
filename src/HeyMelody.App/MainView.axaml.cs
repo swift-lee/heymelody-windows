@@ -413,6 +413,13 @@ public partial class MainView : UserControl
             (Application.Current as App)?.ApplyTheme(savedTheme);
             return;
         }
+        if (!panel.TrySaveDiagnosticSettings(out var diagnosticError))
+        {
+            (Application.Current as App)?.ApplyTheme(savedTheme);
+            await ShowSettingsDialogAsync(new FAContentDialog { Title = "日志设置未保存", Content = diagnosticError,
+                CloseButtonText = "确定" }, owner, token);
+            return;
+        }
         var selected = panel.SelectedTheme;
         if (panel.ResourcesEditable)
             _resourcePreferenceDraft = new(panel.UseOnlineResources, panel.CloudKey);

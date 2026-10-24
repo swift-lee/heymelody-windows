@@ -5,6 +5,8 @@ using HeyMelodyWindows.Devices;
 using HeyMelodyWindows.Protocol;
 using HeyMelodyWindows.Windows;
 
+using HeyMelody.Diagnostics;
+
 namespace HeyMelodyWindows.Host;
 
 public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManagementService
@@ -47,8 +49,9 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
         HashSet<string> allowed;
         string? warning = null;
         try { allowed = _whitelist.Load(); }
-        catch (InvalidDataException)
+        catch (InvalidDataException error)
         {
+            DiagnosticLog.Error("host.devices", "selectionReadFailed", "Saved device selection could not be read", error);
             allowed = new(StringComparer.Ordinal);
             warning = "设备选择记录已损坏，请重新选择并保存。";
         }
@@ -90,7 +93,10 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
             return Task.FromResult(new UiWhitelistSaveResult(true));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-        { return Task.FromResult(new UiWhitelistSaveResult(false, "无法保存设备选择，请重试。")); }
+        {
+            DiagnosticLog.Error("host.devices", "selectionSaveFailed", "Device selection could not be saved", error);
+            return Task.FromResult(new UiWhitelistSaveResult(false, "无法保存设备选择，请重试。"));
+        }
     }
 
     public async Task<UiSnapshot> ConnectAsync(string identity, CancellationToken token)
@@ -143,7 +149,9 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
         if (_client is null) throw new InvalidOperationException("请先连接耳机。");
         var state = await _client.RefreshAsync((DailyRefreshScope)scope, token);
         if (scope is RefreshScope.Full or RefreshScope.Features && CalibrationAvailable("hearing"))
-            try { await ReadHearingProfilesAsync(token); } catch (Exception) when (!token.IsCancellationRequested) { }
+            try { await ReadHearingProfilesAsync(token); }
+            catch (Exception error) when (!token.IsCancellationRequested)
+            { DiagnosticLog.Error("host.hearing", "profileRefreshFailed", "Hearing profiles could not be refreshed", error); }
         return Map(state);
     }
 
@@ -229,7 +237,12 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
             return peers.Length == 1 ? peers[0].Connected ? ConnectionState.Connected : ConnectionState.Disconnected
                 : ConnectionState.Unknown;
         }
-        catch (Exception) { return ConnectionState.Unknown; }
+        catch (Exception error)
+        {
+            DiagnosticLog.Debug("host.connection", "evidenceUnknown", "Connection evidence could not be read",
+                new { exceptionType = error.GetType().FullName, error.HResult, error.Message });
+            return ConnectionState.Unknown;
+        }
     }
 
     private static string ResultMessage(DailyApplyResult result)

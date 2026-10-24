@@ -29,6 +29,10 @@ enum hm_result {
 };
 enum hm_state { HM_EMPTY = 0, HM_LOADING = 1, HM_READY = 2, HM_FAILED = 3, HM_STOPPING = 4 };
 enum hm_backend { HM_BACKEND_OPENGL = 1, HM_BACKEND_METAL = 2, HM_BACKEND_VULKAN = 3 };
+enum hm_log_level { HM_LOG_DEBUG = 0, HM_LOG_INFORMATION = 1, HM_LOG_WARNING = 2, HM_LOG_ERROR = 3, HM_LOG_CRITICAL = 4 };
+/* UTF8 bytes are valid only during this synchronous callback, which can run on any native thread.
+ * The consumer must copy them before returning, must not throw, and must remain alive for the DLL lifetime. */
+typedef void (HM_CALL *hm_log_callback)(uint32_t level, const char* message, uint32_t length, void* user);
 
 typedef struct hm_create_options {
     uint32_t struct_size;
@@ -88,6 +92,8 @@ typedef struct hm_diagnostics {
 } hm_diagnostics;
 
 HM_API uint32_t HM_CALL hm_get_abi_version(void);
+/* Additive ABI 2 export. Null restores Filament's default stream consumers. No renderer configuration changes. */
+HM_API void HM_CALL hm_set_log_callback(hm_log_callback callback, void* user);
 HM_API int32_t HM_CALL hm_create(const hm_create_options* options, hm_renderer** renderer);
 /* Copies the GLB before returning. A nonempty expected_sha256 must match its real SHA256. */
 HM_API int32_t HM_CALL hm_load_model(hm_renderer* renderer, const void* glb,
@@ -96,7 +102,7 @@ HM_API int32_t HM_CALL hm_load_model(hm_renderer* renderer, const void* glb,
 HM_API int32_t HM_CALL hm_set_environment(hm_renderer* renderer, const void* ibl,
         uint64_t ibl_length, const void* skybox, uint64_t skybox_length);
 HM_API int32_t HM_CALL hm_configure(hm_renderer* renderer, const hm_configuration* configuration);
-/* Coalesced asynchronous render request; no callback crosses the ABI. */
+/* Coalesced asynchronous render request; no frame callback crosses the ABI. */
 HM_API int32_t HM_CALL hm_render(hm_renderer* renderer);
 /* 1=copied, 0=no newer completed frame. Output is top-left RGBA8, opaque, sRGB. */
 HM_API int32_t HM_CALL hm_try_copy_latest_frame(hm_renderer* renderer, uint64_t after_frame_id,

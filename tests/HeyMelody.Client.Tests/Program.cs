@@ -12,6 +12,12 @@ string scratch = Path.Combine(Path.GetTempPath(), "HeyMelody-ClientTests-" + Gui
 Directory.CreateDirectory(scratch);
 try
 {
+    if (args is ["--diagnostics-tests"])
+    {
+        await DiagnosticBridgeTests.RunAsync(Test, scratch);
+        Console.WriteLine(JsonSerializer.Serialize(new { passed, success = true, nativeBluetoothCalls = 0 }));
+        return 0;
+    }
     await Test("RPC rejects an incomplete EOF record", async () =>
         await Throws<InvalidDataException>(() => new RpcLineReader(new MemoryStream("{}"u8.ToArray())).ReadLineAsync(default).AsTask()));
     await Test("RPC bounds records before deserialization", async () =>
@@ -149,6 +155,7 @@ try
     await SnapshotCloneTests.RunAsync(Test);
     await WireCompatTests.RunAsync(Test);
     await RpcLineReaderTests.RunAsync(Test);
+    await DiagnosticBridgeTests.RunAsync(Test, scratch);
     Console.WriteLine(JsonSerializer.Serialize(new { passed, success = true, architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(), nativeBluetoothCalls = 0 }, RpcWire.Json));
     return 0;
 }

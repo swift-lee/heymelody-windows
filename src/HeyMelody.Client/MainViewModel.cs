@@ -620,9 +620,15 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     {
         return await Dialogs.RunAsync(token => _confirmations.ConfirmAsync(title, message, token), cancellation);
     }
-    private void SetStatus(string text, bool warning = false) { _status = text; _statusWarning = warning; NotifyState(); }
+    private void SetStatus(string text, bool warning = false)
+    {
+        if (_status != text || _statusWarning != warning)
+            HeyMelody.Diagnostics.DiagnosticLog.Info("client.ui", "status", text, new { warning });
+        _status = text; _statusWarning = warning; NotifyState();
+    }
     private void Log(string text)
     {
+        HeyMelody.Diagnostics.DiagnosticLog.Info("client.ui", "message", text);
         _logs.Add($"{DateTime.Now:HH:mm:ss}  {Sanitize(text)}");
         if (_logs.Count > 80) _logs.RemoveAt(0);
         OnPropertyChanged(nameof(LogText));

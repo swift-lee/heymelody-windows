@@ -3,13 +3,28 @@ using HeyMelodyWindows.App;
 using HeyMelodyWindows.Host;
 using HeyMelodyWindows.Windows;
 
+TestProcessErrorMode.SuppressWindowsErrorDialogs();
+
 if (args is ["--fake-peer"]) return await BackendTests.FakePeerMainAsync();
+if (args is ["--diagnostic-fake-peer", var capture]) return await DiagnosticIntegrationTests.FakePeerMainAsync(capture);
 
 int passed = 0;
 string scratch = Path.Combine(Path.GetTempPath(), "HeyMelody-HostTests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(scratch);
 try
 {
+    if (args is ["--diagnostics-tests"])
+    {
+        await DiagnosticIntegrationTests.RunAsync(Test, scratch);
+        Console.WriteLine(JsonSerializer.Serialize(new { passed, success = true, nativeBluetoothCalls = 0 }));
+        return 0;
+    }
+    if (args is ["--audition-tests"])
+    {
+        await CalibrationAuditionTests.RunAsync(Test, scratch);
+        Console.WriteLine(JsonSerializer.Serialize(new { passed, success = true, nativeBluetoothCalls = 0 }));
+        return 0;
+    }
     await Test("cached classes include paired audio even while disconnected", () =>
     {
         foreach (uint minor in new uint[] { 1, 2, 4, 5, 6, 7, 8, 10, 15, 19, 20 })
@@ -183,8 +198,15 @@ try
     await DeviceStateTests.RunAsync(Test, scratch);
     await EnergyTests.RunAsync(Test, scratch);
     await HostEfficiencyTests.RunAsync(Test, scratch);
+    await DiagnosticIntegrationTests.RunAsync(Test, scratch);
     Console.WriteLine(JsonSerializer.Serialize(new { passed, success = true, nativeBluetoothCalls = 0 }));
     return 0;
+}
+catch (Exception failure)
+{
+    HeyMelody.Diagnostics.DiagnosticLog.Error("Tests", "runner.failed", "Host offline test runner failed", failure);
+    Console.Error.WriteLine(failure);
+    return 1;
 }
 finally
 {

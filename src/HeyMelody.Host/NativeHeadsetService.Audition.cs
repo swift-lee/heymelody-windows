@@ -1,6 +1,8 @@
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Calibration;
 
+using HeyMelody.Diagnostics;
+
 namespace HeyMelodyWindows.Host;
 
 public sealed partial class NativeHeadsetService
@@ -38,12 +40,15 @@ public sealed partial class NativeHeadsetService
             if (_calibrationState is not { } state) return;
             _calibrationState = state with { PreviewEpoch = _previewEpoch, PreviewAudioPlaying = playing,
                 PreviewAudioError = error, Revision = ++_calibrationRevision };
+            DiagnosticLog.Debug("host.audio", "state", "Audition state changed",
+                new { epoch = _previewEpoch, playing, error, state.Handle, state.Stage, state.PreviewMode });
             CalibrationChanged?.Invoke(_calibrationState);
         }
     }
     private async Task PreviewAuditionAsync(CalibrationPreviewMode mode, CancellationToken token)
     {
         long epoch = InvalidateAudition();
+        DiagnosticLog.Info("host.audio", "previewRequested", "Changing audition playback mode", new { epoch, mode });
         using var run = CancellationTokenSource.CreateLinkedTokenSource(token);
         CancellationToken runToken = run.Token;
         await _auditionGate.WaitAsync(token);
@@ -71,6 +76,8 @@ public sealed partial class NativeHeadsetService
                 }
                 catch (Exception error)
                 {
+                    if (error is not OperationCanceledException)
+                        DiagnosticLog.Error("host.audio", "pauseFailed", "Audition could not pause", error, new { epoch, mode, stopSubmitted });
                     if (_auditionPlayer is { } failed)
                     {
                         if (error is OperationCanceledException) await StopPlayerAsync(failed);
@@ -117,6 +124,9 @@ public sealed partial class NativeHeadsetService
             }
             catch (Exception error)
             {
+                if (error is not OperationCanceledException)
+                    DiagnosticLog.Error("host.audio", "previewFailed", "Audition playback or DSP transition failed", error,
+                        new { epoch, mode, dspStarted, keepPlaying });
                 // Still inside the gate: a later epoch can cancel this operation but cannot start a newer stream yet.
                 await _auditionTransitionStop;
                 if (error is OperationCanceledException) await StopPlayerAsync(player);
@@ -194,8 +204,9 @@ public sealed partial class NativeHeadsetService
     {
         Volatile.Write(ref _auditionStreamPlaying, 0);
         try { await player.StopAsync(); }
-        catch
+        catch (Exception error)
         {
+            DiagnosticLog.Error("host.audio", "stopFailed", "Local audition player could not stop and will be discarded", error);
             Interlocked.CompareExchange(ref _auditionPlayer, null, player);
             try { await player.DisposeAsync(); } catch { }
         }

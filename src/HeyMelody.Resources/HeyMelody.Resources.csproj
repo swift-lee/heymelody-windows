@@ -6,4 +6,5 @@
     <Content Include="Bundles/artwork.json;Bundles/provenance.json;Bundles/supplemental.json" Link="ResourceBundles/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Bundles/data/**/*" Link="ResourceBundles/data/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
+  <ItemGroup><ProjectReference Include="../HeyMelody.Diagnostics/HeyMelody.Diagnostics.csproj" /></ItemGroup>
 </Project>

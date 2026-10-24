@@ -126,15 +126,32 @@ internal static class CalibrationAuditionTests
         {
             // The render thread is a COM STA thread; off Windows the real player cannot even be constructed.
             if (!OperatingSystem.IsWindows()) { Console.WriteLine("SKIP fatal audition render initialization drains commands and rejects future work without hanging"); return; }
-            using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
-            await using var player = new WasapiCalibrationAuditionPlayer(() => { entered.Set(); release.Wait(); throw new IOException("Synthetic COM initialization failure"); }, () => { });
-            Check(entered.Wait(TimeSpan.FromSeconds(2)), "Synthetic render thread never started");
-            Task queued = player.PrepareAsync(1, default); release.Set();
-            await ThrowsAsync<IOException>(() => queued.WaitAsync(TimeSpan.FromSeconds(2)));
-            await player.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
-            await ThrowsAsync<ObjectDisposedException>(() => player.PrepareAsync(1, default).WaitAsync(TimeSpan.FromSeconds(2)));
-            await player.StopAsync().WaitAsync(TimeSpan.FromSeconds(2));
-            await player.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+            string directory = Path.Combine(scratch, "audition-fatal-log"); Directory.CreateDirectory(directory);
+            HeyMelody.Diagnostics.DiagnosticLog.InitializeIdentity(HeyMelody.Diagnostics.DiagnosticComponents.Host, "audio-test");
+            HeyMelody.Diagnostics.DiagnosticLog.Configure(new() { Enabled = true, SessionId = Guid.NewGuid().ToString("N"),
+                Directory = directory, Components = [HeyMelody.Diagnostics.DiagnosticComponents.Host] });
+            try
+            {
+                using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
+                await using var player = new WasapiCalibrationAuditionPlayer(() => { entered.Set(); release.Wait(); throw new IOException("Synthetic COM initialization failure"); }, () => { });
+                Check(entered.Wait(TimeSpan.FromSeconds(2)), "Synthetic render thread never started");
+                Task queued = player.PrepareAsync(1, default); release.Set();
+                await ThrowsAsync<IOException>(() => queued.WaitAsync(TimeSpan.FromSeconds(2)));
+                await player.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+                await ThrowsAsync<ObjectDisposedException>(() => player.PrepareAsync(1, default).WaitAsync(TimeSpan.FromSeconds(2)));
+                await player.StopAsync().WaitAsync(TimeSpan.FromSeconds(2));
+                await player.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+            }
+            finally { HeyMelody.Diagnostics.DiagnosticLog.Stop("Audition fatal-thread test completed"); }
+            bool preserved = false;
+            foreach (string path in Directory.GetFiles(directory, "*.jsonl"))
+                foreach (string line in File.ReadLines(path))
+                {
+                    using var entry = System.Text.Json.JsonDocument.Parse(line);
+                    if (entry.RootElement.GetProperty("eventName").GetString() == "threadFailed")
+                        preserved = entry.RootElement.GetProperty("exception").GetString()!.Contains("Synthetic COM initialization failure", StringComparison.Ordinal);
+                }
+            Check(preserved, "Actual WASAPI thread initialization failure lost its original diagnostic exception");
         });
         await test("first audition waits for DSP ACK while A/B keeps the stream and pause preserves the cursor", async () =>
         {

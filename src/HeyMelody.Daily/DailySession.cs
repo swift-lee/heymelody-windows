@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using HeyMelody.Diagnostics;
 using HeyMelodyWindows.Control;
 using HeyMelodyWindows.Protocol;
 
@@ -14,6 +15,8 @@ internal sealed class DailySession : IAsyncDisposable
     private readonly IControlTransport _transport;
     private readonly SequenceAllocator _sequences = new();
     private readonly PacketDecoder _decoder;
+    private readonly string _diagnosticId = Guid.NewGuid().ToString("N");
+    private string? _pendingCorrelationId;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly object _pendingGate = new();
     private readonly Dictionary<ushort, byte> _filterSequences = [];
@@ -36,6 +39,7 @@ internal sealed class DailySession : IAsyncDisposable
     {
         _transport = transport;
         _decoder = new PacketDecoder(AllowCodecReplyCompatibility, RecordDecodedReply);
+        DiagnosticLog.Info("Daily", "session.created", "Created a daily control session.", DiagnosticContext());
     }
     internal void SetCodecReplyCompatibilityAllowed(bool allowed)
     {
@@ -66,6 +70,7 @@ internal sealed class DailySession : IAsyncDisposable
     /// <param name="optionalTimeout">Set only for reads whose silence means "unknown"; such a timeout keeps the session.</param>
     public async Task<DailyResponse> RequestAsync(ushort command, byte[] payload, CancellationToken token, TimeSpan? optionalTimeout = null)
     {
+        using var operation = DiagnosticLog.BeginOperation(DiagnosticLog.CurrentCorrelationId);
         if (!Usable || !_sequences.TryTake(out byte seq)) throw new IOException("Daily session unavailable.");
         var completion = new TaskCompletionSource<Packet>(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (_pendingGate)
@@ -73,6 +78,7 @@ internal sealed class DailySession : IAsyncDisposable
             if (_reply is not null) throw new InvalidOperationException("Requests must be serialized.");
             if (!Usable) throw new IOException("Daily session unavailable.");
             _key = new(command, seq); _reply = completion;
+            _pendingCorrelationId = DiagnosticLog.CurrentCorrelationId;
             _codecReplyCompatibilityUsed = false;
             _replyDecoded = false;
             // A hearing-filter request begins/retries the entire pair of filter loads.
@@ -85,10 +91,16 @@ internal sealed class DailySession : IAsyncDisposable
         try
         {
             submitted = true;
-            await _transport.SendAsync(PacketEncoder.Encode(command, seq, payload), timeout.Token).WaitAsync(timeout.Token);
+            byte[] frame = PacketEncoder.Encode(command, seq, payload);
+            DiagnosticLog.Bytes("Daily", "request.tx", frame, DiagnosticContext());
+            await _transport.SendAsync(frame, timeout.Token).WaitAsync(timeout.Token);
             sent = true;
+            DiagnosticLog.Debug("Daily", "request.sent", "The transport completed the request write.", DiagnosticContext());
             Packet packet = await completion.Task.WaitAsync(timeout.Token);
             byte? status = packet.Payload.Length == 0 ? null : packet.Payload[0];
+            DiagnosticLog.Info("Daily", "request.response", "Received the matched response.",
+                new { sessionId = _diagnosticId, command = $"0x{command:X4}", sequence = seq, responseCommand = $"0x{packet.Command:X4}",
+                    status, payloadLength = packet.Payload.Length, codecCompatibilityUsed = _codecReplyCompatibilityUsed });
             if (status is null) Stop(new FormatException("Missing response status."),
                 DailyReadFailureKind.ProtocolFormat, matchedMissingStatus: true);
             return new(submitted, true, status, packet.Payload, Sequence: packet.Sequence,
@@ -101,6 +113,7 @@ internal sealed class DailySession : IAsyncDisposable
         catch (OperationCanceledException) when (optionalTimeout is not null && sent && Usable
             && !token.IsCancellationRequested && !_lifetime.IsCancellationRequested)
         {
+            DiagnosticLog.Warning("Daily", "request.optional-timeout", "An optional query timed out and leaves its state unknown.", data: DiagnosticContext());
             // A late reply cannot match a later request key and is not a notification command.
             return new(submitted, false, null, null, Sequence: seq, Failure: "等待回执超时",
                 FailureKind: DailyReadFailureKind.Timeout, FailureRequestPending: true);
@@ -108,6 +121,7 @@ internal sealed class DailySession : IAsyncDisposable
         catch (Exception failure)
         {
             Exception actual = _failure ?? failure;
+            DiagnosticLog.Error("Daily", "request.failed", "The daily request failed.", actual, DiagnosticContext());
             var kind = _failure is not null ? _failureKind : failure is OperationCanceledException
                 && !timeout.IsCancellationRequested ? DailyReadFailureKind.Other : ClassifyFailure(actual, token);
             Stop(actual, kind);
@@ -121,47 +135,61 @@ internal sealed class DailySession : IAsyncDisposable
         {
             lock (_pendingGate)
             {
-                if (ReferenceEquals(_reply, completion)) { _reply = null; _key = null; }
+                if (ReferenceEquals(_reply, completion)) { _reply = null; _key = null; _pendingCorrelationId = null; }
             }
         }
     }
     private async Task ReadPumpAsync()
     {
+        // A reader outlives individual RPC operations; raw chunks may contain several request/notification frames.
+        using var readerOperation = DiagnosticLog.SuspendOperation();
         var buffer = new byte[4096];
         try
         {
             while (true)
             {
                 int count = await _transport.ReadAsync(buffer, _lifetime.Token);
+                if (count > 0 && count <= buffer.Length)
+                    DiagnosticLog.Bytes("Daily", "transport.rx", buffer.AsSpan(0, count), DiagnosticContext());
                 if (count == 0)
                 {
+                    DiagnosticLog.Warning("Daily", "transport.eof", "The daily transport reached EOF.", data: DiagnosticContext());
                     // EOF itself establishes a broken connection even if the last frame was partial.
-                    try { _decoder.Complete(); } catch (FormatException) { }
+                    try { _decoder.Complete(); }
+                    catch (FormatException error) { DiagnosticLog.Error("Daily", "transport.incomplete-eof", "EOF interrupted a protocol message.", error, DiagnosticContext()); }
                     throw new EndOfStreamException("RFCOMM closed.");
                 }
                 if (count < 0 || count > buffer.Length) throw new FormatException("Invalid transport read size.");
                 foreach (Packet packet in _decoder.Feed(buffer.AsSpan(0, count)))
                 {
-                    bool matched, currentFilter;
+                    bool matched, currentFilter; string? correlation;
                     bool filter = packet.Command is 0x8116 or 0x811F;
                     lock (_pendingGate)
                     {
                         matched = _key is RequestKey key && key.MatchesResponse(packet);
+                        correlation = matched ? _pendingCorrelationId : null;
                         if (matched) _reply!.TrySetResult(packet);
                         currentFilter = filter && _filterSequences.TryGetValue((ushort)(packet.Command & 0x7FFF), out byte sequence)
                             && sequence == packet.Sequence;
                     }
+                    using var packetOperation = matched && correlation is not null
+                        ? DiagnosticLog.BeginOperation(correlation) : DiagnosticLog.SuspendOperation();
+                    DiagnosticLog.Bytes("Daily", matched ? "response.matched" : currentFilter ? "filter.received" : "packet.unmatched", packet.Payload,
+                        new { sessionId = _diagnosticId, command = $"0x{packet.Command:X4}", packet.Sequence, matched, currentFilter });
                     if (currentFilter || !filter && !matched && NotificationParsers.IsNotificationCommand(packet.Command))
                         Notification?.Invoke(packet);
                 }
             }
         }
-        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
-        catch (Exception failure) { Stop(failure); }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        { DiagnosticLog.Debug("Daily", "reader.cancelled", "The daily reader stopped with its session.", DiagnosticContext()); }
+        catch (Exception failure)
+        { DiagnosticLog.Error("Daily", "reader.failed", "The daily read pump failed.", failure, DiagnosticContext()); Stop(failure); }
     }
     private void Stop(Exception failure, DailyReadFailureKind? kind = null, bool matchedMissingStatus = false)
     {
         if (Interlocked.Exchange(ref _usable, 0) == 0) return;
+        DiagnosticLog.Error("Daily", "session.stopping", "Stopping the daily session after a read/request failure.", failure, DiagnosticContext());
         TaskCompletionSource<Packet>? pendingReply;
         lock (_pendingGate)
         {
@@ -231,8 +259,17 @@ internal sealed class DailySession : IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         Interlocked.Exchange(ref _usable, 0); _lifetime.Cancel();
         lock (_pendingGate) _reply?.TrySetCanceled(_lifetime.Token);
-        try { await _transport.DisposeAsync(); } catch (Exception) { }
+        try { await _transport.DisposeAsync(); }
+        catch (Exception error) { DiagnosticLog.Error("Daily", "session.dispose-failed", "Daily transport disposal failed.", error, DiagnosticContext()); }
         await _reader;
         _lifetime.Dispose();
+        DiagnosticLog.Info("Daily", "session.closed", "The daily session and reader have closed.", new { sessionId = _diagnosticId });
+    }
+    private object DiagnosticContext()
+    {
+        lock (_pendingGate) return new { sessionId = _diagnosticId, transport = _transport.GetType().FullName,
+            pendingCommand = _key is RequestKey key ? $"0x{key.Command:X4}" : null, pendingSequence = _key?.Sequence,
+            pendingCorrelationId = _pendingCorrelationId, usable = Usable, remainingSequences = Remaining,
+            codecCompatibilityAllowed = _allowCodecReplyCompatibility, codecCompatibilityUsed = _codecReplyCompatibilityUsed };
     }
 }

@@ -8,6 +8,7 @@ using Avalonia.Rendering.Composition;
 using Avalonia.Win32;
 using HeyMelodyWindows.App;
 using SkiaSharp;
+using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.Ui;
 
@@ -28,7 +29,11 @@ internal static class RenderingSetup
         {
             // Use the same DXGI first adapter as Avalonia's normal non-ARM64 path, on every Windows architecture.
             // Supplying a callback bypasses Avalonia 12.1.4's default ARM64 Adreno blocklist.
-            GraphicsAdapterSelectionCallback = _ => 0,
+            GraphicsAdapterSelectionCallback = adapters =>
+            {
+                LogSelectedAdapter(adapters, 0, basicRenderMode: false);
+                return 0;
+            },
             RenderingMode = [Win32RenderingMode.AngleEgl, Win32RenderingMode.Software],
             // Mica needs WinUI composition; both composition modes pace frames at the display refresh rate.
             CompositionMode = [Win32CompositionMode.WinUIComposition, Win32CompositionMode.DirectComposition,
@@ -45,6 +50,7 @@ internal static class RenderingSetup
         }
         catch (Exception exception)
         {
+            DiagnosticLog.Warning("Avalonia.GPU", "warpResolutionFailed", "WARP lookup failed; the existing software fallback is used.", exception);
             Logger.TryGet(LogEventLevel.Warning, "OpenGL")?.Log(null,
                 "Unable to resolve the WARP adapter; using software rendering: {Error}", exception);
             warpLuid = null;
@@ -52,6 +58,7 @@ internal static class RenderingSetup
 
         if (warpLuid is not { Length: 8 })
         {
+            DiagnosticLog.Warning("Avalonia.GPU", "warpUnavailable", "Basic Render has no WARP LUID; the existing software fallback is used.");
             Logger.TryGet(LogEventLevel.Warning, "OpenGL")?.Log(null,
                 "Basic Render was requested, but no WARP adapter LUID is available; using software rendering.");
             options.RenderingMode = [Win32RenderingMode.Software];
@@ -65,29 +72,67 @@ internal static class RenderingSetup
         {
             for (var index = 0; index < adapters.Count; index++)
                 if (adapters[index].DeviceLuid is { } luid && luid.AsSpan().SequenceEqual(expectedLuid))
+                {
+                    LogSelectedAdapter(adapters, index, basicRenderMode: true);
                     return index;
+                }
 
             // D3D11AngleWin32PlatformGraphics.TryCreate catches this and the next RenderingMode is Software.
             // Returning 0 here would silently select hardware despite the user's Basic Render preference.
+            DiagnosticLog.Warning("Avalonia.GPU", "warpNotEnumerated", "WARP was absent from ANGLE's adapter list; the existing software fallback is used.",
+                data: new { expectedLuid = Convert.ToHexString(expectedLuid), adapters = adapters.Select(DescribeCandidate).ToArray() });
             throw new InvalidOperationException("Basic Render was requested, but the WARP adapter is absent from " +
                 "the ANGLE adapter list. Falling back to software rendering.");
         };
         return options;
     }
 
+    private static object DescribeCandidate(PlatformGraphicsDeviceAdapterDescription adapter) => new
+    {
+        adapter.Description,
+        luid = adapter.DeviceLuid is { } luid ? Convert.ToHexString(luid) : null,
+        uuid = adapter.DeviceUuid is { } uuid ? Convert.ToHexString(uuid) : null
+    };
+
+    private static void LogSelectedAdapter(IReadOnlyList<PlatformGraphicsDeviceAdapterDescription> adapters, int index, bool basicRenderMode)
+    {
+        if (!DiagnosticLog.IsEnabled) return;
+        DiagnosticLog.Info("Avalonia.GPU", "adapterSelected", "ANGLE adapter selection callback completed; device creation can still fall back.",
+            new { basicRenderMode, selectedIndex = index, adapters = adapters.Select(DescribeCandidate).ToArray(),
+                selected = index >= 0 && index < adapters.Count ? WindowsWarpAdapterResolver.DescribeAdapter(adapters[index].DeviceLuid) : null });
+    }
+
     internal static AppBuilder UseHeyMelodyRendering(this AppBuilder builder, bool? basicRenderMode = null)
     {
+        var requestedBasicRenderMode = basicRenderMode ?? (OperatingSystem.IsWindows() && UiRenderingPreferenceReader.Load());
         SKGraphics.SetFontCacheLimit(FontCacheLimitBytes);
+        DiagnosticLog.Debug("Avalonia.GPU", "configuration", "Applying the existing GUI render configuration.",
+            new { basicRenderMode = requestedBasicRenderMode, FontCacheLimitBytes, GpuResourceLimitBytes,
+                platform = Environment.OSVersion.Platform.ToString() });
         builder = builder.With(new SkiaOptions { MaxGpuResourceSizeBytes = GpuResourceLimitBytes });
         // Avalonia's default merges every dirty rect of a frame into one union, so the hero animation on the left and any
         // change on the right pane repaint nearly the whole window together. Region tracking keeps them separate.
         builder = builder.With(new CompositionOptions { UseRegionDirtyRectClipping = true, MaxDirtyRects = 8 });
         if (OperatingSystem.IsWindows())
             builder = builder
-                .With(CreateWindowsOptions(basicRenderMode ?? UiRenderingPreferenceReader.Load()))
+                .With(CreateWindowsOptions(requestedBasicRenderMode))
                 // The D3D9 path does not use GraphicsAdapterSelectionCallback. Never let it bypass Basic Render.
                 .With(new AngleOptions { AllowedPlatformApis = [AngleOptions.PlatformApi.DirectX11] });
-        return builder;
+        return builder.AfterSetup(_ =>
+        {
+            if (!DiagnosticLog.IsEnabled) return;
+            try
+            {
+                DiagnosticLog.Info("Avalonia.GPU", "platformInitialized", "Avalonia bootstrap completed; concrete graphics services are not exposed by this public bootstrap API.",
+                    new { application = Application.Current?.GetType().FullName,
+                        graphicsService = (string?)null, renderInterface = (string?)null,
+                        detailsAvailable = false });
+            }
+            catch (Exception error)
+            {
+                DiagnosticLog.Warning("Avalonia.GPU", "platformDetailsUnavailable", "Graphics service metadata could not be read.", error);
+            }
+        });
     }
 }
 

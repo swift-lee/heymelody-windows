@@ -4,6 +4,7 @@ using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using HeyMelody.Diagnostics;
 using HeyMelodyWindows.Host;
 
 namespace HeyMelodyWindows.App;
@@ -38,8 +39,8 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
     internal ClientBridge(string pipeName, Action? startBackend = null, TimeSpan? testBudget = null, Func<bool>? backendRunning = null)
     {
         _pipeName = pipeName; _startBackend = startBackend; _testBudget = testBudget; _backendRunning = backendRunning;
-        _ = Task.Run(() => DeliverEventsAsync(_events));
-        _ = Task.Run(() => DeliverEventsAsync(_spectra));
+        _ = RunBackground(() => DeliverEventsAsync(_events));
+        _ = RunBackground(() => DeliverEventsAsync(_spectra));
     }
 
     public async Task<BackendSubscription> SubscribeAsync(string role, CancellationToken cancellationToken)
@@ -66,6 +67,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                 _ = ReconnectAsync();
             throw;
         }
+        foreach (var failure in subscription.DiagnosticFailures) DiagnosticLog.ReportExternalFailure(failure);
         return subscription;
     }
 
@@ -181,6 +183,8 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
     private async Task<T> RequestAsync<T>(BackendRequest request, TimeSpan budget, CancellationToken token,
         Action<T, Connection>? onResult = null)
     {
+        using var operation = DiagnosticLog.BeginOperation();
+        request.DiagnosticCorrelationId = DiagnosticLog.CurrentCorrelationId;
         bool submitted = false, recordWritten = false;
         Connection? connection = null;
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _lifetime.Token);
@@ -198,7 +202,8 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                 request.Id = Interlocked.Increment(ref _nextId);
                 string record = JsonSerializer.Serialize(request, RpcWire.Json);
                 if (record.Length > RpcWire.MaximumLineCharacters) throw new InvalidDataException("后台请求过大。");
-                connection.Pending[request.Id] = pending;
+                DiagnosticLog.Info("client.ipc", "send", "Sending backend RPC record", new { record });
+                connection.Pending[request.Id] = new(pending, request.DiagnosticCorrelationId);
                 submitted = true;
                 await connection.Writer.WriteLineAsync(record.AsMemory(), linked.Token);
                 await connection.Writer.FlushAsync(linked.Token);
@@ -220,11 +225,17 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
             onResult?.Invoke(result, connection);
             return result;
         }
-        catch (BackendOperationException) { throw; }
+        catch (BackendOperationException failure)
+        {
+            DiagnosticLog.Warning("client.ipc", "rejected", "Backend operation failed", failure, new { request.Id, request.Operation });
+            throw;
+        }
         catch (Exception failure) when (failure is IOException or InvalidDataException or TimeoutException
             or OperationCanceledException or ObjectDisposedException or JsonException or DecoderFallbackException
             or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         {
+            DiagnosticLog.Error("client.ipc", "unavailable", "Backend RPC did not complete", failure,
+                new { request.Id, request.Operation, submitted, recordWritten });
             if (submitted && !recordWritten) connection?.Close(failure);
             throw new BackendUnavailableException(submitted && request.Operation == "apply",
                 _versionMismatch ? "后台与界面版本不一致，请从托盘退出后台后重新打开完整客户端。" : "蓝牙后台暂时不可用，请等待重连。", failure);
@@ -268,7 +279,8 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
             }
             var connection = new Connection(pipe);
             lock (_stateGate) _connection = connection;
-            _ = Task.Run(() => ReadMessagesAsync(connection));
+            DiagnosticLog.Info("client.ipc", "connected", "Connected to the shared backend", new { _pipeName });
+            _ = RunBackground(() => ReadMessagesAsync(connection));
             return connection;
         }
         finally { _connectGate.Release(); }
@@ -285,12 +297,22 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
             {
                 string? record = await connection.Reader.ReadLineAsync(_lifetime.Token);
                 if (record is null) break;
-                var message = JsonSerializer.Deserialize<BackendMessage>(record, RpcWire.Json) ?? throw new InvalidDataException();
+                BackendMessage message;
+                try { message = JsonSerializer.Deserialize<BackendMessage>(record, RpcWire.Json) ?? throw new InvalidDataException(); }
+                catch (Exception parseError)
+                {
+                    DiagnosticLog.Error("client.ipc", "invalidRecord", "Received an invalid backend RPC record", parseError, new { record });
+                    throw;
+                }
+                string? correlation = message.Kind == "response" && connection.Pending.TryGetValue(message.Id, out var matching)
+                    ? matching.CorrelationId : null;
+                using var operation = correlation is { } id ? DiagnosticLog.BeginOperation(id) : DiagnosticLog.SuspendOperation();
+                DiagnosticLog.Info("client.ipc", "receive", "Received backend RPC record", new { record });
                 if (message.SchemaVersion != 4)
                 { _versionMismatch = true; throw new InvalidDataException("后台通信版本不一致。"); }
                 if (message.Kind == "response" && message.Id > 0 && message.Id <= Interlocked.Read(ref _nextId))
                 {
-                    if (connection.Pending.TryRemove(message.Id, out var pending)) pending.TrySetResult(message);
+                    if (connection.Pending.TryRemove(message.Id, out var pending)) pending.Completion.TrySetResult(message);
                 }
                 else if (message.Kind == "event" && message.Event is { } notification)
                 {
@@ -307,7 +329,11 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                 else throw new InvalidDataException("无效的后台消息。");
             }
         }
-        catch (Exception error) { failure = error; }
+        catch (Exception error)
+        {
+            failure = error;
+            DiagnosticLog.Warning("client.ipc", "disconnected", "Backend receive channel ended", error);
+        }
         finally
         {
             connection.Close(failure);
@@ -378,6 +404,8 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                         || source.Closed && notification.Kind is not ("stopping" or "unavailable"))) continue;
                 }
                 var handlers = EventReceived;
+                if (notification.Kind == "diagnosticFailure" && notification.DiagnosticFailure is { } failure)
+                    DiagnosticLog.ReportExternalFailure(failure);
                 if (handlers is null) continue;
                 foreach (Action<BackendEvent> handler in handlers.GetInvocationList())
                     try { handler(notification); } catch (Exception) { /* Subscribers cannot stop the receive pump. */ }
@@ -418,43 +446,27 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
         catch (Exception) { }
     });
 
-    private static bool BackendRunning()
-    {
-        if (!OperatingSystem.IsWindows()) return true;
-        try
-        {
-            if (!Mutex.TryOpenExisting(BackendEndpoint.HostMutexName, out var singleton)) return false;
-            singleton.Dispose();
-        }
-        catch (Exception) { }
-        // Unknown (for example access denied) is treated as running: the probe-then-launch order is the safe one.
-        return true;
-    }
+    private static bool BackendRunning() => DiagnosticBackendLauncher.IsRunning();
 
-    private static void StartBackend()
+    private static void StartBackend() => DiagnosticBackendLauncher.Start();
+
+    private static Task RunBackground(Func<Task> action) => Task.Run(async () =>
     {
-        string executable = Path.Combine(AppContext.BaseDirectory, "backend", "HeyMelody.Host.exe");
-        if (!File.Exists(executable)) executable = Path.Combine(AppContext.BaseDirectory, "HeyMelody.Host.exe");
-        var start = new ProcessStartInfo { FileName = executable, UseShellExecute = false, CreateNoWindow = true,
-            WorkingDirectory = AppContext.BaseDirectory };
-        if (!File.Exists(executable))
-        {
-            string? dll = new[] { "Debug", "Release" }.Select(configuration => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-                "../../../../HeyMelody.Host/bin", configuration, "net10.0-windows10.0.19041.0/HeyMelody.Host.dll"))).FirstOrDefault(File.Exists);
-            if (dll is null) throw new FileNotFoundException("蓝牙后台组件缺失，请重启软件或重新安装。");
-            start.FileName = "dotnet"; start.ArgumentList.Add(dll);
-        }
-        using var process = Process.Start(start) ?? throw new IOException("无法启动蓝牙后台。");
-    }
+        using var operation = DiagnosticLog.SuspendOperation();
+        await action();
+    });
 
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
+        DiagnosticLog.Info("client.lifecycle", "dispose", "Closing this client connection; backend remains running");
         _disposed = true; _lifetime.Cancel(); _events.Writer.TryComplete(); _spectra.Writer.TryComplete();
         await _connectGate.WaitAsync();
         try { _connection?.Close(new ObjectDisposedException(nameof(ClientBridge))); _connection = null; }
         finally { _connectGate.Release(); }
     }
+
+    private sealed record PendingResponse(TaskCompletionSource<BackendMessage> Completion, string? CorrelationId);
 
     private sealed class Connection(NamedPipeClientStream pipe)
     {
@@ -462,14 +474,14 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
         public RpcLineReader Reader { get; } = new(pipe, strictUtf8: true);
         public StreamWriter Writer { get; } = new(pipe, new UTF8Encoding(false), 4096, leaveOpen: true);
         public SemaphoreSlim WriteGate { get; } = new(1, 1);
-        public ConcurrentDictionary<long, TaskCompletionSource<BackendMessage>> Pending { get; } = new();
+        public ConcurrentDictionary<long, PendingResponse> Pending { get; } = new();
         private int _closed;
         public bool Closed => Volatile.Read(ref _closed) != 0;
         public void Close(Exception error)
         {
             if (Interlocked.Exchange(ref _closed, 1) != 0) return;
             pipe.Dispose();
-            foreach (var item in Pending) if (Pending.TryRemove(item.Key, out var pending)) pending.TrySetException(error);
+            foreach (var item in Pending) if (Pending.TryRemove(item.Key, out var pending)) pending.Completion.TrySetException(error);
         }
     }
 

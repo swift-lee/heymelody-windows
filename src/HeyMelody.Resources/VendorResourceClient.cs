@@ -5,6 +5,7 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.Resources;
 
@@ -93,14 +94,17 @@ public sealed class VendorResourceClient : IDisposable
     private async Task<HttpResponseMessage> OpenDownloadAsync(string url, CancellationToken token)
     {
         Uri uri = ValidateDownloadUri(url);
+        DiagnosticLog.Debug("Resources", "http.download-request", "Opening a resource download.", new { url });
         var response = await _client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+        DiagnosticLog.Debug("Resources", "http.download-response", "Received resource download headers.",
+            new { url, response.StatusCode, contentLength = response.Content.Headers.ContentLength, headers = response.Headers.ToString() });
         try
         {
             response.EnsureSuccessStatusCode();
             if (response.RequestMessage?.RequestUri != uri) throw new InvalidDataException("Unexpected resource redirect.");
             return response;
         }
-        catch { response.Dispose(); throw; }
+        catch (Exception error) { DiagnosticLog.Error("Resources", "http.download-failed", "The resource download response was rejected.", error, new { url }); response.Dispose(); throw; }
     }
 
     public static Uri ValidateDownloadUri(string url)
@@ -117,12 +121,23 @@ public sealed class VendorResourceClient : IDisposable
         request.Headers.Add("appid", "earphone"); request.Headers.Add("sv", "v1");
         request.Headers.Add("ts", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture));
         request.Headers.Add("nonce", Guid.NewGuid().ToString()); request.Headers.Add("sign", Sign(key, body));
+        DiagnosticLog.Bytes("Resources", "http.metadata-request", body,
+            new { uri = request.RequestUri, headers = request.Headers.ToString() });
         using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+        DiagnosticLog.Debug("Resources", "http.metadata-response", "Received resource metadata headers.",
+            new { uri = request.RequestUri, response.StatusCode, contentLength = response.Content.Headers.ContentLength, headers = response.Headers.ToString() });
         response.EnsureSuccessStatusCode();
         if (response.RequestMessage?.RequestUri != request.RequestUri) throw new InvalidDataException("Unexpected metadata redirect.");
-        var document = JsonDocument.Parse(await BoundedReadAsync(response, ResourceLimits.MetadataBytes, token).ConfigureAwait(false), new JsonDocumentOptions { MaxDepth = 64 });
-        try { ResourceJson.ValidateUniqueProperties(document.RootElement); return document; }
-        catch { document.Dispose(); throw; }
+        var bytes = await BoundedReadAsync(response, ResourceLimits.MetadataBytes, token).ConfigureAwait(false);
+        DiagnosticLog.Bytes("Resources", "http.metadata-body", bytes, new { uri = request.RequestUri });
+        JsonDocument? document = null;
+        try
+        {
+            document = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 64 });
+            ResourceJson.ValidateUniqueProperties(document.RootElement); return document;
+        }
+        catch (Exception error)
+        { DiagnosticLog.Error("Resources", "http.metadata-invalid", "Resource metadata parsing failed.", error, new { uri = request.RequestUri, bodyLength = bytes.Length }); document?.Dispose(); throw; }
     }
 
     private static JsonElement Data(JsonElement root)

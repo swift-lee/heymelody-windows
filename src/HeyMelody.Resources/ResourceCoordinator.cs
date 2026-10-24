@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using HeyMelody.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -106,6 +107,8 @@ public sealed class ResourceCoordinator : IDisposable
 
     private async Task<RefreshOutcome> RefreshConfigurationAsync(bool force, bool redownload, CancellationToken token)
     {
+        using var operation = DiagnosticLog.BeginOperation(DiagnosticLog.CurrentCorrelationId);
+        DiagnosticLog.Debug("Resources", "configuration.refresh-started", "Checking online configuration resources.", new { force, redownload });
         await InitializeAsync(token).ConfigureAwait(false);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _settingsCancellation.Token, _lifetime.Token);
         await _gate.WaitAsync(linked.Token).ConfigureAwait(false);
@@ -148,10 +151,11 @@ public sealed class ResourceCoordinator : IDisposable
             // An HttpClient timeout is an ordinary failure, not a caller cancellation.
             catch (Exception error) when (error is OperationCanceledException or HttpRequestException or IOException or InvalidDataException or JsonException
                 or CryptographicException or ArgumentException or UnauthorizedAccessException)
-            { _checks[check] = Time.GetUtcNow().AddSeconds(30); LastError = "在线资源更新失败，继续使用当前有效资源。"; outcome = RefreshOutcome.Failed; Wake(); }
+            { DiagnosticLog.Error("Resources", "configuration.refresh-failed", "Configuration refresh failed; keeping the current resources.", error, new { force, redownload, Revision }); _checks[check] = Time.GetUtcNow().AddSeconds(30); LastError = "在线资源更新失败，继续使用当前有效资源。"; outcome = RefreshOutcome.Failed; Wake(); }
         }
         finally { _gate.Release(); }
         if (outcome == RefreshOutcome.Updated && Volatile.Read(ref _batchedChanges) == 0) Changed?.Invoke(this, new(Revision, true, false));
+        DiagnosticLog.Info("Resources", "configuration.refresh-completed", "Configuration refresh completed.", new { outcome, Revision, LastError, LastSuccessfulCheck });
         return outcome;
     }
 
@@ -160,6 +164,7 @@ public sealed class ResourceCoordinator : IDisposable
         if (_autoRefresh is not null) return;
         _autoRefresh = Task.Run(async () =>
         {
+            using var backgroundOperation = DiagnosticLog.SuspendOperation();
             while (!_lifetime.IsCancellationRequested)
             {
                 var started = Time.GetUtcNow();
@@ -175,6 +180,7 @@ public sealed class ResourceCoordinator : IDisposable
                 // Anything else must not end the loop silently. The pass recorded no throttle, so the next one runs after the 30-second floor.
                 catch (Exception error)
                 {
+                    DiagnosticLog.Error("Resources", "auto-refresh.failed", "An automatic resource refresh pass failed.", error, new { Revision });
                     Trace.WriteLine($"HeyMelody resources: auto-refresh pass failed: {error}");
                     LastError = "在线资源更新失败，继续使用当前有效资源。";
                 }
@@ -299,7 +305,7 @@ public sealed class ResourceCoordinator : IDisposable
         // First use of this slot: wait for the shared download, then fall back. A late package still
         // raises Changed, and clients resolve again.
         try { await refresh.WaitAsync(FirstDownloadWait, token).ConfigureAwait(false); }
-        catch (TimeoutException) { return null; }
+        catch (TimeoutException error) { DiagnosticLog.Warning("Resources", "artwork.first-wait-timeout", "The first artwork wait expired; the shared download may continue.", error, new { productId, color, model, role, FirstDownloadWait }); return null; }
         return AcquireCachedArtwork(productId, color, model, role);
     }
 
@@ -313,7 +319,7 @@ public sealed class ResourceCoordinator : IDisposable
             var refresh = Task.Run(async () =>
             {
                 try { return await RefreshArtworkAsync(productId, color, model, token: _lifetime.Token).ConfigureAwait(false); }
-                catch (Exception) { return false; }
+                catch (Exception error) { DiagnosticLog.Error("Resources", "artwork.background-refresh-failed", "The shared artwork refresh task failed.", error, new { productId, color, model, key }); return false; }
             });
             _artworkRefreshes[key] = refresh;
             return refresh;
@@ -379,10 +385,11 @@ public sealed class ResourceCoordinator : IDisposable
             catch (OperationCanceledException) when (linked.IsCancellationRequested) { throw; }
             catch (Exception error) when (error is OperationCanceledException or HttpRequestException or IOException or InvalidDataException or JsonException
                 or CryptographicException or ArgumentException or UnauthorizedAccessException)
-            { _checks[key] = Time.GetUtcNow().AddSeconds(30); LastError = "在线美术资源更新失败，继续使用当前有效资源。"; outcome = RefreshOutcome.Failed; Wake(); }
+            { DiagnosticLog.Error("Resources", "artwork.refresh-failed", "Artwork refresh failed; keeping the current resources.", error, new { key, Revision }); _checks[key] = Time.GetUtcNow().AddSeconds(30); LastError = "在线美术资源更新失败，继续使用当前有效资源。"; outcome = RefreshOutcome.Failed; Wake(); }
         }
         finally { _gate.Release(); }
         if (outcome == RefreshOutcome.Updated && Volatile.Read(ref _batchedChanges) == 0) Changed?.Invoke(this, new(Revision, false, true));
+        DiagnosticLog.Info("Resources", "artwork.refresh-completed", "Artwork refresh completed.", new { outcome, Revision, LastError });
         return outcome;
     }
 
@@ -414,7 +421,8 @@ public sealed class ResourceCoordinator : IDisposable
                 if (Directory.Exists(scratch)) ResourcePaths.DeleteOwnedDirectory(_online, scratch);
                 if (createdSlot && !extracting && Directory.Exists(slot)) ResourcePaths.DeleteOwnedDirectory(_online, slot);
             }
-            catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException) { }
+            catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException)
+            { DiagnosticLog.Warning("Resources", "artwork.scratch-cleanup-failed", "Could not remove a resource extraction scratch directory.", error, new { scratch, slot, createdSlot, extracting }); }
         }
     }
 

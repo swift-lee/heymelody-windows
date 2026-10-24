@@ -16,6 +16,7 @@
 #include <filament/View.h>
 #include <filament/Viewport.h>
 #include <backend/PixelBufferDescriptor.h>
+#include <backend/Platform.h>
 #include <gltfio/AssetLoader.h>
 #include <gltfio/FilamentAsset.h>
 #include <gltfio/MaterialProvider.h>
@@ -24,6 +25,8 @@
 #include <image/Ktx1Bundle.h>
 #include <ktxreader/Ktx1Reader.h>
 #include <utils/EntityManager.h>
+#include <utils/CString.h>
+#include <utils/Log.h>
 #include <math/vec3.h>
 #include <materials/uberarchive.h>
 #include <cgltf.h>
@@ -56,6 +59,69 @@ namespace {
 constexpr uint64_t MAX_MODEL_BYTES = 64u * 1024u * 1024u;
 constexpr double PI = 3.14159265358979323846;
 thread_local std::string creation_error;
+
+std::mutex log_consumer_mutex;
+hm_log_callback log_consumer = nullptr;
+void* log_consumer_user = nullptr;
+const uint32_t stream_levels[] = {HM_LOG_DEBUG, HM_LOG_ERROR, HM_LOG_WARNING, HM_LOG_INFORMATION, HM_LOG_DEBUG};
+
+bool native_logging_enabled() noexcept {
+    std::lock_guard lock(log_consumer_mutex);
+    return log_consumer != nullptr;
+}
+
+void emit_native_log(uint32_t level, const char* message, size_t length) noexcept {
+    hm_log_callback callback;
+    void* user;
+    {
+        std::lock_guard lock(log_consumer_mutex);
+        callback = log_consumer;
+        user = log_consumer_user;
+    }
+    if (!callback || !message) return;
+    // Call outside our mutex: the pinned ostream consumer also invokes outside its own lock.
+    try { callback(level, message, static_cast<uint32_t>(std::min(length, size_t(UINT32_MAX))), user); }
+    catch (...) { /* Logging must never unwind through the native ABI or render worker. */ }
+}
+
+void emit_native_log(uint32_t level, const std::string& message) noexcept {
+    emit_native_log(level, message.data(), message.size());
+}
+
+void filament_log_consumer(void* context, const char* message) noexcept {
+    if (message) emit_native_log(*static_cast<const uint32_t*>(context), message, std::strlen(message));
+}
+
+void log_device_info(Engine* engine) noexcept {
+    if (!native_logging_enabled()) return;
+    try {
+        auto* platform = engine->getPlatform();
+        if (!platform) return;
+        auto* driver = const_cast<backend::Driver*>(engine->getDriver());
+        const auto write = [&](backend::Platform::DeviceInfoType type, const char* name) {
+            const auto value = platform->getDeviceInfo(type, driver);
+            const char* text = value.c_str();
+            emit_native_log(HM_LOG_INFORMATION, std::string("deviceInfo.") + name + "=" +
+                    (text && *text ? text : "unavailable"));
+        };
+        emit_native_log(HM_LOG_INFORMATION, "engine.backend=" + std::to_string(static_cast<int>(engine->getBackend())) +
+                " supportedFeatureLevel=" + std::to_string(static_cast<int>(engine->getSupportedFeatureLevel())));
+        if (engine->getBackend() == Engine::Backend::VULKAN) {
+            write(backend::Platform::DeviceInfoType::VULKAN_DEVICE_NAME, "vulkan.deviceName");
+            write(backend::Platform::DeviceInfoType::VULKAN_DRIVER_NAME, "vulkan.driverName");
+            write(backend::Platform::DeviceInfoType::VULKAN_DRIVER_INFO, "vulkan.driverInfo");
+        } else if (engine->getBackend() == Engine::Backend::OPENGL) {
+            write(backend::Platform::DeviceInfoType::OPENGL_RENDERER, "opengl.renderer");
+            write(backend::Platform::DeviceInfoType::OPENGL_VENDOR, "opengl.vendor");
+            write(backend::Platform::DeviceInfoType::OPENGL_VERSION, "opengl.version");
+        }
+    } catch (const std::exception& error) {
+        emit_native_log(HM_LOG_WARNING, error.what(), std::strlen(error.what()));
+    } catch (...) {
+        constexpr char message[] = "Device information could not be queried; renderer configuration is unchanged.";
+        emit_native_log(HM_LOG_WARNING, message, sizeof(message) - 1);
+    }
+}
 
 bool audited_asset(const std::string& digest) {
     static constexpr const char* hashes[] = {
@@ -199,9 +265,12 @@ public:
     }
 
     void fail(const std::string& message) {
-        std::lock_guard lock(mutex);
-        error = message;
-        diagnostics.state = HM_FAILED;
+        {
+            std::lock_guard lock(mutex);
+            error = message;
+            diagnostics.state = HM_FAILED;
+        }
+        emit_native_log(HM_LOG_ERROR, message);
     }
 
     int32_t invoke(std::function<void()> function) {
@@ -244,6 +313,7 @@ public:
         }
         if (diagnostics.backend != diagnostics.requested_backend)
             throw std::runtime_error("Filament did not initialize the explicitly requested backend");
+        log_device_info(engine);
         renderer = engine->createRenderer();
         Renderer::ClearOptions clear{};
         clear.clearColor = {0,0,0,0};
@@ -573,6 +643,25 @@ static_assert(sizeof(hm_diagnostics)==96);
 
 uint32_t HM_CALL hm_get_abi_version(void) { return HM_FILAMENT_ABI_VERSION; }
 
+void HM_CALL hm_set_log_callback(hm_log_callback callback, void* user) {
+    {
+        std::lock_guard lock(log_consumer_mutex);
+        log_consumer = callback;
+        log_consumer_user = user;
+    }
+    auto* consumer = callback ? filament_log_consumer : nullptr;
+    // These are the APIs provided by the pinned ea31afe utils::ostream, not a newer Engine Builder API.
+    utils::slog.d.setConsumer(consumer, const_cast<uint32_t*>(&stream_levels[0]));
+    utils::slog.e.setConsumer(consumer, const_cast<uint32_t*>(&stream_levels[1]));
+    utils::slog.w.setConsumer(consumer, const_cast<uint32_t*>(&stream_levels[2]));
+    utils::slog.i.setConsumer(consumer, const_cast<uint32_t*>(&stream_levels[3]));
+    utils::slog.v.setConsumer(consumer, const_cast<uint32_t*>(&stream_levels[4]));
+    if (callback) {
+        constexpr char message[] = "Filament native logging attached (ABI 2)";
+        emit_native_log(HM_LOG_DEBUG, message, sizeof(message) - 1);
+    }
+}
+
 int32_t HM_CALL hm_create(const hm_create_options* options,hm_renderer** output) {
     if(!output)return HM_INVALID_ARGUMENT;
     *output=nullptr;creation_error.clear();
@@ -597,8 +686,8 @@ int32_t HM_CALL hm_create(const hm_create_options* options,hm_renderer** output)
         const auto result=ready.get();
         if(result!=HM_OK){creation_error=state->error;return result;}
         *output=handle.release();return HM_OK;
-    }catch(const std::exception& ex){creation_error=ex.what();return HM_NATIVE_ERROR;}
-     catch(...){creation_error="Native renderer creation failed";return HM_NATIVE_ERROR;}
+    }catch(const std::exception& ex){creation_error=ex.what();emit_native_log(HM_LOG_ERROR,creation_error);return HM_NATIVE_ERROR;}
+     catch(...){creation_error="Native renderer creation failed";emit_native_log(HM_LOG_ERROR,creation_error);return HM_NATIVE_ERROR;}
 }
 
 int32_t HM_CALL hm_load_model(hm_renderer* handle,const void* bytes,uint64_t length,const char* expected) {

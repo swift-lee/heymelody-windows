@@ -2,6 +2,8 @@ using System.Text.Json;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Windows;
 
+using HeyMelody.Diagnostics;
+
 namespace HeyMelodyWindows.Host;
 
 internal sealed record BroadcastObservation(string ProductId, CaseLidState Lid, EarbudPlacement Left,
@@ -82,6 +84,7 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
         _workerFactory = workerFactory ?? (() => new PeerWorker());
         _resources = resources ?? (workerFactory is null ? new(bundleDirectory: BundleDirectory(AppContext.BaseDirectory)) : null);
         _time = time ?? TimeProvider.System;
+        DiagnosticLog.Info("host.lifecycle", "supervisorCreated", "Backend supervisor created", new { InstanceId });
         try { _allowed = _whitelist.Load(); }
         catch (InvalidDataException) { _catalogWarning = "设备选择记录已损坏，请重新选择并保存。"; }
     }
@@ -119,7 +122,8 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
         lock (_sync)
         {
             var result = new BackendSubscription { BackendInstanceId = InstanceId, Catalog = CatalogLocked(),
-                Devices = DevicesLocked(), Snapshots = _peers.Values.Where(p => p.Present && p.Allowed).Select(p => Copy(p.Published)).ToArray() };
+                Devices = DevicesLocked(), Snapshots = _peers.Values.Where(p => p.Present && p.Allowed).Select(p => Copy(p.Published)).ToArray(),
+                DiagnosticFailures = DiagnosticFailuresLocked() };
             atomicReply?.Invoke(result); return result;
         }
     }
@@ -257,6 +261,8 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
         }
         try
         {
+            DiagnosticLog.Info("host.connection", "initialize", "Initializing peer worker",
+                new { peer.Identity, generation, peer.Candidate });
             lock (_sync)
             {
                 if (peer.Generation != generation || !ReferenceEquals(peer.Worker, worker)) return;
@@ -321,6 +327,8 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
     private void WorkerFailedLocked(Peer peer, long generation, UiSnapshot? failureSnapshot = null)
     {
         if (peer.Generation != generation || peer.Paused || _stopping) return;
+        DiagnosticLog.Warning("host.connection", "workerFailed", "Peer worker became unavailable", data:
+            new { peer.Identity, generation, failureSnapshot });
         // Keep only the safe diagnostic, never the retired transport's state or permissions.
         // Initialization responses can arrive before their snapshot events.
         var failed = failureSnapshot ?? peer.Spp;
@@ -512,7 +520,10 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
     }
 
     public void ReportHealth(string message)
-    { lock (_sync) EmitLocked(new() { Kind = "health", Message = message }); }
+    {
+        DiagnosticLog.Warning("host.health", "message", message);
+        lock (_sync) EmitLocked(new() { Kind = "health", Message = message });
+    }
 
     public void SetRadioAvailable(bool available) => SetEnvironment(available, null);
     public void SetSuspended(bool suspended)
@@ -688,6 +699,7 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        DiagnosticLog.Info("host.lifecycle", "dispose", "Disposing backend supervisor", new { InstanceId });
         List<IPeerWorker> workers;
         lock (_sync)
         {
@@ -699,11 +711,16 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
             _lifetime.Cancel();
         }
         try { foreach (var worker in workers) await worker.DisposeAsync(); }
-        finally { await _deviceState.FlushAsync(); DisposeResources(); }
+        finally
+        {
+            try { await _deviceState.FlushAsync(); DisposeResources(); }
+            finally { DetachDiagnostics(); }
+        }
     }
 
     public async Task StopGracefullyAsync()
     {
+        DiagnosticLog.Info("host.lifecycle", "stop", "Stopping connected devices and calibrations", new { InstanceId });
         Peer[] peers;
         lock (_sync) { _stopping = true; peers = _peers.Values.ToArray(); }
         await CancelAllCalibrationsAsync();

@@ -13,6 +13,7 @@ using HeyMelody.Rendering.Filament;
 using HeyMelodyWindows.App;
 
 if (ProcessLifetimeTests.TryRunHelper(args, out var helperExit)) return helperExit;
+if (args is ["--diagnostic-settings-tests"]) return DiagnosticSettingsTests.Run();
 
 if (args is ["--smooth-scroll-tests"]) return SmoothScrollingTests.Run();
 

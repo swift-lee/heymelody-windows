@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.Windows;
 
@@ -24,6 +25,7 @@ public static class WindowsBluetooth
     /// This synchronous native operation has no absolute time bound; supervise the caller process.</summary>
     public static unsafe IReadOnlyList<BluetoothCandidate> EnumeratePaired()
     {
+        DiagnosticLog.Debug("Windows.Bluetooth", "devices.enumeration-started", "Enumerating cached authenticated or remembered Bluetooth devices without inquiry.");
         Native.RequireWindows();
         var search = new Native.BluetoothSearch
         {
@@ -35,7 +37,9 @@ public static class WindowsBluetooth
         if (handle == 0)
         {
             if (firstError == 259) return Array.Empty<BluetoothCandidate>();
-            throw new Win32Exception(firstError, "Bluetooth device enumeration failed.");
+            var failure = new Win32Exception(firstError, "Bluetooth device enumeration failed.");
+            DiagnosticLog.Error("Windows.Bluetooth", "devices.enumeration-failed", "Bluetooth enumeration could not start.", failure);
+            throw failure;
         }
         try
         {
@@ -56,9 +60,12 @@ public static class WindowsBluetooth
                 var error = found ? 0 : Marshal.GetLastPInvokeError();
                 if (found) continue;
                 if (error != 259) throw new Win32Exception(error, "Bluetooth device enumeration failed.");
-                return result.Values.OrderBy(x => x.Address).ToArray();
+                var devices = result.Values.OrderBy(x => x.Address).ToArray();
+                DiagnosticLog.Debug("Windows.Bluetooth", "devices.enumerated", "Enumerated the cached Bluetooth candidates.", devices);
+                return devices;
             }
         }
+        catch (Exception error) { DiagnosticLog.Error("Windows.Bluetooth", "devices.enumeration-failed", "Bluetooth enumeration failed.", error); throw; }
         finally { Native.BluetoothFindDeviceClose(handle); }
     }
 }

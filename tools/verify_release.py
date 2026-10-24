@@ -61,6 +61,9 @@ def verify_filament(directory, rid, require_current=False, check_managed=True):
     assert rid in machines, "Unsupported Windows Filament runtime"
     for name in ([library, probe] if current else [library]):
         assert PE(runtime_file(name)).machine == machines[rid], "Filament PE architecture does not match its RID"
+    if require_current or manifest.get("logCallbackExport") is not None:
+        assert manifest.get("logCallbackExport") == "hm_set_log_callback", "Missing Filament diagnostic callback declaration"
+        assert "hm_set_log_callback" in PE(runtime_file(library)).exports(), "Missing Filament diagnostic callback export"
     if check_managed:
         checked_file(directory, "HeyMelody.Rendering.Filament.dll")
     assert not (directory / "Ava3D.dll").exists()
@@ -89,6 +92,7 @@ class PE:
         magic = struct.unpack_from("<H", self.data, optional)[0]
         directories = optional + {0x10b: 96, 0x20b: 112}[magic]
         self.resources, _ = struct.unpack_from("<II", self.data, directories + 16)
+        self.export_rva, _ = struct.unpack_from("<II", self.data, directories)
         self.sections = []
         for index in range(count):
             entry = optional + optional_size + 40 * index
@@ -102,6 +106,23 @@ class PE:
                 if offset + size <= len(self.data):
                     return offset
         raise ValueError("PE RVA outside file data")
+
+    def exports(self):
+        if not self.export_rva:
+            return set()
+        directory = self.offset(self.export_rva, 40)
+        count = struct.unpack_from("<I", self.data, directory + 24)[0]
+        assert count <= 16384, "Invalid export name count"
+        names_rva = struct.unpack_from("<I", self.data, directory + 32)[0]
+        names = self.offset(names_rva, count * 4)
+        result = set()
+        for index in range(count):
+            name_rva = struct.unpack_from("<I", self.data, names + index * 4)[0]
+            start = self.offset(name_rva, 1)
+            end = self.data.find(b"\0", start, min(len(self.data), start + 512))
+            assert end >= 0, "Invalid PE export name"
+            result.add(self.data[start:end].decode("ascii"))
+        return result
 
     def icons(self):
         root = self.offset(self.resources, 16)
@@ -222,6 +243,12 @@ def verify(root, package, evidence=None, architectures=("x64", "x86", "arm64")):
         gui, host = folder / "HeyMelody.exe", folder / "backend" / "HeyMelody.Host.exe"
         manager = checked_file(folder, "HeyMelody.DeviceManager.exe")
         gui_assembly = checked_file(folder, "HeyMelody.dll")
+        if manifest.get("diagnosticLogging") == "one-host-session-debug-jsonl-v1":
+            assert sha(checked_file(folder, "HeyMelody.Diagnostics.dll")) == declared[arch]["guiDiagnosticsSha256"]
+            assert sha(checked_file(host.parent, "HeyMelody.Diagnostics.dll")) == declared[arch]["hostDiagnosticsSha256"]
+            for entry in ("HeyMelody", "HeyMelody.DeviceManager", "HeyMelody.FitTest", "HeyMelody.HearingSetup", "backend/HeyMelody.Host"):
+                entry_deps = json.loads(checked_file(folder, entry + ".deps.json").read_text(encoding="utf-8-sig"))
+                assert sum(name.startswith("HeyMelody.Diagnostics/") for name in entry_deps["libraries"]) == 1, entry
         components = [checked_file(folder, name + ".exe") for name in ("HeyMelody.FitTest", "HeyMelody.HearingSetup")] if resource_release else []
         native = [directory / filename for directory in (folder, host.parent)
                   for filename in ("libSkiaSharp.dll", "libHarfBuzzSharp.dll", "av_libglesv2.dll")]
@@ -266,7 +293,8 @@ def verify(root, package, evidence=None, architectures=("x64", "x86", "arm64")):
         if manifest.get("modelRenderer") == "Filament" or (folder / "HeyMelody.Rendering.Filament.dll").exists():
             assert manifest.get("modelRenderer") == "Filament", "Missing release renderer declaration"
             assert not renderer_packages, "Ava3D dependency remains in Filament release"
-            renderer = verify_filament(folder, "win-" + arch)
+            renderer = verify_filament(folder, "win-" + arch,
+                                       require_current=manifest.get("diagnosticLogging") == "one-host-session-debug-jsonl-v1")
             declared_renderer = declared[arch]["modelRenderer"]
             assert declared_renderer["success"] and declared_renderer["sha256"] == renderer["sha256"]
             assert declared_renderer["manifestSha256"] == renderer["manifestSha256"]

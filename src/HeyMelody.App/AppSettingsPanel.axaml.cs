@@ -21,6 +21,7 @@ public partial class AppSettingsPanel : UserControl
     public AppSettingsPanel()
     {
         InitializeComponent();
+        InitializeDiagnosticSettings();
         UiBasicRenderCard.IsVisible = OperatingSystem.IsWindows();
         UiBasicRenderSwitch.IsChecked = ThemePreferences.LoadUiBasicRenderMode();
         ModelCompatibilityCard.IsVisible = !OperatingSystem.IsMacOS();

@@ -1,4 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><PlatformTarget>AnyCPU</PlatformTarget></PropertyGroup>
   <ItemGroup><ProjectReference Include="../HeyMelody.Control/HeyMelody.Control.csproj" /><ProjectReference Include="../HeyMelody.Calibration/HeyMelody.Calibration.csproj" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="../HeyMelody.Diagnostics/HeyMelody.Diagnostics.csproj" /></ItemGroup>
 </Project>

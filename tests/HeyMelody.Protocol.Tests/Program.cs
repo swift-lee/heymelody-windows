@@ -2,6 +2,12 @@ using HeyMelodyWindows.Protocol;
 using System.Text;
 using System.Text.Json;
 
+if (args.Contains("--diagnostics-tests"))
+{
+    Console.WriteLine($"{DiagnosticLoggingTests.Run()} protocol diagnostic tests passed.");
+    return;
+}
+
 int passed = 0;
 void Check(bool condition) { if (!condition) throw new Exception("Offline assertion failed."); }
 void Test(string name, Action test) { test(); passed++; Console.WriteLine("PASS " + name); }

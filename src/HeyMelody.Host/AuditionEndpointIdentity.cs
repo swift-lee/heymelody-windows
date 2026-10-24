@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using HeyMelody.Diagnostics;
 using static HeyMelodyWindows.Host.WasapiNative;
 
 namespace HeyMelodyWindows.Host;
@@ -22,6 +23,8 @@ internal sealed class EndpointTrace
     internal bool Failed(int hr)
     {
         if (hr >= 0) return false;
+        DiagnosticLog.Debug("host.audio", "endpointNativeFailure", "WASAPI endpoint identity query returned a failing HRESULT",
+            new { Phase, Attempts, hresult = hr, hresultHex = $"0x{hr:X8}" });
         LastNativeFailurePhase = Phase; LastNativeFailureHResult = hr; return true;
     }
 }
@@ -39,14 +42,25 @@ internal static class EndpointIdentity
             try { return resolve(); }
             catch (EndpointMatchException e) when (e.MatchCount == 0 && attempt < 3)
             {
+                DiagnosticLog.Debug("host.audio", "endpointRetry", "No exact audition endpoint yet; retrying identity lookup",
+                    new { attempt, e.EndpointCount, e.MatchCount });
                 if (wait is not null) wait(token);
                 else if (token.WaitHandle.WaitOne(250)) token.ThrowIfCancellationRequested();
             }
             catch (COMException e) when (attempt < 3 && e.HResult is unchecked((int)0x88890004) or unchecked((int)0x80070490))
             {
+                DiagnosticLog.Debug("host.audio", "endpointRetry", "Audition endpoint changed during identity lookup",
+                    new { attempt, trace.Phase, e.HResult, e.Message });
                 // AUDCLNT_E_DEVICE_INVALIDATED or HRESULT_FROM_WIN32(ERROR_NOT_FOUND).
                 if (wait is not null) wait(token);
                 else if (token.WaitHandle.WaitOne(250)) token.ThrowIfCancellationRequested();
+            }
+            catch (Exception error)
+            {
+                DiagnosticLog.Debug("host.audio", "endpointResolutionFailed", "Audition endpoint identity lookup failed",
+                    new { trace.Phase, trace.Attempts, trace.EndpointCount, trace.MatchCount,
+                        trace.LastNativeFailurePhase, trace.LastNativeFailureHResult, error.HResult, error.Message });
+                throw;
             }
         }
     }

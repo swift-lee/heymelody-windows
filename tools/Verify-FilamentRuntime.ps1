@@ -14,10 +14,12 @@ $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $expectedCommit = 'ea31afeaf66339e7414aa648aa76c7e61adbde28'
 $current = $manifest.schemaVersion -eq 2 -and $manifest.abiVersion -eq 2
 $legacy = $manifest.schemaVersion -eq 1 -and $manifest.abiVersion -eq 1
+$hasLogCallback = $manifest.PSObject.Properties.Name -ccontains 'logCallbackExport' -and $manifest.logCallbackExport -ceq 'hm_set_log_callback'
 if ((-not $current -and -not $legacy) -or ($RequireCurrent -and -not $current) -or
     $manifest.filamentCommit -ne $expectedCommit -or $manifest.rid -ne $RuntimeIdentifier) {
     throw 'Filament runtime schema, ABI, source commit or RID does not match this build.'
 }
+if ($RequireCurrent -and -not $hasLogCallback) { throw 'The current Filament runtime must declare its required native log callback export.' }
 $libraryName = if ($RuntimeIdentifier.StartsWith('win-')) { 'HeyMelody.Filament.Native.dll' } elseif ($RuntimeIdentifier.StartsWith('osx-')) { 'libHeyMelody.Filament.Native.dylib' } else { 'libHeyMelody.Filament.Native.so' }
 $probeName = if ($RuntimeIdentifier.StartsWith('win-')) { 'hm_filament_probe.exe' } else { 'hm_filament_probe' }
 $expectedBackends = @(if ($RuntimeIdentifier.StartsWith('osx-')) { 'Metal' } else { 'Vulkan'; 'OpenGL' })
@@ -95,9 +97,53 @@ function Assert-NativeArchitecture([string]$Path) {
         }
     } finally { $reader.Dispose() }
 }
+function Assert-NativeLogExport([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    $pe = $null
+    $reader = $null
+    try {
+        $pe = [Reflection.PortableExecutable.PEReader]::new($stream)
+        function Resolve-ExportRva([long]$Rva) {
+            foreach ($section in $pe.PEHeaders.SectionHeaders) {
+                if ($Rva -ge $section.VirtualAddress -and
+                    $Rva -lt $section.VirtualAddress + [Math]::Max($section.VirtualSize, $section.SizeOfRawData)) {
+                    return [long]$section.PointerToRawData + $Rva - $section.VirtualAddress
+                }
+            }
+            throw 'Filament export RVA is outside its PE sections.'
+        }
+        $directory = $pe.PEHeaders.PEHeader.ExportTableDirectory
+        if ($directory.RelativeVirtualAddress -le 0) { throw 'Filament PE export directory is missing.' }
+        $reader = [IO.BinaryReader]::new($stream, [Text.Encoding]::UTF8, $true)
+        $reader.BaseStream.Position = (Resolve-ExportRva $directory.RelativeVirtualAddress) + 24
+        $count = $reader.ReadUInt32()
+        [void]$reader.ReadUInt32()
+        $namesRva = $reader.ReadUInt32()
+        if ($count -eq 0 -or $count -gt 65536 -or $namesRva -eq 0) { throw 'Invalid Filament PE exports.' }
+        $namesOffset = Resolve-ExportRva $namesRva
+        for ($index = 0; $index -lt $count; $index++) {
+            $reader.BaseStream.Position = $namesOffset + $index * 4
+            $nameRva = $reader.ReadUInt32()
+            $reader.BaseStream.Position = Resolve-ExportRva $nameRva
+            $bytes = [Collections.Generic.List[byte]]::new()
+            while ($reader.BaseStream.Position -lt $stream.Length -and $bytes.Count -lt 256) {
+                $value = $reader.ReadByte()
+                if ($value -eq 0) { break }
+                $bytes.Add($value)
+            }
+            if ([Text.Encoding]::ASCII.GetString($bytes.ToArray()) -ceq 'hm_set_log_callback') { return }
+        }
+        throw 'Filament runtime does not export hm_set_log_callback.'
+    } finally {
+        if ($null -ne $reader) { $reader.Dispose() }
+        if ($null -ne $pe) { $pe.Dispose() }
+        $stream.Dispose()
+    }
+}
 $libraryPath = Join-Path $runtimeDirectory $libraryName
 Assert-NativeArchitecture $libraryPath
 if ($current) { Assert-NativeArchitecture (Join-Path $runtimeDirectory $probeName) }
+if ($hasLogCallback -and $RuntimeIdentifier.StartsWith('win-')) { Assert-NativeLogExport $libraryPath }
 $result = [ordered]@{
     success = $true; schemaVersion = $manifest.schemaVersion; rid = $RuntimeIdentifier; abiVersion = $manifest.abiVersion
     filamentCommit = $manifest.filamentCommit; library = $libraryName
@@ -110,5 +156,7 @@ if ($current) {
     $result.probe = $probeName
     $result.probeSha256 = (Get-FileHash -LiteralPath (Join-Path $runtimeDirectory $probeName) -Algorithm SHA256).Hash.ToLowerInvariant()
     $result.materials = $manifest.materials
+    $result.logCallbackExport = if ($hasLogCallback) { 'hm_set_log_callback' } else { $null }
+    $result.logCallbackExportVerified = $hasLogCallback -and $RuntimeIdentifier.StartsWith('win-')
 } else { $result.backend = $manifest.backend }
 $result

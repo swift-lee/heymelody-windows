@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using HeyMelody.Diagnostics;
 using HeyMelodyWindows.App;
 
 namespace HeyMelodyWindows.Host;
@@ -27,6 +28,7 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
 
     public void Start()
     {
+        DiagnosticLog.Info("host.ipc", "start", "Starting the shared backend pipe", new { pipeName = pipeName ?? BackendEndpoint.PipeName });
         supervisor.EventPublished += Broadcast;
         supervisor.CalibrationOwnerEventPublished += SendOwnerEvent;
         _accept = AcceptAsync();
@@ -45,6 +47,7 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
                     if (!IsLocalSession(pipe)) { pipe.Dispose(); continue; }
                     if (_clients.Count >= 16) { pipe.Dispose(); continue; }
                     var client = new Client(pipe, this);
+                    DiagnosticLog.Info("host.ipc", "connected", "Client connected", new { client.Key });
                     _clients[client.Key] = client;
                     if (energy is not null) client.LapseUnsubscribedAfter(energy.Time, SubscribeGrace, UpdateGuiCount);
                     UpdateGuiCount();
@@ -90,6 +93,8 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
 
     private async Task HandleAsync(Client client, BackendRequest request)
     {
+        using var operation = DiagnosticLog.BeginOperation(request.DiagnosticCorrelationId);
+        DiagnosticLog.Info("host.ipc", "request", "Dispatching client RPC", new { client.Key, request });
         if (request.SchemaVersion != 4)
         { client.Reply(request.Id, null, "versionMismatch", "前后端版本不一致，请重启软件或重新安装。"); return; }
         if (request.Operation.Length is 0 or > 32)
@@ -166,6 +171,8 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
         catch (OperationCanceledException) { client.Reply(request.Id, null, "cancelled", "操作已取消。"); }
         catch (Exception error)
         {
+            DiagnosticLog.Error("host.ipc", "operationFailed", "Backend operation failed", error,
+                new { client.Key, request.Id, request.Operation });
             // Do not forward native exceptions, addresses or arbitrary peer-provided text.
             var message = error is InvalidOperationException && error.Message.Length <= 180
                 ? error.Message : "后台操作未完成，请检查蓝牙状态后重试。";
@@ -192,10 +199,19 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
             _pendingActivation = true;
             if (!allowLaunch || _mainLaunch is { HasExited: false }) return;
             _mainLaunch?.Dispose();
-            var start = MainStartInfo();
-            // The window inherits this process's priority class: leave Eco before it starts, then pin Normal in case the class stuck.
-            HostEnergy.Controller?.PrepareLaunch();
-            _mainLaunch = Process.Start(start);
+            try
+            {
+                var start = MainStartInfo();
+                DiagnosticLog.Debug("host.lifecycle", "mainLaunching", "Launching the main GUI", new { start.FileName, start.WorkingDirectory });
+                // The window inherits this process's priority class: leave Eco before it starts, then pin Normal in case the class stuck.
+                HostEnergy.Controller?.PrepareLaunch();
+                _mainLaunch = Process.Start(start);
+            }
+            catch (Exception error)
+            {
+                DiagnosticLog.Error("host.lifecycle", "mainLaunchFailed", "The tray could not launch the main GUI", error);
+                throw;
+            }
             try { if (_mainLaunch is not null) _mainLaunch.PriorityClass = ProcessPriorityClass.Normal; } catch { }
         }
     }
@@ -217,6 +233,7 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
     public async Task RequestExitAsync()
     {
         if (!await _exitGate.WaitAsync(0)) return;
+        DiagnosticLog.Info("host.lifecycle", "exitRequested", "Host exit requested");
         try
         {
             Client[] main;
@@ -237,7 +254,11 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
             }
             catch (Exception) { approved = false; }
             if (!approved)
-            { Broadcast(new() { Kind = "exitCancelled", BackendInstanceId = supervisor.InstanceId, ExitRequestId = id, Message = "退出已取消。" }); return; }
+            {
+                DiagnosticLog.Info("host.lifecycle", "exitCancelled", "Host exit was cancelled", new { id });
+                Broadcast(new() { Kind = "exitCancelled", BackendInstanceId = supervisor.InstanceId, ExitRequestId = id, Message = "退出已取消。" }); return;
+            }
+            DiagnosticLog.Info("host.lifecycle", "exitApproved", "Host exit approved", new { id });
             Broadcast(new() { Kind = "stopping", BackendInstanceId = supervisor.InstanceId });
             await supervisor.StopGracefullyAsync();
             if (ExitApproved is { } onExit) await onExit();
@@ -247,6 +268,7 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
 
     private void Detach(Client client)
     {
+        DiagnosticLog.Info("host.ipc", "disconnected", "Client disconnected", new { client.Key, client.Role });
         _clients.TryRemove(client.Key, out _);
         UpdateGuiCount();
         supervisor.ClientDetached(client.Key);
@@ -264,6 +286,7 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
     // An event with its wire line, serialized by whichever client writes it first. The event is never mutated once published.
     internal sealed class Outbound
     {
+        internal string? DiagnosticCorrelationId { get; } = DiagnosticLog.CurrentCorrelationId;
         private readonly BackendMessage _message;
         private string? _line;
         internal Outbound(BackendMessage message) => _message = message;
@@ -341,19 +364,25 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
                 long lastId = 0;
                 while (await lines.ReadLineAsync(Lifetime.Token) is { } line)
                 {
+                    DiagnosticLog.Info("host.ipc", "receive", "Received client RPC record", new { client = Key, line });
                     var request = JsonSerializer.Deserialize<BackendRequest>(line, RpcWire.Json) ?? throw new InvalidDataException();
                     if (request.Id <= lastId) throw new InvalidDataException(); lastId = request.Id;
                     if (!_dispatch.Wait(0)) throw new InvalidDataException("Too many outstanding requests.");
                     _ = DispatchAsync(request);
                 }
             }
-            catch (Exception) { }
+            catch (Exception failure)
+            { DiagnosticLog.Warning("host.ipc", "receiveEnded", "Client receive channel ended", failure, new { client = Key }); }
             finally { Dispose(); owner.Detach(this); try { await output; } catch { } }
         }
         private async Task DispatchAsync(BackendRequest request)
         {
             try { await owner.HandleAsync(this, request); }
-            catch (Exception) { Reply(request.Id, null, "operationFailed", "后台操作未完成。"); }
+            catch (Exception failure)
+            {
+                DiagnosticLog.Error("host.ipc", "dispatchFailed", "Client RPC dispatch failed", failure, new { client = Key, request.Id });
+                Reply(request.Id, null, "operationFailed", "后台操作未完成。");
+            }
             finally { _dispatch.Release(); }
         }
         private async Task OutputAsync(StreamWriter writer)
@@ -369,10 +398,16 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
                     foreach (var message in updates) await WriteAsync(message);
                 }
             }
-            catch (Exception) { Dispose(); }
+            catch (Exception failure)
+            {
+                DiagnosticLog.Warning("host.ipc", "sendEnded", "Client send channel ended", failure, new { client = Key });
+                Dispose();
+            }
             async Task WriteAsync(Outbound message)
             {
+                using var operation = message.DiagnosticCorrelationId is { } id ? DiagnosticLog.BeginOperation(id) : null;
                 var line = message.Line();
+                DiagnosticLog.Info("host.ipc", "send", "Sending backend RPC record", new { client = Key, line });
                 if (line.Length > RpcWire.MaximumLineCharacters) throw new InvalidDataException();
                 using var budget = CancellationTokenSource.CreateLinkedTokenSource(Lifetime.Token);
                 budget.CancelAfter(TimeSpan.FromSeconds(10));

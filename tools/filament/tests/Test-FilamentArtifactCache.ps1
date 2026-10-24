@@ -53,12 +53,37 @@ function New-SourceFixture([string]$Root) {
 }
 
 function New-PeFixture([string]$Path, [string]$RuntimeIdentifier) {
-    # Header-only files are never executed. The production verifier checks their RID.
-    $bytes = [byte[]]::new(128)
+    # Metadata-only PE32+ files are never executed. Include the one required diagnostic export.
+    $bytes = [byte[]]::new(1024)
     $bytes[0] = 0x4d; $bytes[1] = 0x5a; $bytes[0x3c] = 0x40
     $bytes[0x40] = 0x50; $bytes[0x41] = 0x45
     if ($RuntimeIdentifier -eq 'win-arm64') { $bytes[0x44] = 0x64; $bytes[0x45] = 0xaa }
     else { $bytes[0x44] = 0x64; $bytes[0x45] = 0x86 }
+    [BitConverter]::GetBytes([uint16]1).CopyTo($bytes, 0x46)
+    [BitConverter]::GetBytes([uint16]0xf0).CopyTo($bytes, 0x54)
+    [BitConverter]::GetBytes([uint16]0x2022).CopyTo($bytes, 0x56)
+    [BitConverter]::GetBytes([uint16]0x20b).CopyTo($bytes, 0x58)
+    [BitConverter]::GetBytes([uint32]0x1000).CopyTo($bytes, 0x78)
+    [BitConverter]::GetBytes([uint32]0x200).CopyTo($bytes, 0x7c)
+    [BitConverter]::GetBytes([uint32]0x2000).CopyTo($bytes, 0x90)
+    [BitConverter]::GetBytes([uint32]0x200).CopyTo($bytes, 0x94)
+    [BitConverter]::GetBytes([uint32]16).CopyTo($bytes, 0xc4)
+    [BitConverter]::GetBytes([uint32]0x1000).CopyTo($bytes, 0xc8)
+    [BitConverter]::GetBytes([uint32]0x100).CopyTo($bytes, 0xcc)
+    [Text.Encoding]::ASCII.GetBytes('.edata').CopyTo($bytes, 0x148)
+    [BitConverter]::GetBytes([uint32]0x200).CopyTo($bytes, 0x150)
+    [BitConverter]::GetBytes([uint32]0x1000).CopyTo($bytes, 0x154)
+    [BitConverter]::GetBytes([uint32]0x200).CopyTo($bytes, 0x158)
+    [BitConverter]::GetBytes([uint32]0x200).CopyTo($bytes, 0x15c)
+    [BitConverter]::GetBytes([uint32]0x40000040).CopyTo($bytes, 0x16c)
+    [BitConverter]::GetBytes([uint32]1).CopyTo($bytes, 0x214)
+    [BitConverter]::GetBytes([uint32]1).CopyTo($bytes, 0x218)
+    [BitConverter]::GetBytes([uint32]0x1030).CopyTo($bytes, 0x21c)
+    [BitConverter]::GetBytes([uint32]0x1034).CopyTo($bytes, 0x220)
+    [BitConverter]::GetBytes([uint32]0x1038).CopyTo($bytes, 0x224)
+    [BitConverter]::GetBytes([uint32]0x1100).CopyTo($bytes, 0x230)
+    [BitConverter]::GetBytes([uint32]0x1040).CopyTo($bytes, 0x234)
+    [Text.Encoding]::ASCII.GetBytes("hm_set_log_callback`0").CopyTo($bytes, 0x240)
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Path)) | Out-Null
     [IO.File]::WriteAllBytes($Path, $bytes)
 }
@@ -85,6 +110,7 @@ function New-RuntimeFixture([string]$Root, [string]$RuntimeIdentifier, $Toolchai
         schemaVersion = 2; abiVersion = 2; rid = $RuntimeIdentifier
         filamentCommit = 'ea31afeaf66339e7414aa648aa76c7e61adbde28'
         supportedBackends = @('Vulkan', 'OpenGL'); defaultBackend = 'Vulkan'
+        logCallbackExport = 'hm_set_log_callback'
         materials = [ordered]@{ path = 'materials/gltfio.uberz'; sha256 = $materialHash; supportedBackends = @('Vulkan', 'OpenGL') }
         files = $files
     })
@@ -244,6 +270,37 @@ $verify = {
 try {
     New-SourceFixture $source
     $fingerprint = Get-FilamentCacheFingerprint -RepoRoot $source -RuntimeIdentifier win-x64 -ToolchainIdentity $toolchain
+
+    Invoke-Check 'Current runtime requires the explicit log callback declaration' {
+        $root = Join-Path $scratch 'missing-log-declaration'
+        New-RuntimeFixture $root win-x64 $toolchain
+        $path = Join-Path $root 'runtimes/win-x64/native/filament-runtime.json'
+        $manifest = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        $manifest.PSObject.Properties.Remove('logCallbackExport')
+        Write-Json $path $manifest
+        $message = ''
+        try { & $verifier -Directory (Split-Path -Parent $path) -RuntimeIdentifier win-x64 -RequireCurrent | Out-Null }
+        catch { $message = $_.Exception.Message }
+        Assert-True ($message -like '*required native log callback export*') 'Missing logging declaration was not rejected'
+    }
+
+    Invoke-Check 'Log callback declaration cannot replace the actual PE export' {
+        $root = Join-Path $scratch 'missing-log-export'
+        New-RuntimeFixture $root win-arm64 $toolchain
+        $native = Join-Path $root 'runtimes/win-arm64/native'
+        $library = Join-Path $native 'HeyMelody.Filament.Native.dll'
+        $bytes = [IO.File]::ReadAllBytes($library)
+        $bytes[0x240] = [byte][char]'x'
+        [IO.File]::WriteAllBytes($library, $bytes)
+        $path = Join-Path $native 'filament-runtime.json'
+        $manifest = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        ($manifest.files | Where-Object path -CEQ 'HeyMelody.Filament.Native.dll').sha256 = (Get-FileHash -LiteralPath $library).Hash.ToLowerInvariant()
+        Write-Json $path $manifest
+        $message = ''
+        try { & $verifier -Directory $native -RuntimeIdentifier win-arm64 -RequireCurrent | Out-Null }
+        catch { $message = $_.Exception.Message }
+        Assert-True ($message -like '*does not export hm_set_log_callback*') 'A renamed export passed the strict verifier'
+    }
 
     Invoke-Check 'Fingerprint is deterministic and independent of checkout/output location' {
         $other = Join-Path $scratch 'another-checkout'

@@ -263,6 +263,18 @@ foreach ($architecture in $targetArchitectures) {
     Require (@($runtimeVersions | Sort-Object -Unique).Count -eq 1) ('GUI/manager/Host runtime versions differ: ' + $architecture)
 
     $guiDeps = Read-Json (Join-Path $appDirectory 'HeyMelody.deps.json')
+    if ($manifest.diagnosticLogging -eq 'one-host-session-debug-jsonl-v1') {
+        $guiDiagnostics = Checked-File $appDirectory 'HeyMelody.Diagnostics.dll'
+        $hostDiagnostics = Checked-File $hostDirectory 'HeyMelody.Diagnostics.dll'
+        Add-CriticalFile $guiDiagnostics
+        Add-CriticalFile $hostDiagnostics
+        Require ((Hash-File $guiDiagnostics) -eq $build.guiDiagnosticsSha256) ('GUI diagnostics library does not match manifest: ' + $architecture)
+        Require ((Hash-File $hostDiagnostics) -eq $build.hostDiagnosticsSha256) ('Host diagnostics library does not match manifest: ' + $architecture)
+        foreach ($entry in @('HeyMelody', 'HeyMelody.DeviceManager', 'HeyMelody.FitTest', 'HeyMelody.HearingSetup', 'backend/HeyMelody.Host')) {
+            $entryDeps = Read-Json (Join-Path $appDirectory ($entry + '.deps.json'))
+            Require (@($entryDeps.libraries.PSObject.Properties.Name | Where-Object { $_ -like 'HeyMelody.Diagnostics/*' }).Count -eq 1) ('Diagnostic dependency missing: ' + $architecture + '/' + $entry)
+        }
+    }
     $managerDeps = Read-Json (Join-Path $appDirectory 'HeyMelody.DeviceManager.deps.json')
     Require ($guiDeps.runtimeTarget.name -eq $managerDeps.runtimeTarget.name) ('GUI/manager runtime target differs: ' + $architecture)
     $notice = Read-Json (Join-Path $appDirectory 'PACKAGE-NOTICES.json')
@@ -357,7 +369,7 @@ foreach ($architecture in $targetArchitectures) {
     if ($manifest.modelRenderer -eq 'Filament' -or (Test-Path -LiteralPath (Join-Path $appDirectory 'HeyMelody.Rendering.Filament.dll'))) {
         Require ($manifest.modelRenderer -eq 'Filament') 'Filament renderer declaration is absent from the release manifest.'
         Add-CriticalFile (Checked-File $appDirectory 'HeyMelody.Rendering.Filament.dll')
-        $modelRenderer = & (Join-Path $PSScriptRoot 'Verify-FilamentRuntime.ps1') -Directory $appDirectory -RuntimeIdentifier ('win-' + $architecture)
+        $modelRenderer = & (Join-Path $PSScriptRoot 'Verify-FilamentRuntime.ps1') -Directory $appDirectory -RuntimeIdentifier ('win-' + $architecture) -RequireCurrent:($manifest.diagnosticLogging -eq 'one-host-session-debug-jsonl-v1')
         Require ($build[0].modelRenderer.success -and $build[0].modelRenderer.sha256 -eq $modelRenderer.sha256 -and $build[0].modelRenderer.manifestSha256 -eq $modelRenderer.manifestSha256) 'Filament runtime does not match the release manifest.'
         Require ($build[0].modelRenderer.abiVersion -eq $modelRenderer.abiVersion -and $build[0].modelRenderer.filamentCommit -eq $modelRenderer.filamentCommit -and $build[0].modelRenderer.library -eq $modelRenderer.library) 'Filament release metadata does not match its native runtime.'
         if ($modelRenderer.abiVersion -eq 2) {

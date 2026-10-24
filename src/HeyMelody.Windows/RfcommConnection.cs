@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.Windows;
 
@@ -7,6 +8,7 @@ namespace HeyMelodyWindows.Windows;
 public sealed class RfcommConnection : IAsyncDisposable
 {
     private readonly SafeRfcommSocket _socket;
+    private readonly string _diagnosticId = Guid.NewGuid().ToString("N");
     private readonly object _nativeGate = new();
     private readonly SemaphoreSlim _readGate = new(1, 1), _writeGate = new(1, 1);
     private readonly EventWaitHandle _networkEvent = new(false, EventResetMode.ManualReset);
@@ -30,13 +32,19 @@ public sealed class RfcommConnection : IAsyncDisposable
         }
         ArmWait();
     }
-    private void ArmWait() => _registration = ThreadPool.RegisterWaitForSingleObject(_networkEvent,
-        static (state, _) => ((RfcommConnection)state!).OnNetworkEvent(), this, Timeout.Infinite, executeOnlyOnce: true);
+    private void ArmWait()
+    {
+        // Native readiness belongs to the channel lifetime, not the request that happened to create it.
+        using var operation = DiagnosticLog.SuspendOperation();
+        _registration = ThreadPool.RegisterWaitForSingleObject(_networkEvent,
+            static (state, _) => ((RfcommConnection)state!).OnNetworkEvent(), this, Timeout.Infinite, executeOnlyOnce: true);
+    }
 
     /// <summary>Connects once to the explicit SDP-derived Melody channel; never falls back or reconnects.</summary>
     public static Task<RfcommConnection> ConnectAsync(ulong address, Guid serviceId, uint channel, CancellationToken token)
     {
         Native.Validate(address, serviceId);
+        DiagnosticLog.Info("Windows.Bluetooth", "rfcomm.connect.requested", "Connecting to the explicit RFCOMM channel.", new { address = $"{address:X12}", serviceId, channel });
         if (channel is < 1 or > 30) throw new ArgumentOutOfRangeException(nameof(channel));
         return ConnectCoreAsync(address, channel, token);
     }
@@ -48,6 +56,7 @@ public sealed class RfcommConnection : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(serviceIds);
         if (serviceIds.Count == 0) throw new ArgumentException("No control service UUIDs were configured.", nameof(serviceIds));
         foreach (var serviceId in serviceIds) Native.Validate(address, serviceId);
+        DiagnosticLog.Info("Windows.Bluetooth", "rfcomm.control.requested", "Resolving the configured control services.", new { address = $"{address:X12}", serviceIds });
         return ConnectControlCoreAsync(serviceIds, (serviceId, refreshCache) => WindowsSdp.FindServices(address, serviceId, refreshCache),
             (service, connectionToken) => ConnectAsync(address, service.ServiceId, service.Channel, connectionToken), token);
     }
@@ -60,6 +69,7 @@ public sealed class RfcommConnection : IAsyncDisposable
         {
             token.ThrowIfCancellationRequested();
             var services = lookup(serviceId, refreshCache);
+            DiagnosticLog.Debug("Windows.Bluetooth", "sdp.services", "Resolved RFCOMM service records.", new { serviceId, refreshCache, services });
             token.ThrowIfCancellationRequested();
             return services;
         }
@@ -96,10 +106,13 @@ public sealed class RfcommConnection : IAsyncDisposable
             if (!connection.BeginConnect(address, channel))
                 await connection._connectionReady.Task.WaitAsync(token).ConfigureAwait(false);
             token.ThrowIfCancellationRequested(); connection.ThrowIfUnavailable();
+            DiagnosticLog.Info("Windows.Bluetooth", "rfcomm.connected", "The RFCOMM connection is ready.", new { connectionId = connection._diagnosticId, address = $"{address:X12}", channel });
             return connection;
         }
-        catch
+        catch (Exception error)
         {
+            DiagnosticLog.Error("Windows.Bluetooth", "rfcomm.connect.failed", "RFCOMM connection failed.", error,
+                new { connectionId = connection?._diagnosticId, address = $"{address:X12}", channel });
             if (connection is not null) await connection.DisposeAsync(); else socket.Dispose();
             throw;
         }
@@ -146,6 +159,7 @@ public sealed class RfcommConnection : IAsyncDisposable
     }
     private void Fail(Exception failure)
     {
+        DiagnosticLog.Error("Windows.Bluetooth", "rfcomm.failed", "The RFCOMM channel reported a failure.", failure, new { connectionId = _diagnosticId });
         _failure ??= failure;
         _connectionReady.TrySetException(failure);
         _readReady?.TrySetException(failure); _writeReady?.TrySetException(failure);
@@ -182,6 +196,7 @@ public sealed class RfcommConnection : IAsyncDisposable
     {
         using var pinned = bytes.Pin();
         int count = Native.send(_socket.DangerousGetHandle(), (byte*)pinned.Pointer, Math.Min(bytes.Length, 65536), 0);
+        if (count > 0) DiagnosticLog.Bytes("Windows.Bluetooth", "rfcomm.tx", bytes.Span[..count], new { connectionId = _diagnosticId, requestedLength = bytes.Length, sentLength = count });
         if (count < 0)
         {
             int error = Native.WSAGetLastError();
@@ -215,6 +230,8 @@ public sealed class RfcommConnection : IAsyncDisposable
     {
         using var pinned = bytes.Pin();
         int count = Native.recv(_socket.DangerousGetHandle(), (byte*)pinned.Pointer, Math.Min(bytes.Length, 65536), 0);
+        if (count > 0) DiagnosticLog.Bytes("Windows.Bluetooth", "rfcomm.rx", bytes.Span[..count], new { connectionId = _diagnosticId, receivedLength = count });
+        else if (count == 0) DiagnosticLog.Info("Windows.Bluetooth", "rfcomm.eof", "The native receive call returned EOF.", new { connectionId = _diagnosticId });
         if (count < 0)
         {
             int error = Native.WSAGetLastError();
@@ -230,6 +247,7 @@ public sealed class RfcommConnection : IAsyncDisposable
     public ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return ValueTask.CompletedTask;
+        DiagnosticLog.Info("Windows.Bluetooth", "rfcomm.disposing", "Closing the owned RFCOMM socket and network event.", new { connectionId = _diagnosticId, remoteClosed = _remoteClosed });
         lock (_nativeGate)
         {
             _registration?.Unregister(null);

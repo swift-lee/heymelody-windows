@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.App;
 
@@ -11,6 +12,7 @@ public sealed class BackendRequest
     public long Id { get; set; }
     public string Operation { get; set; } = "";
     public string? BackendInstanceId { get; set; }
+    public string? DiagnosticCorrelationId { get; set; }
     public string? Identity { get; set; }
     public long? DeviceGeneration { get; set; }
     public string[]? DeviceIdentities { get; set; }
@@ -37,7 +39,7 @@ public sealed class BackendMessage
 
 public sealed class BackendEvent
 {
-    // catalog | snapshot | caseOpen | health | activate | requestExit | exitCancelled | stopping | unavailable
+    // catalog | snapshot | caseOpen | health | diagnosticFailure | activate | requestExit | exitCancelled | stopping | unavailable
     public string Kind { get; set; } = "";
     public string BackendInstanceId { get; set; } = "";
     public UiSnapshot? Snapshot { get; set; }
@@ -45,6 +47,7 @@ public sealed class BackendEvent
     public IReadOnlyList<UiDevice>? Devices { get; set; }
     public string? ExitRequestId { get; set; }
     public string? Message { get; set; }
+    public DiagnosticFailure? DiagnosticFailure { get; set; }
     public bool FirstObservation { get; set; }
     public UiCalibrationState? Calibration { get; set; }
     public UiCalibrationSpectrum? CalibrationSpectrum { get; set; }
@@ -58,6 +61,7 @@ public sealed class BackendSubscription
     public UiDeviceCatalog Catalog { get; set; } = new([]);
     public IReadOnlyList<UiDevice> Devices { get; set; } = [];
     public IReadOnlyList<UiSnapshot> Snapshots { get; set; } = [];
+    public IReadOnlyList<DiagnosticFailure> DiagnosticFailures { get; set; } = [];
 }
 
 // Typed Action/Data payloads; property names and order match the anonymous objects they replaced.

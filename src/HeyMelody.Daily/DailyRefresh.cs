@@ -2,6 +2,8 @@ using HeyMelodyWindows.Devices;
 using HeyMelodyWindows.Protocol;
 using HeyMelodyWindows.Control;
 
+using HeyMelody.Diagnostics;
+
 namespace HeyMelodyWindows.Daily;
 
 public sealed partial class DailyClient
@@ -136,14 +138,19 @@ public sealed partial class DailyClient
             catch (Exception) when (_calibrationActive) { throw; }
             catch (Exception ex) when (!token.IsCancellationRequested)
             {
+                DiagnosticLog.Error("Daily", "refresh.failed", "A daily refresh attempt failed.", ex, new { phase, attempt, scope, verifiedIdentity });
                 failure = DescribeReadFailure(ex, phase);
                 if (attempt == 0 && verifiedIdentity is not null && ex is DailyReadException read && read.CanRecoverCodec)
+                {
+                    DiagnosticLog.Warning("Daily", "codec.recovery-planned", "The codec query qualifies for one fresh verified read without repeating the codec query.", ex,
+                        new { phase, attempt, scope, verifiedIdentity, read.Reason });
                     codecRecovery = new(verifiedIdentity,
                         $"音频编码查询 0x0114 暂不可用（{read.Reason}），已跳过该查询；其他功能按各自能力和状态使用。重新连接可重试。");
+                }
                 await DropSessionAsync();
                 if (attempt == 0) continue;
             }
-            catch (Exception) { failure = "设备状态读取已取消"; await DropSessionAsync(); break; }
+            catch (Exception error) { DiagnosticLog.Warning("Daily", "refresh.cancelled", "The daily refresh was cancelled.", error, new { phase, attempt, scope }); failure = "设备状态读取已取消"; await DropSessionAsync(); break; }
         }
         return PublishReadFailure(failure);
     }
@@ -269,7 +276,12 @@ public sealed partial class DailyClient
             if (payload is null) return;
             try { parse(payload); }
             catch (Exception ex) when (ex is FormatException or ArgumentException or OverflowException)
-            { s.Warnings.Add($"查询 0x{command:X4} 的布局未通过校验，状态保留未知。"); }
+            {
+                DiagnosticLog.Bytes("Daily", "query.invalid-fields.payload", payload, new { command = $"0x{command:X4}", scope });
+                DiagnosticLog.Error("Daily", "query.invalid-fields", "The decoded response fields did not pass their query parser.", ex,
+                    new { command = $"0x{command:X4}", scope, payloadLength = payload.Length });
+                s.Warnings.Add($"查询 0x{command:X4} 的布局未通过校验，状态保留未知。");
+            }
         }
         switch (scope)
         {

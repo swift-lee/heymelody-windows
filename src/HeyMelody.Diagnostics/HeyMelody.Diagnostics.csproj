@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="HeyMelody.Diagnostics.Tests" />
+    <InternalsVisibleTo Include="HeyMelody.Host.Tests" />
+    <InternalsVisibleTo Include="HeyMelody.Client.Tests" />
+    <InternalsVisibleTo Include="HeyMelody.App.Tests" />
+    <InternalsVisibleTo Include="HeyMelody.Protocol.Tests" />
+    <InternalsVisibleTo Include="HeyMelody.Daily.Tests" />
+    <InternalsVisibleTo Include="HeyMelody.Rendering.Filament.Tests" />
+  </ItemGroup>
+</Project>

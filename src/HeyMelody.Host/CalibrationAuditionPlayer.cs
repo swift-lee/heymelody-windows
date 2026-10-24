@@ -7,6 +7,8 @@ using System.Text.RegularExpressions;
 using HeyMelodyWindows.Calibration;
 using static HeyMelodyWindows.Host.WasapiNative;
 
+using HeyMelody.Diagnostics;
+
 namespace HeyMelodyWindows.Host;
 
 internal interface ICalibrationAuditionPlayer : IAsyncDisposable
@@ -98,7 +100,7 @@ internal sealed class AuditionWave
 /// <summary>One private shared-mode stream. First activation and all COM calls stay on a dedicated STA thread.</summary>
 internal sealed class WasapiCalibrationAuditionPlayer : ICalibrationAuditionPlayer
 {
-    private sealed record Command(Action Action, CancellationToken Token, TaskCompletionSource Completion);
+    private sealed record Command(Action Action, CancellationToken Token, TaskCompletionSource Completion, string? CorrelationId);
     private readonly BlockingCollection<Command> _commands = new();
     private readonly TaskCompletionSource _finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Thread _thread;
@@ -136,6 +138,7 @@ internal sealed class WasapiCalibrationAuditionPlayer : ICalibrationAuditionPlay
         if (_client is null || _render is null || _wave is null) throw new InvalidOperationException("耳机音频输出尚未就绪。");
         if (_playing) return;
         Fill(); Check(_client.Start()); _playing = true; _lastSpectrum = 0;
+        DiagnosticLog.Info("host.audio", "playing", "WASAPI audition playback started");
     }, token);
     public Task StopAsync() => Volatile.Read(ref _disposed) != 0 ? _finished.Task : Enqueue(Cleanup, CancellationToken.None);
     private Task Enqueue(Action action, CancellationToken token)
@@ -143,16 +146,18 @@ internal sealed class WasapiCalibrationAuditionPlayer : ICalibrationAuditionPlay
         token.ThrowIfCancellationRequested();
         if (Volatile.Read(ref _disposed) != 0) return Task.FromException(new ObjectDisposedException(nameof(WasapiCalibrationAuditionPlayer)));
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        try { _commands.Add(new(action, token, completion)); }
+        try { _commands.Add(new(action, token, completion, DiagnosticLog.CurrentCorrelationId)); }
         catch (InvalidOperationException) { completion.TrySetException(new ObjectDisposedException(nameof(WasapiCalibrationAuditionPlayer))); }
         return completion.Task;
     }
     private void Run()
     {
+        using var background = DiagnosticLog.SuspendOperation();
         bool initialized = false;
         try
         {
             Check(_initializeCom()); initialized = true;
+            DiagnosticLog.Debug("host.audio", "threadStarted", "WASAPI audition COM thread initialized");
             // The tray may be in EcoQoS while a preview plays; the 5 ms pump must not be throttled. A failed exemption only costs efficiency.
             try { _exemptThread(); } catch { }
             while (!_commands.IsCompleted)
@@ -160,9 +165,15 @@ internal sealed class WasapiCalibrationAuditionPlayer : ICalibrationAuditionPlay
                 // Idle: block until a command arrives or CompleteAdding wakes the thread; no polling while nothing plays.
                 if (_commands.TryTake(out var command, _playing ? 5 : Timeout.Infinite))
                 {
+                    using var operation = command.CorrelationId is { } id ? DiagnosticLog.BeginOperation(id) : DiagnosticLog.SuspendOperation();
                     try { command.Token.ThrowIfCancellationRequested(); command.Action(); command.Completion.TrySetResult(); }
                     catch (OperationCanceledException) { command.Completion.TrySetCanceled(command.Token); }
-                    catch (Exception error) { command.Completion.TrySetException(error); }
+                    catch (Exception error)
+                    {
+                        DiagnosticLog.Debug("host.audio", "commandFailed", "WASAPI audition command failed; caller receives the original exception",
+                            new { action = command.Action.Method.Name, exceptionType = error.GetType().FullName, error.HResult, error.Message });
+                        command.Completion.TrySetException(error);
+                    }
                 }
                 if (!_playing) continue;
                 try
@@ -174,11 +185,16 @@ internal sealed class WasapiCalibrationAuditionPlayer : ICalibrationAuditionPlay
                         _lastSpectrum = now; PublishSpectrum();
                     }
                 }
-                catch { Cleanup(); try { Failed?.Invoke(); } catch { } }
+                catch (Exception error)
+                {
+                    DiagnosticLog.Error("host.audio", "renderFailed", "WASAPI audition render pump failed", error);
+                    Cleanup(); try { Failed?.Invoke(); } catch { }
+                }
             }
         }
         catch (Exception error)
         {
+            DiagnosticLog.Error("host.audio", "threadFailed", "WASAPI audition COM thread failed", error);
             Interlocked.Exchange(ref _disposed, 1); _commands.CompleteAdding();
             while (_commands.TryTake(out var command)) command.Completion.TrySetException(error);
         }
@@ -195,6 +211,7 @@ internal sealed class WasapiCalibrationAuditionPlayer : ICalibrationAuditionPlay
         if (address is 0 or > 0xFFFFFFFFFFFF) throw new ArgumentOutOfRangeException(nameof(address));
         try
         {
+            DiagnosticLog.Debug("host.audio", "preparing", "Resolving the headset WASAPI audition endpoint", new { address });
             using var stream = typeof(WasapiCalibrationAuditionPlayer).Assembly.GetManifestResourceStream("HeyMelody.Host.Assets.hearing_enhancement_audition.wav")
                 ?? throw new InvalidDataException("试听音频不可用。");
             _wave = AuditionWave.Read(stream);
@@ -219,6 +236,8 @@ internal sealed class WasapiCalibrationAuditionPlayer : ICalibrationAuditionPlay
             if (_capacity is 0 or > 96000) throw new InvalidDataException("耳机音频缓冲区不可用。");
             Check(_client.GetService(RenderClientId, out _renderObject)); _render = (IRenderClient)_renderObject;
             _cursor = 0; _analyzer.Reset();
+            DiagnosticLog.Info("host.audio", "prepared", "Headset WASAPI audition endpoint is ready",
+                new { address, bufferFrames = _capacity, sampleRate = 48000, channels = 2, bitsPerSample = 16 });
         }
         catch { Cleanup(); throw; }
     }

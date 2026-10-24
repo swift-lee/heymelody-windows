@@ -1,5 +1,7 @@
 using HeyMelodyWindows.Protocol;
 
+using HeyMelody.Diagnostics;
+
 namespace HeyMelodyWindows.Daily;
 
 public sealed partial class DailyClient
@@ -55,7 +57,7 @@ public sealed partial class DailyClient
         }
         byte[] offered;
         try { offered = NotificationParsers.ParseSupportedEvents(capability.Payload!); }
-        catch (FormatException) { throw new DailyReadException(0x0200, "通知能力数据格式无效"); }
+        catch (FormatException error) { DiagnosticLog.Error("Daily", "monitoring.capabilities-invalid", "Notification capability parsing failed.", error); throw new DailyReadException(0x0200, "通知能力数据格式无效"); }
         lock (_stateGate) _advertisedEvents.UnionWith(offered);
         byte[] ids = offered.Where(id => id is 1 or 2 or 3 or 4 or 5 or 6 or 8 or 14 or 15).ToArray();
         if (ids.Length != 0)
@@ -125,12 +127,15 @@ public sealed partial class DailyClient
         {
             if (snapshot.Revision <= _lastPublishedRevision) return;
             _lastPublishedRevision = snapshot.Revision;
+            DiagnosticLog.Debug("Daily", "state.published", "Published a fresh daily device snapshot.", snapshot);
             foreach (Action<DailySnapshot> handler in SnapshotChanged?.GetInvocationList() ?? [])
-                try { handler(Clone(snapshot)); } catch (Exception) { }
+                try { handler(Clone(snapshot)); } catch (Exception error) { DiagnosticLog.Error("Daily", "snapshot-observer.failed", "A snapshot subscriber failed; monitoring continues.", error, new { snapshot.Revision }); }
         }
     }
     private void OnSessionEnded(DailySession source, Exception failure)
     {
+        DiagnosticLog.Error("Daily", "monitoring.session-ended", "A monitored daily session ended.", failure,
+            new { currentSession = ReferenceEquals(_session, source), calibrationActive = _calibrationActive, freshReadDepth = Volatile.Read(ref _freshReadDepth), source.CodecReadRecoveryPending });
         // A temporary offline push would retire an already active Host worker and cancel
         // its read-only recovery. The final refresh publishes either the recovery or failure.
         if (ReferenceEquals(_session, source) && !_calibrationActive && Volatile.Read(ref _freshReadDepth) > 0
@@ -151,10 +156,10 @@ public sealed partial class DailyClient
     {
         if (!ReferenceEquals(_session, source)) return;
         foreach (Action<Packet> handler in Notification?.GetInvocationList() ?? [])
-            try { handler(packet); } catch { }
+            try { handler(packet); } catch (Exception error) { DiagnosticLog.Error("Daily", "notification-observer.failed", "A notification subscriber failed; monitoring continues.", error, new { command = $"0x{packet.Command:X4}", packet.Sequence }); }
         DeviceNotification? notification;
         try { if (!NotificationParsers.TryParse(packet, out notification)) return; }
-        catch (FormatException) { QueueRefresh(DailyRefreshScope.Full); return; }
+        catch (FormatException error) { DiagnosticLog.Error("Daily", "notification.envelope-invalid", "The notification envelope could not be parsed.", error, new { command = $"0x{packet.Command:X4}", packet.Sequence, payloadLength = packet.Payload.Length }); QueueRefresh(DailyRefreshScope.Full); return; }
         var updates = new Dictionary<string, Action<DailySnapshot>>();
         var refreshes = new HashSet<DailyRefreshScope>();
         try
@@ -222,6 +227,8 @@ public sealed partial class DailyClient
         }
         catch (Exception ex) when (ex is FormatException or ArgumentException or OverflowException)
         {
+            DiagnosticLog.Error("Daily", "notification.fields-invalid", "The notification fields could not be applied.", ex,
+                new { command = $"0x{packet.Command:X4}", packet.Sequence, payloadLength = packet.Payload.Length, kind = notification?.Kind });
             refreshes.Add(notification!.Kind switch {
                 DeviceNotificationKind.Battery => DailyRefreshScope.Battery,
                 DeviceNotificationKind.Anc => DailyRefreshScope.Anc,
@@ -283,6 +290,7 @@ public sealed partial class DailyClient
     }
     private async Task RefreshNotificationsAsync()
     {
+        using var operation = DiagnosticLog.BeginOperation();
         try
         {
             // A single deferred reader coalesces bursts; it never replays settings.
