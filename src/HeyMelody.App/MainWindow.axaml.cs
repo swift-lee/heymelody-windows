@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Threading;
 using FluentAvalonia.UI.Controls;
 using FluentAvalonia.UI.Windowing;
+using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.App;
 
@@ -14,9 +15,11 @@ public partial class MainWindow : FAAppWindow
     private readonly WindowConfirmationService _confirmations;
     private readonly IHeadsetEventService? _events;
     private Task? _exitVote;
+    private string? _exitRequestId;
+    private readonly TaskCompletionSource _backendStop = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Task? _calibrationOperation;
     private Task? _startupVerification;
-    private bool _closing, _closed, _opened, _managing;
+    private bool _closing, _closed, _opened, _managing, _backendStopping, _localCloseApproved;
     internal bool StartWithDemo { get; init; }
 
     public MainWindow() : this(HeadsetServiceFactory.Create(), false,
@@ -27,7 +30,8 @@ public partial class MainWindow : FAAppWindow
 
     internal MainWindow(IHeadsetService service, bool preview) : this(service, preview, null) { }
 
-    internal MainWindow(IHeadsetService service, bool preview, IDeviceManagerProcess? manager)
+    internal MainWindow(IHeadsetService service, bool preview, IDeviceManagerProcess? manager,
+        IConfirmationService? confirmations = null)
     {
         InitializeComponent();
         Ui.Typography.ApplyTextOptions(this);
@@ -37,7 +41,7 @@ public partial class MainWindow : FAAppWindow
         _events = service as IHeadsetEventService;
         _manager = manager is null ? null : new TrackedDeviceManager(manager);
         _confirmations = new WindowConfirmationService(this);
-        _viewModel = new MainViewModel(service, _confirmations, preview);
+        _viewModel = new MainViewModel(service, confirmations ?? _confirmations, preview);
         Page.DataContext = _viewModel;
         Page.SetPlatformNotice(!OperatingSystem.IsWindows());
         Page.ManageDevicesRequested = manager is not null ? ManageDevicesAsync : null;
@@ -122,34 +126,56 @@ public partial class MainWindow : FAAppWindow
         if (_closed) return;
         try
         {
+            if (notification.Kind == "stopping")
+            {
+                MarkBackendStopping();
+                try { _viewModel.AdoptBackendEvent(notification); }
+                finally { _confirmations.CancelActiveDialog(); Close(); }
+                return;
+            }
             _viewModel.AdoptBackendEvent(notification);
             switch (notification.Kind)
             {
                 case "activate": ActivateMainUi(); break;
                 case "requestExit" when notification.ExitRequestId is { } requestId && _events is not null:
-                    if (_exitVote is null)
+                    if (_exitRequestId != requestId)
                     {
-                        _exitVote = VoteForBackendExitAsync(requestId);
-                        try { await _exitVote; }
-                        finally { _exitVote = null; }
+                        var previous = _exitVote;
+                        _exitRequestId = requestId;
+                        var vote = VoteAfterAsync(previous, requestId);
+                        _exitVote = vote;
+                        try { await vote; }
+                        finally { if (ReferenceEquals(_exitVote, vote)) _exitVote = null; }
                     }
                     break;
                 case "exitCancelled":
-                    if (!_closing) Page.ResumeSettingsDialogs();
+                    _exitRequestId = null;
+                    if (!_closing && !_backendStopping)
+                    {
+                        _confirmations.CancelActiveDialog();
+                        _viewModel.CancelBackendExit();
+                        Page.ResumeSettingsDialogs();
+                    }
                     break;
-                case "stopping": Close(); break;
             }
         }
         catch (OperationCanceledException) when (_closing) { }
         catch (Exception)
         {
-            if (!_closing)
+            if (!_closing && !_backendStopping)
             {
                 _viewModel.CancelBackendExit();
                 Page.ResumeSettingsDialogs();
             }
         }
     });
+
+    private async Task VoteAfterAsync(Task? previous, string requestId)
+    {
+        if (previous is not null) { try { await previous; } catch { } }
+        if (_exitRequestId == requestId && !_closed && !_backendStopping)
+            await VoteForBackendExitAsync(requestId);
+    }
 
     internal void ActivateMainUi()
     {
@@ -161,14 +187,39 @@ public partial class MainWindow : FAAppWindow
 
     private async Task VoteForBackendExitAsync(string requestId)
     {
+        if (_closing)
+        {
+            // A local confirmation already in progress must not be replaced by a second dialog.
+            await _events!.AcknowledgeExitAsync(requestId, _localCloseApproved || _viewModel.CloseCommitted, CancellationToken.None);
+            return;
+        }
         ActivateMainUi();
         _viewModel.SuspendActionsForClose();
         _confirmations.CancelActiveDialog();
         await Page.DismissSettingsDialogAsync();
         var approved = await _viewModel.ConfirmBackendExitAsync();
-        try { await _events!.AcknowledgeExitAsync(requestId, approved, _managerLifetime.Token); }
-        catch { _viewModel.CancelBackendExit(); Page.ResumeSettingsDialogs(); throw; }
-        if (!approved) Page.ResumeSettingsDialogs();
+        if (_exitRequestId != requestId || _closed || _backendStopping)
+        {
+            if (!_closed && !_closing && !_backendStopping)
+            { _viewModel.CancelBackendExit(); Page.ResumeSettingsDialogs(); }
+            return;
+        }
+        try { await _events!.AcknowledgeExitAsync(requestId, approved, CancellationToken.None); }
+        catch (Exception error)
+        {
+            DiagnosticLog.Warning("ui.lifetime", "exitVoteFailed", "The backend exit vote could not be delivered on its original connection.", error);
+            if (approved && (error is IOException or ObjectDisposedException) &&
+                (_events is not ClientBridge bridge || bridge.IsStopping) && _exitRequestId == requestId)
+            {
+                MarkBackendStopping();
+                Close();
+                return;
+            }
+            if (!_closing && !_backendStopping && _exitRequestId == requestId)
+            { _viewModel.CancelBackendExit(); Page.ResumeSettingsDialogs(); }
+            return;
+        }
+        if (!approved && _exitRequestId == requestId) Page.ResumeSettingsDialogs();
     }
 
     private async Task<IReadOnlyList<UiDevice>?> ResolveDevicesAsync()
@@ -285,28 +336,89 @@ public partial class MainWindow : FAAppWindow
         e.Cancel = true;
         if (_closing) return;
         _closing = true;
-        _viewModel.SuspendActionsForClose();
-        _confirmations.CancelActiveDialog();
-        await Page.DismissSettingsDialogAsync();
-        if (!await _viewModel.RequestCloseAsync())
+        var approved = _backendStopping;
+        try
         {
-            _closing = false; Page.ResumeSettingsDialogs(); return;
+            _viewModel.SuspendActionsForClose();
+            _confirmations.CancelActiveDialog();
+            var dismiss = Page.DismissSettingsDialogAsync();
+            if (await Task.WhenAny(dismiss, _backendStop.Task) == dismiss) await dismiss;
+            else ObserveLateFailure(dismiss);
+            if (!approved && !_backendStopping)
+            {
+                var decision = _viewModel.RequestCloseAsync();
+                if (await Task.WhenAny(decision, _backendStop.Task) == decision)
+                    _localCloseApproved = approved = await decision;
+                else { ObserveLateFailure(decision); approved = true; }
+            }
         }
-        _managerLifetime.Cancel();
-        if (_startupVerification is { } verification)
-        { try { await verification; } catch { } }
-        if (_calibrationOperation is { } calibration)
-        { try { await calibration; } catch { } }
-        if (_manager?.CurrentOperation is { } operation)
+        catch (Exception error)
         {
-            try { await operation; }
-            catch (Exception) { }
+            DiagnosticLog.Error("ui.lifetime", "closePreparationFailed", "Main window close preparation failed.", error);
+            approved |= _backendStopping || _localCloseApproved || _viewModel.CloseCommitted;
         }
-        await _viewModel.DisposeAsync();
-        Page.VisualCatalog.Dispose();
-        _closed = true;
-        Dispatcher.UIThread.Post(Close);
+        if (!approved && !_backendStopping)
+        {
+            _closing = false;
+            _viewModel.CancelBackendExit();
+            Page.ResumeSettingsDialogs();
+            return;
+        }
+        try
+        {
+            _managerLifetime.Cancel();
+            await CleanupAsync(() => _viewModel.DisposeAsync().AsTask(), "viewModel");
+            var pending = new[] { _startupVerification, _calibrationOperation, _manager?.CurrentOperation }
+                .OfType<Task>().ToArray();
+            if (pending.Length != 0)
+                await CleanupAsync(async () =>
+                {
+                    var work = Task.WhenAll(pending);
+                    if (_backendStopping)
+                    {
+                        _ = work.ContinueWith(task => _ = task.Exception, CancellationToken.None,
+                            TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+                        await work.WaitAsync(TimeSpan.FromSeconds(2));
+                    }
+                    else await work;
+                }, "windowOperations");
+            try { Page.VisualCatalog.Dispose(); }
+            catch (Exception error) { DiagnosticLog.Warning("ui.lifetime", "artworkCleanupFailed", "Artwork cleanup failed after close was approved.", error); }
+        }
+        catch (Exception error)
+        {
+            DiagnosticLog.Warning("ui.lifetime", "closeCleanupFailed", "Main window cleanup failed after close was approved.", error);
+        }
+        finally
+        {
+            _closed = true;
+            Dispatcher.UIThread.Post(Close);
+        }
     }
+
+    private async Task CleanupAsync(Func<Task> cleanup, string stage)
+    {
+        try
+        {
+            var work = cleanup();
+            if (await Task.WhenAny(work, _backendStop.Task) != work)
+            {
+                ObserveLateFailure(work);
+                await work.WaitAsync(TimeSpan.FromSeconds(2));
+            }
+            else await work;
+        }
+        catch (Exception error) { DiagnosticLog.Warning("ui.lifetime", "closeCleanupFailed", "Main window cleanup failed after close was approved.", error, new { stage }); }
+    }
+
+    private void MarkBackendStopping()
+    {
+        _backendStopping = true;
+        _backendStop.TrySetResult();
+    }
+
+    private static void ObserveLateFailure(Task task) => _ = task.ContinueWith(completed => _ = completed.Exception,
+        CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
 }
 
 internal sealed class WindowConfirmationService(TopLevel owner) : IConfirmationService

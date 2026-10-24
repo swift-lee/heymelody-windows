@@ -1,6 +1,7 @@
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Calibration.UI;
 
+if (args is ["--native-exit-smoke"]) return WindowExitLifecycleTests.Run();
 if (args is ["--native-rendering-policy-smoke", var renderMode, "--output-dir", var renderOutput]
     && renderMode is "default" or "basic")
     return NativeCalibrationSmoke.Run(basicRenderMode: renderMode == "basic", outputDirectory: Path.GetFullPath(renderOutput));

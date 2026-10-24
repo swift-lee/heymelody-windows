@@ -5,7 +5,7 @@ public sealed partial class MainViewModel
     private readonly Dictionary<string, UiSnapshot> _backendSnapshots = new(StringComparer.Ordinal);
     private readonly HashSet<string> _retiredBackends = new(StringComparer.Ordinal);
     private string? _backendInstanceId;
-    private bool _subscribed, _backendExitApproved;
+    private bool _subscribed, _backendExitApproved, _backendStopping;
     private IHeadsetEventService? EventService => _service as IHeadsetEventService;
 
     public Task AttachBackendAsync() => SubscribeToBackendAsync();
@@ -20,6 +20,8 @@ public sealed partial class MainViewModel
     /// <summary>The desktop shell dispatches backend messages onto its UI thread.</summary>
     public void AdoptBackendEvent(BackendEvent notification)
     {
+        if (notification.Kind == "stopping")
+        { _backendStopping = _backendExitApproved = _closeRequested = true; _reconnectPaused = null; }
         if (_closing || EventService is null) return;
         if (notification.Kind == "resources" && notification.Resources is { } resources && AcceptBackend(notification.BackendInstanceId))
         { PresentResourceSettings(resources); return; }
@@ -170,7 +172,7 @@ public sealed partial class MainViewModel
 
     public void CancelBackendExit()
     {
-        if (_closing) return;
+        if (_closing || _backendStopping) return;
         _backendExitApproved = _closeRequested = false;
         if (_selectedDevice is { } selected && _backendSnapshots.TryGetValue(selected.Identity, out var snapshot))
             AdoptRead(snapshot);

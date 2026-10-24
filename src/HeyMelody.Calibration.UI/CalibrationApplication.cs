@@ -21,7 +21,9 @@ public sealed class CalibrationApplication : Application
     {
         if (args is not ["--handle", var handle] || string.IsNullOrWhiteSpace(handle) || handle.Length > 128 || !OperatingSystem.IsWindows()) return 2;
         Kind = kind; Handle = handle;
+        if (DiagnosticRuntime.IsBoundLaunchExpired) return 1;
         using var diagnostics = DiagnosticRuntime.InitializeClient(kind == "fit" ? DiagnosticComponents.FitTest : DiagnosticComponents.HearingSetup);
+        if (DiagnosticRuntime.IsBoundLaunchExpired) return 1;
         try { return AppBuilder.Configure<CalibrationApplication>().UsePlatformDetect().UseHeyMelodyDiagnostics()
             .UseHeyMelodyRendering().UseHeyMelodyTypography().StartWithClassicDesktopLifetime(args); }
         catch (Exception error) { DiagnosticLog.Error("Calibration.UI", "process.failed", "Calibration application failed", error); return 2; }
@@ -55,6 +57,10 @@ public sealed class CalibrationWindow : FAAppWindow
     private readonly IHeadsetEventService? _events;
     private readonly MicaAltBackdrop _backdrop;
     private bool _closing, _closed, _completed, _allowLocalClose;
+    private Task? _exitVote;
+    private string? _exitRequestId;
+    private readonly TaskCompletionSource _backendStop = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal bool ShutdownApplicationOnClose { get; init; } = true;
     private readonly object _spectrumGate = new();
     private UiCalibrationSpectrum? _pendingSpectrum;
     private bool _spectrumPosted;
@@ -84,7 +90,7 @@ public sealed class CalibrationWindow : FAAppWindow
         {
             if (_events is not null) _events.EventReceived -= OnEvent;
             _backdrop.Dispose();
-            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+            if (ShutdownApplicationOnClose && Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
                 desktop.Shutdown(_completed && _model.StopConfirmed ? 0 : 1);
         };
     }
@@ -109,37 +115,89 @@ public sealed class CalibrationWindow : FAAppWindow
         Dispatcher.UIThread.Post(async () =>
     {
         if (_closed) return;
-        if (notification.Calibration is { } state) _model.Adopt(state);
         if (notification.Kind is "unavailable" or "stopping")
-        { _allowLocalClose = true; _model.BackendUnavailable(notification.Message ?? ""); Close(); }
-        else if (notification.Kind == "requestExit" && notification.ExitRequestId is { } requestId && _events is not null)
         {
-            var confirmed = false;
-            try
-            {
-                confirmed = await _model.CancelAsync();
-                await _events.AcknowledgeExitAsync(requestId, confirmed, CancellationToken.None);
-            }
-            catch { /* Connection events permit a local close if the backend has disappeared. */ }
-            if (confirmed) Close();
+            _allowLocalClose = true; _backendStop.TrySetResult();
+            try { _model.BackendUnavailable(notification.Message ?? ""); }
+            catch (Exception error)
+            { DiagnosticLog.Warning("ui.lifetime", "terminalNotificationFailed", "Calibration model could not publish its terminal state.", error); }
+            finally { Close(); }
+            return;
         }
+        if (notification.Calibration is { } state) _model.Adopt(state);
+        if (notification.Kind == "requestExit" && notification.ExitRequestId is { } requestId && _events is not null)
+        {
+            if (_exitRequestId == requestId) return;
+            var previous = _exitVote;
+            _exitRequestId = requestId;
+            var vote = VoteForExitAsync(previous, requestId);
+            _exitVote = vote;
+            try { await vote; }
+            finally { if (ReferenceEquals(_exitVote, vote)) _exitVote = null; }
+        }
+        else if (notification.Kind == "exitCancelled") _exitRequestId = null;
         });
+    }
+
+    private async Task VoteForExitAsync(Task? previous, string requestId)
+    {
+        if (previous is not null) { try { await previous; } catch { } }
+        if (_exitRequestId != requestId || _closed || _allowLocalClose) return;
+        _completed |= _model.State.Stage == "Completed";
+        var confirmed = await _model.CancelAsync();
+        if (_exitRequestId != requestId || _closed || _allowLocalClose) return;
+        try { await _events!.AcknowledgeExitAsync(requestId, confirmed, CancellationToken.None); }
+        catch (Exception error)
+        {
+            HeyMelody.Diagnostics.DiagnosticLog.Warning("ui.lifetime", "exitVoteFailed", "Calibration window could not deliver the backend exit vote.", error);
+            if (confirmed && (error is IOException or ObjectDisposedException) &&
+                (_events is not ClientBridge bridge || bridge.IsStopping) && _exitRequestId == requestId)
+            { _allowLocalClose = true; _backendStop.TrySetResult(); Close(); }
+        }
+        // An approved vote is preparation only. Another window can still veto the backend exit.
     }
     private async void ClosingAsync(object? sender, WindowClosingEventArgs e)
     {
         if (_closed) return;
         e.Cancel = true; if (_closing) return; _closing = true; _completed |= _model.State.Stage == "Completed";
+        var approved = _allowLocalClose;
         try
         {
-            if (!_allowLocalClose && !await _model.CancelAsync() && !_allowLocalClose) return;
-            await _model.DisposeAsync();
+            if (!approved)
+            {
+                var cancel = _model.CancelAsync();
+                if (await Task.WhenAny(cancel, _backendStop.Task) == cancel) approved = await cancel;
+                else _ = cancel.ContinueWith(task => _ = task.Exception, CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+                approved |= _allowLocalClose;
+            }
+            if (!approved) return;
+            try { await _model.DisposeAsync(); }
+            catch (Exception error)
+            { HeyMelody.Diagnostics.DiagnosticLog.Warning("ui.lifetime", "closeCleanupFailed", "Calibration model cleanup failed after STOP or local close was approved.", error); }
             if (_service is IAsyncDisposable disposable)
             {
-                try { await disposable.DisposeAsync(); }
-                catch { /* STOP was confirmed, or the backend disappeared; an IPC cleanup failure must not trap the window. */ }
+                try
+                {
+                    var cleanup = disposable.DisposeAsync().AsTask();
+                    if (await Task.WhenAny(cleanup, _backendStop.Task) != cleanup)
+                    {
+                        _ = cleanup.ContinueWith(task => _ = task.Exception, CancellationToken.None,
+                            TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+                        await cleanup.WaitAsync(TimeSpan.FromSeconds(2));
+                    }
+                    else await cleanup;
+                }
+                catch (Exception error)
+                { HeyMelody.Diagnostics.DiagnosticLog.Warning("ui.lifetime", "closeCleanupFailed", "Calibration client cleanup failed after STOP or local close was approved.", error); }
             }
-            _closed = true; Dispatcher.UIThread.Post(Close);
         }
-        finally { _closing = false; }
+        catch (Exception error)
+        { HeyMelody.Diagnostics.DiagnosticLog.Warning("ui.lifetime", "closePreparationFailed", "Calibration close preparation failed.", error); }
+        finally
+        {
+            if (approved || _allowLocalClose) { _closed = true; Dispatcher.UIThread.Post(Close); }
+            else _closing = false;
+        }
     }
 }

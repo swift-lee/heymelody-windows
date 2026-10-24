@@ -18,8 +18,7 @@ internal sealed class CalibrationProcess
             start.FileName = "dotnet"; start.ArgumentList.Add(dll);
         }
         start.ArgumentList.Add("--handle"); start.ArgumentList.Add(handle);
-        token.ThrowIfCancellationRequested();
-        using var process = Process.Start(start) ?? throw new IOException("无法打开测试窗口。");
+        using var process = ClientBridge.StartOwnedComponent(start, token);
         var errors = DrainAsync(process.StandardError);
         try { await process.WaitForExitAsync(token); await errors; if (process.ExitCode is not (0 or 1)) throw new IOException("测试窗口未正常完成。"); }
         catch (OperationCanceledException) when (token.IsCancellationRequested)

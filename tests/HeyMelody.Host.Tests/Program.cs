@@ -25,6 +25,13 @@ try
         Console.WriteLine(JsonSerializer.Serialize(new { passed, success = true, nativeBluetoothCalls = 0 }));
         return 0;
     }
+    if (args is ["--exit-tests"])
+    {
+        await ExitProtocolTests.RunAsync(Test, scratch);
+        await BridgeExitIntegrationTests.RunAsync(Test, scratch);
+        Console.WriteLine(JsonSerializer.Serialize(new { passed, success = true, nativeBluetoothCalls = 0 }));
+        return 0;
+    }
     await Test("cached classes include paired audio even while disconnected", () =>
     {
         foreach (uint minor in new uint[] { 1, 2, 4, 5, 6, 7, 8, 10, 15, 19, 20 })
@@ -186,6 +193,8 @@ try
     });
     await HostWireTests.RunAsync(Test);
     await BackendTests.RunAsync(Test, scratch);
+    await ExitProtocolTests.RunAsync(Test, scratch);
+    await BridgeExitIntegrationTests.RunAsync(Test, scratch);
     await SupervisorDiagnosticsTests.RunAsync(Test, scratch);
     await CalibrationBackendTests.RunAsync(Test, scratch);
     await NativeCalibrationDescriptionTests.RunAsync(Test, scratch);

@@ -11,6 +11,7 @@ using HeyMelodyWindows.App;
 using HeyMelodyWindows.DeviceManager;
 using HeyMelodyWindows.Ui;
 
+if (args is ["--native-exit-smoke"]) return WindowExitLifecycleTests.Run();
 if (args is ["--native-rendering-policy-smoke", var renderMode, "--output-dir", var renderOutput]
     && renderMode is "default" or "basic")
     return NativeSmoke.Run(basicRenderMode: renderMode == "basic", outputDirectory: Path.GetFullPath(renderOutput));

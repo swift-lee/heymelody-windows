@@ -14,6 +14,7 @@ using HeyMelodyWindows.App;
 
 if (ProcessLifetimeTests.TryRunHelper(args, out var helperExit)) return helperExit;
 if (args is ["--diagnostic-settings-tests"]) return DiagnosticSettingsTests.Run();
+if (args is ["--native-exit-smoke"]) return WindowExitLifecycleTests.Run();
 
 if (args is ["--smooth-scroll-tests"]) return SmoothScrollingTests.Run();
 
@@ -258,7 +259,7 @@ sealed class NoConfirm : IConfirmationService
     public Task<bool> ConfirmAsync(string title, string message, CancellationToken token) => Task.FromResult(false);
 }
 
-sealed class InputTestService : IHeadsetService
+class InputTestService : IHeadsetService
 {
     private readonly PreviewService _inner = new();
     private UiSnapshot? _snapshot;

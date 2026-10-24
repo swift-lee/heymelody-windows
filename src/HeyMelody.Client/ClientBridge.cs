@@ -18,7 +18,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
     private readonly TimeSpan? _testBudget;
     private readonly SemaphoreSlim _connectGate = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
-    private sealed record QueuedEvent(BackendEvent Value, Connection? Source);
+    private sealed record QueuedEvent(BackendEvent Value, Connection? Source, Action<BackendEvent>? Target = null);
     private readonly Channel<QueuedEvent> _events = Channel.CreateBounded<QueuedEvent>(new BoundedChannelOptions(128)
     { SingleReader = true, SingleWriter = false, FullMode = BoundedChannelFullMode.Wait });
     private readonly Channel<QueuedEvent> _spectra = Channel.CreateBounded<QueuedEvent>(new BoundedChannelOptions(1)
@@ -32,8 +32,6 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
     private volatile bool _disposed, _stopping, _versionMismatch;
     private DateTimeOffset _lastStart;
 
-    public event Action<BackendEvent>? EventReceived;
-
     public ClientBridge() : this(BackendEndpoint.PipeName, StartBackend, backendRunning: BackendRunning) { }
 
     internal ClientBridge(string pipeName, Action? startBackend = null, TimeSpan? testBudget = null, Func<bool>? backendRunning = null)
@@ -41,6 +39,8 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
         _pipeName = pipeName; _startBackend = startBackend; _testBudget = testBudget; _backendRunning = backendRunning;
         _ = RunBackground(() => DeliverEventsAsync(_events));
         _ = RunBackground(() => DeliverEventsAsync(_spectra));
+        _ = RunBackground(() => DeliverEventsAsync(_controlEvents));
+        RegisterBridge();
     }
 
     public async Task<BackendSubscription> SubscribeAsync(string role, CancellationToken cancellationToken)
@@ -57,13 +57,16 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                         if (!ReferenceEquals(_connection, connection) || connection.Closed)
                             throw new IOException("订阅连接已变化。");
                         SetBackendInstance(baseline.BackendInstanceId);
+                        connection.BackendInstanceId = baseline.BackendInstanceId;
                         foreach (var snapshot in baseline.Snapshots) Remember(snapshot);
+                        connection.Subscribed = true;
+                        PublishPrepareLocked();
                     }
                 });
         }
         catch (IOException)
         {
-            if (!_versionMismatch && !_disposed && !_stopping && !cancellationToken.IsCancellationRequested)
+            if (!_versionMismatch && !_disposed && CanReconnect && !cancellationToken.IsCancellationRequested)
                 _ = ReconnectAsync();
             throw;
         }
@@ -166,8 +169,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
 
     public async Task AcknowledgeExitAsync(string exitRequestId, bool approved, CancellationToken cancellationToken)
     {
-        _ = await RequestAsync<bool>(new() { Operation = "exitVote", ExitRequestId = exitRequestId, Approved = approved },
-            TimeSpan.FromSeconds(15), cancellationToken);
+        await VoteOnOriginalConnectionAsync(exitRequestId, approved, cancellationToken);
     }
 
     public async Task ActivateMainUiAsync(CancellationToken cancellationToken)
@@ -181,7 +183,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
     }
 
     private async Task<T> RequestAsync<T>(BackendRequest request, TimeSpan budget, CancellationToken token,
-        Action<T, Connection>? onResult = null)
+        Action<T, Connection>? onResult = null, Connection? boundConnection = null)
     {
         using var operation = DiagnosticLog.BeginOperation();
         request.DiagnosticCorrelationId = DiagnosticLog.CurrentCorrelationId;
@@ -192,8 +194,10 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
         var pending = new TaskCompletionSource<BackendMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         try
         {
-            connection = await EnsureConnectionAsync(linked.Token);
-            lock (_stateGate) request.BackendInstanceId = _backendInstanceId;
+            connection = boundConnection ?? await EnsureConnectionAsync(linked.Token,
+                request.Operation is "subscribe" or "cancelCalibration");
+            if (connection.Closed) throw new IOException("原后台连接已关闭。");
+            if (boundConnection is null) lock (_stateGate) request.BackendInstanceId = _backendInstanceId;
             await connection.WriteGate.WaitAsync(linked.Token);
             try
             {
@@ -243,15 +247,29 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
         finally { connection?.Pending.TryRemove(request.Id, out _); }
     }
 
-    private async Task<Connection> EnsureConnectionAsync(CancellationToken token)
+    private async Task<Connection> EnsureConnectionAsync(CancellationToken token, bool allowExitPending = false)
     {
+        if (DiagnosticRuntime.HasBoundLaunch && DiagnosticRuntime.IsBoundLaunchExpired)
+        { BoundOwnerEnded(); throw new IOException("启动此窗口的后台已经结束。"); }
+        using var connectionBudget = CancellationTokenSource.CreateLinkedTokenSource(token, _stopConnecting.Token);
+        token = connectionBudget.Token;
         await _connectGate.WaitAsync(token);
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_versionMismatch) throw new BackendOperationException("后台与界面版本不一致，请从托盘退出后台后重新打开完整客户端。");
             if (_stopping) throw new IOException("后台正在退出。");
-            lock (_stateGate) if (_connection is { Closed: false } connected) return connected;
+            lock (_stateGate)
+            {
+                if (ExitPendingLocked && !allowExitPending) throw new IOException("后台正在确认退出。");
+                if (_connection is { Closed: false } connected)
+                {
+                    if (ExitPendingLocked && !ReferenceEquals(connected, _exitConnection))
+                        throw new IOException("退出准备只能使用原后台连接。");
+                    return connected;
+                }
+                if (ExitPendingLocked) throw new IOException("退出确认必须使用原后台连接。");
+            }
             var pipe = NewPipe();
             // Without the tray's singleton mutex nothing can answer the 300 ms probe: launch at once. A tray that is
             // still starting or already exiting holds the mutex and keeps the probe-then-launch order.
@@ -259,7 +277,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                 && DateTimeOffset.UtcNow - _lastStart > TimeSpan.FromSeconds(10))
             {
                 _lastStart = DateTimeOffset.UtcNow;
-                try { _startBackend(); await pipe.ConnectAsync(15000, token); }
+                try { StartBackendIfAllowed(); await pipe.ConnectAsync(15000, token); }
                 catch { pipe.Dispose(); throw; }
             }
             else
@@ -270,7 +288,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                     pipe.Dispose();
                     if (_startBackend is null) throw;
                     if (DateTimeOffset.UtcNow - _lastStart > TimeSpan.FromSeconds(10))
-                    { _lastStart = DateTimeOffset.UtcNow; _startBackend(); }
+                    { _lastStart = DateTimeOffset.UtcNow; StartBackendIfAllowed(); }
                     pipe = NewPipe();
                     try { await pipe.ConnectAsync(15000, token); }
                     catch { pipe.Dispose(); throw; }
@@ -278,7 +296,12 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                 catch { pipe.Dispose(); throw; }
             }
             var connection = new Connection(pipe);
-            lock (_stateGate) _connection = connection;
+            lock (_stateGate)
+            {
+                if (_disposed || _stopping || ExitPendingLocked)
+                { connection.Close(new IOException("后台正在退出。")); throw new IOException("后台正在退出。"); }
+                _connection = connection;
+            }
             DiagnosticLog.Info("client.ipc", "connected", "Connected to the shared backend", new { _pipeName });
             _ = RunBackground(() => ReadMessagesAsync(connection));
             return connection;
@@ -316,15 +339,20 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                 }
                 else if (message.Kind == "event" && message.Event is { } notification)
                 {
+                    bool terminal = false;
                     lock (_stateGate)
                     {
                         if (!ReferenceEquals(_connection, connection) || connection.Closed) continue;
-                        if (notification.Kind == "stopping") _stopping = true;
                         SetBackendInstance(notification.BackendInstanceId);
+                        connection.BackendInstanceId = notification.BackendInstanceId;
                         if (notification.Snapshot is { } snapshot) Remember(snapshot);
-                        if (notification.CalibrationSpectrum is not null) _spectra.Writer.TryWrite(new(notification, connection));
-                        else if (!_events.Writer.TryWrite(new(notification, connection))) throw new IOException("界面无法及时接收后台事件。");
+                        if (notification.Kind == "stopping") terminal = true;
+                        else if (notification.Kind == "requestExit") ReceivePrepareLocked(notification, connection);
+                        else if (notification.Kind == "exitCancelled") ReceiveExitCancelledLocked(notification);
+                        else if (notification.CalibrationSpectrum is not null) _spectra.Writer.TryWrite(new(notification, connection));
+                        else QueueStateLocked(notification, connection);
                     }
+                    if (terminal) CommitStopping(notification, sourceConnection: connection);
                 }
                 else throw new InvalidDataException("无效的后台消息。");
             }
@@ -338,19 +366,23 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
         {
             connection.Close(failure);
             bool reconnect = false;
+            BackendEvent? terminal = null;
             lock (_stateGate)
             {
                 if (ReferenceEquals(_connection, connection))
                 {
                     _backendInstanceId = null; _snapshots.Clear();
-                    if (!_disposed && !_stopping)
+                    if (!_disposed && !_stopping && ReferenceEquals(_exitConnection, connection) && _localExitVote == true && _exitRequest is { } exit)
+                        terminal = new() { Kind = "stopping", BackendInstanceId = exit.BackendInstanceId, ExitRequestId = exit.ExitRequestId };
+                    if (!_disposed && !_stopping && !ExitPendingLocked)
                     {
-                        _events.Writer.TryWrite(new(new BackendEvent { Kind = "unavailable", Message = _versionMismatch
-                            ? "后台与界面版本不一致，请从托盘退出后台后重新打开完整客户端。" : "蓝牙后台已中断，正在重新连接。" }, connection));
+                        QueueStateLocked(new BackendEvent { Kind = "unavailable", Message = _versionMismatch
+                            ? "后台与界面版本不一致，请从托盘退出后台后重新打开完整客户端。" : "蓝牙后台已中断，正在重新连接。" }, connection);
                         reconnect = !_versionMismatch && _role is not null;
                     }
                 }
             }
+            if (terminal is not null) CommitStopping(terminal, sourceConnection: connection);
             if (reconnect) _ = ReconnectAsync();
         }
     }
@@ -360,19 +392,20 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
         if (Interlocked.CompareExchange(ref _reconnecting, 1, 0) != 0) return;
         try
         {
-            while (!_disposed && !_stopping && !_versionMismatch)
+            while (CanReconnect)
             {
                 await Task.Delay(1000, _lifetime.Token).ConfigureAwait(false);
+                if (!CanReconnect) return;
                 try
                 {
                     var subscription = await SubscribeAsync(_role!, _lifetime.Token);
                     lock (_stateGate)
                     {
                         if (_connection is not { Closed: false } connection || _backendInstanceId != subscription.BackendInstanceId) continue;
-                        _events.Writer.TryWrite(new(new BackendEvent { Kind = "catalog", BackendInstanceId = subscription.BackendInstanceId,
-                            Catalog = subscription.Catalog, Devices = subscription.Devices }, connection));
+                        QueueStateLocked(new BackendEvent { Kind = "catalog", BackendInstanceId = subscription.BackendInstanceId,
+                            Catalog = subscription.Catalog, Devices = subscription.Devices }, connection);
                         foreach (var snapshot in subscription.Snapshots)
-                            _events.Writer.TryWrite(new(new BackendEvent { Kind = "snapshot", BackendInstanceId = subscription.BackendInstanceId, Snapshot = snapshot }, connection));
+                            QueueStateLocked(new BackendEvent { Kind = "snapshot", BackendInstanceId = subscription.BackendInstanceId, Snapshot = snapshot }, connection);
                     }
                     return;
                 }
@@ -385,7 +418,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
         {
             Volatile.Write(ref _reconnecting, 0);
             bool restart;
-            lock (_stateGate) restart = !_disposed && !_stopping && !_versionMismatch && _role is not null
+            lock (_stateGate) restart = !_disposed && !_stopping && !ExitPendingLocked && !_versionMismatch && _role is not null
                 && (_connection is null || _connection.Closed);
             if (restart) _ = ReconnectAsync();
         }
@@ -400,10 +433,14 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                 var notification = queued.Value;
                 lock (_stateGate)
                 {
+                    if (ReferenceEquals(channel, _events)) DrainOverflowLocked();
+                    if (queued.Target is not null && !(_eventReceived?.GetInvocationList().Contains(queued.Target) ?? false)) continue;
+                    if (notification.Kind == "requestExit" && (_stopping || _exitRequest?.ExitRequestId != notification.ExitRequestId)) continue;
+                    if (_stopping && notification.Kind is not ("requestExit" or "exitCancelled" or "stopping")) continue;
                     if (queued.Source is { } source && (!ReferenceEquals(_connection, source)
                         || source.Closed && notification.Kind is not ("stopping" or "unavailable"))) continue;
                 }
-                var handlers = EventReceived;
+                var handlers = queued.Target ?? _eventReceived;
                 if (notification.Kind == "diagnosticFailure" && notification.DiagnosticFailure is { } failure)
                     DiagnosticLog.ReportExternalFailure(failure);
                 if (handlers is null) continue;
@@ -460,7 +497,9 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
     {
         if (_disposed) return;
         DiagnosticLog.Info("client.lifecycle", "dispose", "Closing this client connection; backend remains running");
-        _disposed = true; _lifetime.Cancel(); _events.Writer.TryComplete(); _spectra.Writer.TryComplete();
+        _disposed = true; _lifetime.Cancel(); _stopConnecting.Cancel();
+        _events.Writer.TryComplete(); _spectra.Writer.TryComplete(); _controlEvents.Writer.TryComplete();
+        UnregisterBridge();
         await _connectGate.WaitAsync();
         try { _connection?.Close(new ObjectDisposedException(nameof(ClientBridge))); _connection = null; }
         finally { _connectGate.Release(); }
@@ -476,6 +515,9 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
         public SemaphoreSlim WriteGate { get; } = new(1, 1);
         public ConcurrentDictionary<long, PendingResponse> Pending { get; } = new();
         private int _closed;
+        public bool Subscribed;
+        public string? BackendInstanceId;
+        public int StopAckSent;
         public bool Closed => Volatile.Read(ref _closed) != 0;
         public void Close(Exception error)
         {

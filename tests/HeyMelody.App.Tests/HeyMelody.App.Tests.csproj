@@ -10,4 +10,5 @@
   <ItemGroup><Content Include="Fixtures/*.webp;Fixtures/*.png" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
   <ItemGroup><Compile Include="../HeyMelody.Rendering.Filament.Tests/GlbSource.cs" Link="Rendering/GlbSource.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../HeyMelody.ModelPreview.Tests/NativeWindowCapture.cs" Link="Rendering/NativeWindowCapture.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../Shared/NativeWindowLifetimeHarness.cs" Link="NativeWindowLifetimeHarness.cs" /></ItemGroup>
 </Project>

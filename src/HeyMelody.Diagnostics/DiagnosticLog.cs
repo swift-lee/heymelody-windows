@@ -34,6 +34,7 @@ public static class DiagnosticLog
         Correlation.Value = null;
         _reportToStandardError = false;
         Failed = null;
+        DiagnosticRuntime.ResetLaunchStateForTests();
     }
 
     internal static void InitializeIdentity(string component, string role, bool reportToStandardError = false)

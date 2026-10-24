@@ -5,6 +5,17 @@ using System.Text.Json;
 using HeyMelody.Diagnostics;
 
 if (OperatingSystem.IsWindows()) NativeMethods.SetErrorMode(3);
+if (args.FirstOrDefault() == "--bound-child") return await ChildLaunchChecks.RunChildAsync(args);
+
+if (await LogRetentionChecks.TryRunChildAsync(args) is int retentionChildExit) return retentionChildExit;
+if (args is ["--log-retention-tests"])
+{
+    string retentionRoot = Path.Combine(Path.GetTempPath(), "HeyMelody-log-retention-" + Guid.NewGuid().ToString("N"));
+    int retentionChecks = await LogRetentionChecks.RunAsync(retentionRoot, (valid, name) =>
+    { if (!valid) throw new InvalidOperationException(name); Console.WriteLine("PASS " + name); });
+    Console.WriteLine($"Log retention checks passed: {retentionChecks}; only isolated test processes were started.");
+    return 0;
+}
 
 if (args is ["--owner"])
 {
@@ -166,6 +177,8 @@ try
             && !logs.Any(row => row.GetProperty("eventName").GetString() == "afterOwnerExit"), "old component never follows next descriptor");
     }
     await WriterFailureChecks.RunAsync(root, Check);
+    await ChildLaunchChecks.RunAsync(root, Check);
+    await LogRetentionChecks.RunAsync(Path.Combine(root, "retention"), Check);
     Console.WriteLine($"Diagnostics checks passed: {passed}; no Bluetooth or Explorer invoked.");
     return 0;
 }

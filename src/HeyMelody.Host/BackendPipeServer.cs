@@ -10,12 +10,14 @@ using HeyMelodyWindows.App;
 
 namespace HeyMelodyWindows.Host;
 
-internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pipeName = null, EnergyPolicy? energy = null) : IAsyncDisposable
+internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, string? pipeName = null, EnergyPolicy? energy = null,
+    TimeSpan? exitVoteBudget = null, TimeSpan? stoppingBudget = null) : IAsyncDisposable
 {
     // A window sends subscribe in the same request that opens its connection, so this only bounds a silent or stuck client.
     // It is longer than EnergyPolicy's launch hold and shorter than ClientBridge's 90 s subscribe budget.
     internal static readonly TimeSpan SubscribeGrace = TimeSpan.FromSeconds(60);
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly CancellationTokenSource _acceptLifetime = new();
     private readonly ConcurrentDictionary<string, Client> _clients = new();
     private readonly SemaphoreSlim _exitGate = new(1);
     private readonly object _activationSync = new(), _voteSync = new(), _guiSync = new();
@@ -37,13 +39,13 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
     {
         try
         {
-            while (!_lifetime.IsCancellationRequested)
+            while (!_acceptLifetime.IsCancellationRequested)
             {
                 var pipe = new NamedPipeServerStream(pipeName ?? BackendEndpoint.PipeName, PipeDirection.InOut, NamedPipeServerStream.MaxAllowedServerInstances,
                     PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
                 try
                 {
-                    await pipe.WaitForConnectionAsync(_lifetime.Token);
+                    await pipe.WaitForConnectionAsync(_acceptLifetime.Token);
                     if (!IsLocalSession(pipe)) { pipe.Dispose(); continue; }
                     if (_clients.Count >= 16) { pipe.Dispose(); continue; }
                     var client = new Client(pipe, this);
@@ -52,12 +54,13 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
                     if (energy is not null) client.LapseUnsubscribedAfter(energy.Time, SubscribeGrace, UpdateGuiCount);
                     UpdateGuiCount();
                     _ = client.RunAsync();
+                    ClientAcceptedDuringExit(client);
                 }
                 catch { pipe.Dispose(); throw; }
             }
         }
         catch (OperationCanceledException) { }
-        catch (IOException) when (_lifetime.IsCancellationRequested) { }
+        catch (IOException) when (_acceptLifetime.IsCancellationRequested) { }
     }
     private static bool IsLocalSession(NamedPipeServerStream pipe)
     {
@@ -99,15 +102,17 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
         { client.Reply(request.Id, null, "versionMismatch", "前后端版本不一致，请重启软件或重新安装。"); return; }
         if (request.Operation.Length is 0 or > 32)
         { client.Reply(request.Id, null, "invalidRequest", "请求无效。"); return; }
+        if (RejectStoppingOperation(client, request)) return;
         if (request.Operation == "subscribe")
         {
             if (request.Role is not ("main" or "manager" or "preview" or "observer" or "calibration"))
             { client.Reply(request.Id, null, "invalidRole", "订阅角色无效。"); return; }
             supervisor.Subscribe(subscription =>
             {
-                client.Role = request.Role; client.Reply(request.Id, subscription);
+                SubscribeDuringExit(client, request, subscription);
             });
             UpdateGuiCount();
+            if (IsStopping) return;
             lock (_activationSync)
             {
                 if (client.Role == "main" && _pendingActivation)
@@ -155,14 +160,9 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
                     data = new ArtworkLeaseReply(await supervisor.AcquireArtworkAsync(client.Key, StringArg("productId"), NullableInt("color"), StringArg("role"), client.Lifetime.Token)); break;
                 case "releaseArtwork": data = supervisor.ReleaseArtwork(client.Key, StringArg("leaseId")); break;
                 case "exitVote":
-                    lock (_voteSync)
-                    {
-                        if (client.Role is not ("main" or "calibration") || request.ExitRequestId != _exitId || request.Approved is not { } approved
-                            || !_votes.TryGetValue(client.Key, out var vote)) throw new InvalidOperationException();
-                        client.Reply(request.Id, true);
-                        vote.TrySetResult(approved);
-                    }
-                    return;
+                    ReceiveExitVote(client, request); return;
+                case "stoppingAck":
+                    ReceiveStoppingAcknowledgement(client, request); return;
                 case "activateMain": ActivateMain(false); data = true; break;
                 default: throw new InvalidDataException();
             }
@@ -194,6 +194,7 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
     {
         lock (_activationSync)
         {
+            if (IsStopping) throw new InvalidOperationException("后台正在退出。");
             var main = _clients.Values.FirstOrDefault(c => c.Role == "main" && !c.Lifetime.IsCancellationRequested);
             if (main is not null) { main.SendEvent(new() { Kind = "activate", BackendInstanceId = supervisor.InstanceId }); return; }
             _pendingActivation = true;
@@ -230,69 +231,38 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
         throw new FileNotFoundException("主界面组件缺失，请重启软件或重新安装。");
     }
 
-    public async Task RequestExitAsync()
-    {
-        if (!await _exitGate.WaitAsync(0)) return;
-        DiagnosticLog.Info("host.lifecycle", "exitRequested", "Host exit requested");
-        try
-        {
-            Client[] main;
-            string id = Guid.NewGuid().ToString("N");
-            lock (_voteSync)
-            {
-                main = _clients.Values.Where(c => c.Role is "main" or "calibration" && !c.Lifetime.IsCancellationRequested).ToArray();
-                _exitId = id; _votes.Clear();
-                foreach (var client in main) _votes[client.Key] = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            }
-            foreach (var client in main) client.SendEvent(new() { Kind = "requestExit", BackendInstanceId = supervisor.InstanceId, ExitRequestId = id });
-            bool approved;
-            try
-            {
-                Task<bool>[] tasks; lock (_voteSync) tasks = _votes.Values.Select(v => v.Task).ToArray();
-                var result = await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(60), _lifetime.Token);
-                approved = result.All(value => value);
-            }
-            catch (Exception) { approved = false; }
-            if (!approved)
-            {
-                DiagnosticLog.Info("host.lifecycle", "exitCancelled", "Host exit was cancelled", new { id });
-                Broadcast(new() { Kind = "exitCancelled", BackendInstanceId = supervisor.InstanceId, ExitRequestId = id, Message = "退出已取消。" }); return;
-            }
-            DiagnosticLog.Info("host.lifecycle", "exitApproved", "Host exit approved", new { id });
-            Broadcast(new() { Kind = "stopping", BackendInstanceId = supervisor.InstanceId });
-            await supervisor.StopGracefullyAsync();
-            if (ExitApproved is { } onExit) await onExit();
-        }
-        finally { lock (_voteSync) { _votes.Clear(); _exitId = null; } _exitGate.Release(); }
-    }
-
     private void Detach(Client client)
     {
         DiagnosticLog.Info("host.ipc", "disconnected", "Client disconnected", new { client.Key, client.Role });
         _clients.TryRemove(client.Key, out _);
         UpdateGuiCount();
         supervisor.ClientDetached(client.Key);
-        lock (_voteSync) if (_votes.TryGetValue(client.Key, out var vote)) vote.TrySetResult(true);
+        ClientDetachedDuringExit(client);
     }
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0) return;
+        _acceptLifetime.Cancel();
+        if (_accept is not null) { try { await _accept; } catch { } }
+        if (IsStopping) await DrainStoppingClientsAsync();
         _lifetime.Cancel(); supervisor.EventPublished -= Broadcast;
         supervisor.CalibrationOwnerEventPublished -= SendOwnerEvent;
         foreach (var client in _clients.Values) client.Dispose();
-        if (_accept is not null) { try { await _accept; } catch { } }
         _mainLaunch?.Dispose();
     }
 
     // An event with its wire line, serialized by whichever client writes it first. The event is never mutated once published.
     internal sealed class Outbound
     {
+        internal TaskCompletionSource? Flushed { get; }
         internal string? DiagnosticCorrelationId { get; } = DiagnosticLog.CurrentCorrelationId;
         private readonly BackendMessage _message;
         private string? _line;
         internal Outbound(BackendMessage message) => _message = message;
         internal BackendMessage Message => _message;
-        internal Outbound(BackendEvent value)
+        internal Outbound(BackendEvent value, TaskCompletionSource? flushed = null)
         {
+            Flushed = flushed;
             _message = new BackendMessage { Kind = "event", Event = value };
             if (value.Kind is "snapshot" or "catalog" or "health" or "calibration" or "resources" or "calibrationSpectrum")
                 CoalesceKey = value.Kind + ":" + (value.CalibrationSpectrum?.Handle ?? value.Calibration?.Handle ?? value.Snapshot?.Identity);
@@ -334,6 +304,13 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
                 Data = data is null ? null : JsonSerializer.SerializeToElement(data, RpcWire.Json) }));
         }
         public void SendEvent(BackendEvent value) => Send(new Outbound(value));
+        public Task SendFlushedAsync(BackendEvent value)
+        {
+            if (Lifetime.IsCancellationRequested) return Task.CompletedTask;
+            var flushed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Send(new Outbound(value, flushed));
+            return flushed.Task.WaitAsync(Lifetime.Token);
+        }
         public void Send(Outbound outbound)
         {
             if (outbound.CoalesceKey is { } key)
@@ -412,6 +389,7 @@ internal sealed class BackendPipeServer(BackendSupervisor supervisor, string? pi
                 using var budget = CancellationTokenSource.CreateLinkedTokenSource(Lifetime.Token);
                 budget.CancelAfter(TimeSpan.FromSeconds(10));
                 await writer.WriteLineAsync(line.AsMemory(), budget.Token); await writer.FlushAsync(budget.Token);
+                message.Flushed?.TrySetResult();
             }
         }
         public void Dispose()
