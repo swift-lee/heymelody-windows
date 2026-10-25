@@ -105,8 +105,6 @@ internal static class DemoVmTests
             Check(vm.Devices.Count == 1 && vm.IsDemoSelected && vm.HasVerifiedSnapshot);
             service.Publish(new() { Kind = "unavailable", Message = "后台测试中断" });
             Check(vm.IsDemoSelected && vm.HasVerifiedSnapshot && vm.CanEditEq && vm.EqName == "后台重连时保留");
-            service.Publish(new() { Kind = "stopping" });
-            Check(vm.IsDemoSelected && vm.HasVerifiedSnapshot);
             service.Backend = "backend-replacement";
             var replacement = Snapshot("real-a", service.Backend); replacement.LeftBattery = 37;
             service.Snapshots[replacement.Identity] = replacement;
@@ -117,6 +115,12 @@ internal static class DemoVmTests
             await vm.SelectDeviceAsync(vm.Devices.Single(device => device.Identity == "real-a"));
             Check(!vm.IsDemoSelected && vm.LeftBatteryText == "37%" && vm.HasVerifiedSnapshot,
                 "Real snapshots received during demo remain available after switching back.");
+            await vm.AddDemoDeviceAsync();
+            var callsBeforeExit = service.Calls.Count;
+            service.Publish(new() { Kind = "stopping" });
+            await vm.SelectDeviceAsync(vm.Devices.Single(device => device.Identity == "real-a"));
+            Check(vm.IsDemoSelected && service.Calls.Count == callsBeforeExit,
+                "A terminal backend exit must retain demo presentation and refuse further device operations.");
         });
 
         await test("demo refresh and device management keep its identity and draft", async () =>

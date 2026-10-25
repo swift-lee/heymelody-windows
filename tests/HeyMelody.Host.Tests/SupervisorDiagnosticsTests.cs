@@ -1,7 +1,7 @@
+using HeyMelody.Platform;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Host;
 using HeyMelodyWindows.Resources;
-using HeyMelodyWindows.Windows;
 
 internal static class SupervisorDiagnosticsTests
 {

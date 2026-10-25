@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22.1)
 if(CMAKE_HOST_APPLE)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET 11.0 CACHE STRING "Native bridge minimum macOS version")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET 15.0 CACHE STRING "Native bridge minimum macOS version")
 endif()
 project(HeyMelodyFilamentNative VERSION 2.0 LANGUAGES C CXX)
 
@@ -117,6 +117,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
 endif()
 
 add_subdirectory("${HM_FILAMENT_SOURCE}" filament EXCLUDE_FROM_ALL)
+if(APPLE)
+    # The pinned backend still maps PVRTC enum values deprecated by the macOS 15
+    # SDK. Keep its source intact while permitting those compatibility mappings
+    # with current Xcode; other warnings remain errors in the upstream target.
+    target_compile_options(backend PRIVATE -Wno-error=deprecated-declarations)
+endif()
 if(HM_RUNTIME_IDENTIFIER STREQUAL "win-arm64")
     # Upstream selects x64 MASM for every 64-bit Windows target. Its existing typed
     # C++ dispatch wrappers preserve the target ABI and are also valid on ARM64.

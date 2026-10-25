@@ -107,7 +107,7 @@ public sealed class DeviceManagerViewModel : ObservableObject, IAsyncDisposable
     }
 
     public void ReportLaunchFailure()
-    { _error = "无法打开蓝牙设置，请在 Windows 设置中打开蓝牙与设备。"; NotifyState(); }
+    { _error = "无法打开蓝牙设置，" + HeyMelody.Platform.DesktopSystemSettings.BluetoothHelp; NotifyState(); }
 
     public void AdoptBackendEvent(BackendEvent notification)
     {

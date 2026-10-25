@@ -1,14 +1,14 @@
 # 开发、构建与验证
 
-本文描述 0.9.2 的源码入口和现行脚本。本轮在 Windows 本地构建，尚未发布到 GitHub。用户操作见根目录 [README](../README.md)，协作规则与文档导航见 [AGENTS.md](../AGENTS.md)，过去版本的结果见[版本记录](history/release-notes.md)。所有命令均从仓库根目录运行。
+本文描述 0.9.2 的源码入口和现行脚本，包含 Windows 与 Apple Silicon macOS 构建。用户操作见根目录 [README](../README.md)，协作规则与文档导航见 [AGENTS.md](../AGENTS.md)，过去版本的结果见[版本记录](history/release-notes.md)。所有命令均从仓库根目录运行。
 
 ## Filament 实验分支
 
-本分支支持 Windows x64、ARM64 打包，默认 Vulkan，在“3D模型渲染API”下拉框选择 OpenGL 可切换后端。“3D模型渲染帧率”提供 30帧、60帧、无限制三档吸附滑块，默认无限制。原生窗口验收使用 Windows x64；ARM64 为交叉构建与静态校验，硬件运行尚未验证。三维层的 macOS Metal、Linux Vulkan／EGLHeadless、ABI 2 和探测程序见 [Filament 构建与接口](filament-renderer.md)。托管构建不要求 APK 或固定 research 路径，真实三维需对应 RID 的完整原生产物；Vulkan 失败使用静态外观并提示手动选择 OpenGL。
+Windows 端支持 x64、ARM64 打包，默认 Vulkan，在“3D模型渲染API”下拉框选择 OpenGL 可切换后端。“3D模型渲染帧率”提供 30帧、60帧、无限制三档吸附滑块，默认无限制。此前 Windows 原生窗口验收使用 x64；ARM64 为交叉构建与静态校验，硬件运行尚未验证。本轮 M1 上的 Metal 与窗口验收范围见 [macOS 说明](macos.md)。三维层的 macOS Metal、Linux Vulkan／EGLHeadless、ABI 2 和探测程序见 [Filament 构建与接口](filament-renderer.md)。托管构建不要求 APK 或固定 research 路径，真实三维需对应 RID 的完整原生产物；Vulkan 失败使用静态外观并提示手动选择 OpenGL。
 
 ## 环境与模块
 
-日常客户端使用 Windows 与 .NET SDK 10，通过仓库 `NuGet.Config` 中的官方 NuGet 源及已签入的局部补丁包恢复依赖。GUI 使用 Avalonia、FluentAvalonia；Windows 平台层目标为 `net10.0-windows`。发布包是自包含应用，终端用户无需安装 SDK。
+Windows 端使用 .NET SDK 10，通过仓库 `NuGet.Config` 中的官方 NuGet 源及已签入的局部补丁包恢复依赖。GUI 使用 Avalonia、FluentAvalonia；Windows 平台层目标为 `net10.0-windows`。发布包是自包含应用，终端用户无需安装 SDK。
 
 | 入口或模块 | 职责 |
 | --- | --- |
@@ -27,6 +27,10 @@
 架构与连接流程见[后台架构](backend-architecture.md)，保留的研究工具见 [CLI 说明](cli-tools.md)。日常客户端、协议、设备配置和控制模块可从本仓库构建；早期驱动/音频实验使用相邻目录 `../manager/src/LhdcManager.Core`，对应私有伴随仓库为 `https://github.com/CberYellowstone/lhdc-manager`。该依赖属于可选实验，不是普通 GUI 构建的前置步骤。
 
 ## 源码构建与运行
+
+macOS Apple Silicon 使用相同的 .NET 10 SDK 和通用 `net10.0`，额外原生接口通过 Objective-C C ABI 提供，不要求安装 .NET macOS workload。公共平台层只依赖 BCL；Host 根据 `HeyMelodyDesktopPlatform` 选择 Windows 或 macOS 适配器。Windows RID 交叉编译仍选择 Windows TFM，不能仅按开发机 OS 选择依赖。
+
+本地工具、完整原生运行时、离线验收及 DMG 入口见 [macOS 说明](macos.md)。`Build-MacOS.ps1` 使用五个独立自包含 bundle，资源集中于外层 `Contents/Resources/ResourceBundles`；Windows 继续使用原有 `Build-Client.ps1`。平台测试使用 `dotnet run --project tests/HeyMelody.Platform.Tests -c Release`，包含跨会话单例与真实 Unix 管道，受限沙箱需要允许本地进程和套接字。
 
 按修改涉及的入口构建，例如：
 

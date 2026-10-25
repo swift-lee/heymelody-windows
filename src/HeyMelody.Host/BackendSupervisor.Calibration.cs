@@ -67,6 +67,20 @@ internal sealed partial class BackendSupervisor
     }
     public UiCalibrationState GetCalibration(string owner, string handle, string? role)
     { lock (_sync) return FindCalibrationLocked(owner, handle, true, role).State; }
+    public async Task<IReadOnlyList<UiPreviewAudioOutput>> GetPreviewAudioOutputsAsync(string owner, string handle, CancellationToken token)
+    {
+        CalibrationLease lease;
+        lock (_sync) { lease = FindCalibrationLocked(owner, handle); ValidateCalibrationLocked(lease); }
+        await lease.Peer.Commands.WaitAsync(token);
+        try
+        {
+            lock (_sync) ValidateCalibrationLocked(lease);
+            var outputs = await lease.Worker.GetPreviewAudioOutputsAsync(handle, token);
+            lock (_sync) ValidateCalibrationLocked(lease);
+            return outputs;
+        }
+        finally { lease.Peer.Commands.Release(); }
+    }
     public async Task<UiCalibrationState> AdvanceCalibrationAsync(string owner, string handle, long revision, UiCalibrationInput input, CancellationToken token)
     {
         CalibrationLease lease; lock (_sync) lease = FindCalibrationLocked(owner, handle);

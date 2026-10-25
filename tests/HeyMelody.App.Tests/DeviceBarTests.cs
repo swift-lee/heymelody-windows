@@ -24,15 +24,15 @@ internal static class DeviceBarTests
         Run("opening with overflowing devices centers the selection within natural strip boundaries", DeviceStartupCenteredAsync);
         Run("selection and resizing respect natural boundaries without overriding manual scrolling", DeviceCenteringInteractionsAsync);
         Run("selected device borders follow theme and accent changes", DeviceThemeAsync);
-        if (OperatingSystem.IsWindows())
+        if (HeyMelody.Platform.DesktopCapabilities.SupportsHeadsetControl)
         {
             Run("add device launches once without enumerating devices or changing an EQ draft", LaunchSuccessAsync);
             Run("failed system launches wait for dialog ownership and show one actionable alert", LaunchFailureAsync);
             Run("closing cancels a pending launch and suppresses its late failure", LaunchClosingAsync);
             return 9;
         }
-        Console.WriteLine("SKIP 3 Windows settings launcher tests: Windows required.");
-        Run("unsupported platforms disable the add button and cannot launch Windows settings", UnsupportedLaunchAsync);
+        Console.WriteLine("SKIP 3 settings launcher tests: headset control is unavailable on this platform.");
+        Run("unsupported platforms disable the add button and cannot launch system settings", UnsupportedLaunchAsync);
         return 7;
 
         void Run(string name, Func<Task> test)
@@ -445,7 +445,9 @@ internal static class DeviceBarTests
             scroll.Offset = new Vector(scroll.Extent.Width, 0); Dispatcher.UIThread.RunJobs();
             CheckInside(button, scroll, "The trailing add button can be reached before it is activated.");
             Click(window, button);
-            Check(launcher.Uris is [{ OriginalString: "ms-settings:bluetooth" }],
+            var expectedUri = OperatingSystem.IsMacOS()
+                ? "x-apple.systempreferences:com.apple.BluetoothSettings" : "ms-settings:bluetooth";
+            Check(launcher.Uris.Count == 1 && launcher.Uris[0].OriginalString == expectedUri,
                 "The add button requests the documented Bluetooth settings URI.");
             Check(!view.FindControl<Border>("AddDeviceHost")!.IsEnabled, "A pending launch disables the add device control.");
             await view.OpenBluetoothSettingsAsync();
@@ -482,7 +484,7 @@ internal static class DeviceBarTests
             window.Show(); Dispatcher.UIThread.RunJobs();
             var button = view.FindControl<Button>("AddDeviceButton")!;
             Check(!view.FindControl<Border>("AddDeviceHost")!.IsEnabled && !button.IsEffectivelyEnabled,
-                "The Windows settings entry is disabled on unsupported platforms.");
+                "The settings entry is disabled on unsupported platforms.");
             Click(window, button);
             await view.OpenBluetoothSettingsAsync();
             Check(launcher.Uris.Count == 0 && service.Enumerations == 1 && service.Submissions == 0,
@@ -522,6 +524,8 @@ internal static class DeviceBarTests
                 Check(dialog.CloseButtonText == "确定" && string.IsNullOrEmpty(dialog.PrimaryButtonText)
                     && string.IsNullOrEmpty(dialog.SecondaryButtonText) && !opening.IsCompleted,
                     "Both a rejected URI and a launcher exception produce one acknowledgement alert.");
+                Check(dialog.Content is string help && help.Contains(OperatingSystem.IsMacOS() ? "macOS 系统设置" : "Windows 设置"),
+                    "Launch failures explain how to open the current platform's Bluetooth settings.");
                 await view.DismissSettingsDialogAsync().WaitAsync(Deadline);
                 await opening.WaitAsync(Deadline);
             }

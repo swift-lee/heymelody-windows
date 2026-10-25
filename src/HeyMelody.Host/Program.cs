@@ -1,3 +1,4 @@
+using HeyMelody.Platform;
 using System.Runtime.CompilerServices;
 using Avalonia;
 using HeyMelodyWindows.Ui;
@@ -10,19 +11,20 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        if (InstallationCheck.TryRun(args, out var installationResult)) return installationResult;
         // Workers never initialize Avalonia or acquire the tray singleton.
         if (args is ["--worker"])
         {
             using var diagnostics = DiagnosticRuntime.InitializeWorker("worker");
-            return NativeWorker.RunAsync().GetAwaiter().GetResult();
+            return HostPlatformFactory.RunWorker(NativeWorker.RunAsync);
         }
         if (args is ["--catalog-worker"])
         {
             using var diagnostics = DiagnosticRuntime.InitializeWorker("catalog-worker");
-            return NativeWorker.EnumerateAsync().GetAwaiter().GetResult();
+            return HostPlatformFactory.RunWorker(NativeWorker.EnumerateAsync);
         }
-        if (args.Length != 0 || !OperatingSystem.IsWindows()) return 2;
-        using var singleton = new Mutex(false, BackendEndpoint.HostMutexName);
+        if (args.Length != 0 || !HostPlatformFactory.IsSupported) return 2;
+        using var singleton = DesktopRuntime.CreateMutex(BackendEndpoint.HostMutexName, out _);
         bool owner;
         try { owner = singleton.WaitOne(0); }
         catch (AbandonedMutexException) { owner = true; }

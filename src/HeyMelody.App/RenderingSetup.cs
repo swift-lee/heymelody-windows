@@ -104,7 +104,7 @@ internal static class RenderingSetup
 
     internal static AppBuilder UseHeyMelodyRendering(this AppBuilder builder, bool? basicRenderMode = null)
     {
-        var requestedBasicRenderMode = basicRenderMode ?? (OperatingSystem.IsWindows() && UiRenderingPreferenceReader.Load());
+        var requestedBasicRenderMode = basicRenderMode ?? UiRenderingPreferenceReader.Load();
         SKGraphics.SetFontCacheLimit(FontCacheLimitBytes);
         DiagnosticLog.Debug("Avalonia.GPU", "configuration", "Applying the existing GUI render configuration.",
             new { basicRenderMode = requestedBasicRenderMode, FontCacheLimitBytes, GpuResourceLimitBytes,
@@ -118,6 +118,13 @@ internal static class RenderingSetup
                 .With(CreateWindowsOptions(requestedBasicRenderMode))
                 // The D3D9 path does not use GraphicsAdapterSelectionCallback. Never let it bypass Basic Render.
                 .With(new AngleOptions { AllowedPlatformApis = [AngleOptions.PlatformApi.DirectX11] });
+        else if (OperatingSystem.IsMacOS())
+            builder = builder.With(new AvaloniaNativePlatformOptions
+            {
+                RenderingMode = requestedBasicRenderMode
+                    ? [AvaloniaNativeRenderingMode.Software]
+                    : [AvaloniaNativeRenderingMode.Metal, AvaloniaNativeRenderingMode.Software]
+            });
         return builder.AfterSetup(_ =>
         {
             if (!DiagnosticLog.IsEnabled) return;

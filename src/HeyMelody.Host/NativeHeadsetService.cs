@@ -3,7 +3,7 @@ using HeyMelodyWindows.Control;
 using HeyMelodyWindows.Daily;
 using HeyMelodyWindows.Devices;
 using HeyMelodyWindows.Protocol;
-using HeyMelodyWindows.Windows;
+using HeyMelody.Platform;
 
 using HeyMelody.Diagnostics;
 
@@ -12,6 +12,7 @@ namespace HeyMelodyWindows.Host;
 public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManagementService
 {
     private readonly Func<IReadOnlyList<BluetoothCandidate>> _enumerate;
+    private readonly IBluetoothPlatform _bluetooth;
     private readonly DeviceWhitelistStore _whitelist;
     private readonly Func<ICalibrationAuditionPlayer> _auditionFactory;
     private readonly Dictionary<ulong, string> _identities = [];
@@ -28,11 +29,16 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
     private readonly Dictionary<long, long> _uiRevisions = [];
     public event Action<UiSnapshot>? SnapshotChanged;
 
-    public NativeHeadsetService() : this(WindowsBluetooth.EnumeratePaired, DeviceWhitelistStore.CreateDefault()) { }
+    public NativeHeadsetService() : this(null, DeviceWhitelistStore.CreateDefault()) { }
 
-    internal NativeHeadsetService(Func<IReadOnlyList<BluetoothCandidate>> enumerate, DeviceWhitelistStore whitelist,
+    internal NativeHeadsetService(Func<IReadOnlyList<BluetoothCandidate>>? enumerate, DeviceWhitelistStore whitelist,
         Func<ICalibrationAuditionPlayer>? auditionFactory = null)
-    { _enumerate = enumerate; _whitelist = whitelist; _auditionFactory = auditionFactory ?? (() => new WasapiCalibrationAuditionPlayer()); }
+    {
+        _bluetooth = HostPlatformFactory.CreateBluetooth();
+        _enumerate = enumerate ?? (() => _bluetooth.EnumeratePairedAsync(CancellationToken.None).GetAwaiter().GetResult());
+        _whitelist = whitelist;
+        _auditionFactory = auditionFactory ?? HostPlatformFactory.CreateAuditionPlayer;
+    }
 
     public Task<IReadOnlyList<UiDevice>> EnumerateAsync(CancellationToken token)
     {
@@ -63,7 +69,7 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
     private IReadOnlyList<BluetoothCandidate> EnumerateCandidates(CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        var paired = _enumerate().Where(WindowsBluetooth.IsAudioCandidate).ToArray();
+        var paired = _enumerate().Where(BluetoothCandidates.IsAudioCandidate).ToArray();
         token.ThrowIfCancellationRequested();
         _devices.Clear();
         foreach (var device in paired)
@@ -110,7 +116,7 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
         }
         token.ThrowIfCancellationRequested();
         if (!_whitelist.Load().Contains(DeviceWhitelistStore.KeyFor(peer.Address))
-            || !_enumerate().Any(device => device.Address == peer.Address && WindowsBluetooth.IsAudioCandidate(device)))
+            || !_enumerate().Any(device => device.Address == peer.Address && BluetoothCandidates.IsAudioCandidate(device)))
         {
             var rejected = new InvalidOperationException("所选耳机未启用或已解除配对，请重新选择设备。");
             DiagnosticLog.Warning("host.connection", "connectFailed", "Requested device was rejected by the whitelist or is no longer a paired audio device", rejected,
@@ -404,7 +410,11 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
     private static EarbudPlacement Placement(bool? inCase, bool? inEar) => inEar == true ? EarbudPlacement.InEar
         : inCase == true ? EarbudPlacement.InCase : inCase == false ? EarbudPlacement.OutOfCase : EarbudPlacement.Unknown;
 
-    public ValueTask DisposeAsync() => new(DisconnectAsync(CancellationToken.None));
+    public async ValueTask DisposeAsync()
+    {
+        try { await DisconnectAsync(CancellationToken.None); }
+        finally { _bluetooth.Dispose(); }
+    }
 
     public object Diagnostics() => new
     {
@@ -439,30 +449,30 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
         decoder.Complete();
     }
 
-    private sealed class PeerConnector(ulong address, Action<ReadOnlyMemory<byte>> record, IReadOnlyList<Guid>? serviceIds = null) : IControlConnector
+    private sealed class PeerConnector(IBluetoothPlatform platform, ulong address, Action<ReadOnlyMemory<byte>> record, IReadOnlyList<Guid>? serviceIds = null) : IControlConnector
     {
         private readonly IReadOnlyList<Guid> _serviceIds = serviceIds ?? [X4Profile.Load().Uuid];
         public async Task<IControlTransport> OpenAsync(CancellationToken token)
         {
             token.ThrowIfCancellationRequested();
-            var devices = WindowsBluetooth.EnumeratePaired().Where(device => device.Address == address && device.Authenticated).ToArray();
+            var devices = (await platform.EnumeratePairedAsync(token)).Where(device => device.Address == address && device.Authenticated).ToArray();
             if (devices.Length != 1 || !devices[0].Connected) throw new IOException("The selected peer is disconnected.");
-            RfcommConnection connection;
-            try { connection = await RfcommConnection.ConnectControlAsync(address, _serviceIds, token); }
-            catch (RfcommServiceDiscoveryException failure)
+            Stream connection;
+            try { connection = await platform.OpenControlChannelAsync(address, _serviceIds, token); }
+            catch (BluetoothDiscoveryException failure)
             {
-                throw new ControlTransportUnavailableException(failure.IsAmbiguous
+                throw new ControlTransportUnavailableException(failure.Failure == BluetoothDiscoveryFailure.AmbiguousServices
                     ? ControlTransportFailure.AmbiguousServices : ControlTransportFailure.ServiceNotFound);
             }
             return new Transport(connection, record);
         }
     }
 
-    private sealed class Transport(RfcommConnection connection, Action<ReadOnlyMemory<byte>> record) : IControlTransport
+    private sealed class Transport(Stream connection, Action<ReadOnlyMemory<byte>> record) : IControlTransport
     {
         public Task SendAsync(ReadOnlyMemory<byte> bytes, CancellationToken token)
-        { record(bytes); return connection.SendAsync(bytes, token); }
-        public Task<int> ReadAsync(Memory<byte> buffer, CancellationToken token) => connection.ReadAsync(buffer, token);
+        { record(bytes); return connection.WriteAsync(bytes, token).AsTask(); }
+        public Task<int> ReadAsync(Memory<byte> buffer, CancellationToken token) => connection.ReadAsync(buffer, token).AsTask();
         public ValueTask DisposeAsync() => connection.DisposeAsync();
     }
 }

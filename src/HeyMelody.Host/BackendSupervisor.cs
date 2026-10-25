@@ -1,6 +1,6 @@
 using System.Text.Json;
 using HeyMelodyWindows.App;
-using HeyMelodyWindows.Windows;
+using HeyMelody.Platform;
 
 using HeyMelody.Diagnostics;
 
@@ -92,14 +92,14 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
     // Completes with true once the tray's first catalog refresh has succeeded; null outside start-up.
     private Task<bool>? _startup;
 
-    public async Task InitializeAsync(CancellationToken token)
+    public async Task InitializeAsync(CancellationToken token, bool refreshCatalog = true)
     {
         var startup = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         Volatile.Write(ref _startup, startup.Task);
         try
         {
             await InitializeResourcesAsync(token);
-            await RefreshCatalogAsync(token);
+            if (refreshCatalog) await RefreshCatalogAsync(token);
             startup.TrySetResult(true);
         }
         catch (Exception) { startup.TrySetResult(false); throw; }
@@ -117,13 +117,29 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
         if (Volatile.Read(ref _startup) is { } startup && await startup.WaitAsync(token)) return;
         await RefreshCatalogAsync(token);
     }
+    private UiPlatformStatus? _platformStatus;
+    internal void UpdatePlatformStatus(BluetoothPlatformStatus status)
+    {
+        var platform = OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsMacOS() ? "macOS" : "Linux";
+        var state = new UiPlatformStatus(platform, status.Access.ToString(),
+            status.RadioAvailable is { } available ? available ? "PoweredOn" : "PoweredOff" : "Unknown",
+            status.Message ?? (status.RadioAvailable == false ? "蓝牙已关闭，请在系统设置中开启蓝牙。" : ""));
+        lock (_sync)
+        {
+            if (_platformStatus == state) return;
+            _platformStatus = state;
+            EmitLocked(new() { Kind = "platform", Platform = state });
+            PublishCatalogLocked();
+        }
+    }
+
     public BackendSubscription Subscribe(Action<BackendSubscription>? atomicReply = null)
     {
         lock (_sync)
         {
             var result = new BackendSubscription { BackendInstanceId = InstanceId, Catalog = CatalogLocked(),
                 Devices = DevicesLocked(), Snapshots = _peers.Values.Where(p => p.Present && p.Allowed).Select(p => Copy(p.Published)).ToArray(),
-                DiagnosticFailures = DiagnosticFailuresLocked() };
+                DiagnosticFailures = DiagnosticFailuresLocked(), Platform = _platformStatus };
             atomicReply?.Invoke(result); return result;
         }
     }
@@ -136,7 +152,12 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
             IsPreferredSelection = _deviceState.PreferredKey == DeviceWhitelistStore.KeyFor(p.Candidate.Address) }).ToArray();
     private UiDeviceCatalog CatalogLocked() => new(_peers.Values.Where(p => p.Present)
         .OrderByDescending(p => p.Candidate.Connected).ThenBy(p => p.Candidate.Name, StringComparer.OrdinalIgnoreCase)
-        .Select(p => new UiDeviceCandidate(p.Identity, p.Candidate.Name, p.Candidate.Connected, p.Allowed)).ToArray(), _catalogWarning);
+        .Select(p => new UiDeviceCandidate(p.Identity, p.Candidate.Name, p.Candidate.Connected, p.Allowed)).ToArray(),
+        !string.IsNullOrWhiteSpace(_catalogWarning) ? _catalogWarning : PlatformWarningLocked());
+
+    private string? PlatformWarningLocked() => _platformStatus is { } status &&
+        (status.BluetoothAccess is "NotDetermined" or "Denied" or "Restricted" or "Unsupported" || status.AdapterState == "PoweredOff")
+        ? status.Message : null;
 
     public async Task RefreshCatalogAsync(CancellationToken token)
     {
@@ -149,7 +170,7 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
             lock (_sync)
             {
                 if (_stopping) return;
-                var present = candidates.Where(WindowsBluetooth.IsAudioCandidate)
+                var present = candidates.Where(BluetoothCandidates.IsAudioCandidate)
                     .Where(p => !_osPresent.TryGetValue(p.Address, out var paired) || paired).ToDictionary(p => p.Address);
                 foreach (var peer in _peers.Values)
                     if (!present.ContainsKey(peer.Candidate.Address) && peer.Present)

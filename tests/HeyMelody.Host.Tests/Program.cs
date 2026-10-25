@@ -1,7 +1,7 @@
+using HeyMelody.Platform;
 using System.Text.Json;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Host;
-using HeyMelodyWindows.Windows;
 
 TestProcessErrorMode.SuppressWindowsErrorDialogs();
 
@@ -22,6 +22,7 @@ try
     if (args is ["--audition-tests"])
     {
         await CalibrationAuditionTests.RunAsync(Test, scratch);
+        await MacCalibrationAuditionTests.RunAsync(Test);
         Console.WriteLine(JsonSerializer.Serialize(new { passed, success = true, nativeBluetoothCalls = 0 }));
         return 0;
     }
@@ -35,18 +36,18 @@ try
     await Test("cached classes include paired audio even while disconnected", () =>
     {
         foreach (uint minor in new uint[] { 1, 2, 4, 5, 6, 7, 8, 10, 15, 19, 20 })
-            Check(WindowsBluetooth.IsAudioCandidate(Audio(1) with { ClassOfDevice = 0x400 | (minor << 2) }));
-        Check(WindowsBluetooth.IsAudioCandidate(Audio(1) with { ClassOfDevice = 0x200400 }));
-        Check(WindowsBluetooth.IsAudioCandidate(Audio(1) with { ClassOfDevice = 0x200000 }));
-        Check(WindowsBluetooth.IsAudioCandidate(Audio(1) with { ClassOfDevice = 0x201F00 }));
-        Check(WindowsBluetooth.IsAudioCandidate(Audio(1) with { ClassOfDevice = 0x404 | (1u << 14) }));
+            Check(BluetoothCandidates.IsAudioCandidate(Audio(1) with { ClassOfDevice = 0x400 | (minor << 2) }));
+        Check(BluetoothCandidates.IsAudioCandidate(Audio(1) with { ClassOfDevice = 0x200400 }));
+        Check(BluetoothCandidates.IsAudioCandidate(Audio(1) with { ClassOfDevice = 0x200000 }));
+        Check(BluetoothCandidates.IsAudioCandidate(Audio(1) with { ClassOfDevice = 0x201F00 }));
+        Check(BluetoothCandidates.IsAudioCandidate(Audio(1) with { ClassOfDevice = 0x404 | (1u << 14) }));
         return Task.CompletedTask;
     });
     await Test("remembered-only, keyboards, video and unknown classes are excluded", () =>
     {
         foreach (uint cod in new uint[] { 0, 0x540, 0x580, 0x200540, 0x438, 0x430, 0x20010C, 0x20020C })
-            Check(!WindowsBluetooth.IsAudioCandidate(Audio(1) with { ClassOfDevice = cod }));
-        Check(!WindowsBluetooth.IsAudioCandidate(Audio(1) with { Authenticated = false }));
+            Check(!BluetoothCandidates.IsAudioCandidate(Audio(1) with { ClassOfDevice = cod }));
+        Check(!BluetoothCandidates.IsAudioCandidate(Audio(1) with { Authenticated = false }));
         return Task.CompletedTask;
     });
     await Test("missing whitelist is empty and loading never creates a file", () =>
@@ -199,6 +200,7 @@ try
     await CalibrationBackendTests.RunAsync(Test, scratch);
     await NativeCalibrationDescriptionTests.RunAsync(Test, scratch);
     await CalibrationAuditionTests.RunAsync(Test, scratch);
+    await MacCalibrationAuditionTests.RunAsync(Test);
     await ResourceBackendTests.RunAsync(Test, scratch);
     await ResourceBackendTests.RunAppearanceAsync(Test, scratch);
     await NativeSnapshotMappingTests.RunAsync(Test, scratch);

@@ -8,6 +8,8 @@ internal interface ICalibrationPeerWorker
     event Action<UiCalibrationSpectrum>? CalibrationSpectrumChanged;
     Task<UiCalibrationState> CreateCalibrationAsync(string handle, string kind, CancellationToken token);
     Task<UiCalibrationState> GetCalibrationAsync(string handle, CancellationToken token);
+    Task<IReadOnlyList<UiPreviewAudioOutput>> GetPreviewAudioOutputsAsync(string handle, CancellationToken token) =>
+        Task.FromResult<IReadOnlyList<UiPreviewAudioOutput>>([]);
     Task<UiCalibrationState> AdvanceCalibrationAsync(string handle, long revision, UiCalibrationInput input, CancellationToken token);
     Task<UiCalibrationState> CancelCalibrationAsync(string handle, CancellationToken token);
     Task<IReadOnlyList<UiHearingProfile>> HearingProfilesAsync(CancellationToken token);
@@ -32,6 +34,8 @@ internal sealed partial class PeerWorker
         RequestAsync<UiCalibrationState>(new() { Operation = "createCalibration", Handle = handle, CalibrationKind = kind }, token);
     public Task<UiCalibrationState> GetCalibrationAsync(string handle, CancellationToken token) =>
         RequestAsync<UiCalibrationState>(new() { Operation = "getCalibration", Handle = handle }, token);
+    public async Task<IReadOnlyList<UiPreviewAudioOutput>> GetPreviewAudioOutputsAsync(string handle, CancellationToken token) =>
+        await RequestAsync<UiPreviewAudioOutput[]>(new() { Operation = "calibrationAudioOutputs", Handle = handle }, token);
     public Task<UiCalibrationState> AdvanceCalibrationAsync(string handle, long revision, UiCalibrationInput input, CancellationToken token) =>
         RequestAsync<UiCalibrationState>(new() { Operation = "advanceCalibration", Handle = handle, Revision = revision, Input = input }, token);
     public Task<UiCalibrationState> CancelCalibrationAsync(string handle, CancellationToken token) =>

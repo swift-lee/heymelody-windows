@@ -10,6 +10,7 @@ public partial class MainWindow : FAAppWindow
 {
     private readonly MainViewModel _viewModel;
     private readonly IHeadsetService _service;
+    private readonly Ui.DesktopWindowBackdrop _backdrop;
     private readonly TrackedDeviceManager? _manager;
     private readonly CancellationTokenSource _managerLifetime = new();
     private readonly WindowConfirmationService _confirmations;
@@ -23,10 +24,10 @@ public partial class MainWindow : FAAppWindow
     internal bool StartWithDemo { get; init; }
 
     public MainWindow() : this(HeadsetServiceFactory.Create(), false,
-        OperatingSystem.IsWindows() ? new DeviceManagerProcess() : null) { }
+        HeyMelody.Platform.DesktopCapabilities.SupportsHeadsetControl ? new DeviceManagerProcess() : null) { }
 
     internal MainWindow(IHeadsetService service) : this(service, false,
-        OperatingSystem.IsWindows() ? new DeviceManagerProcess() : null) { }
+        HeyMelody.Platform.DesktopCapabilities.SupportsHeadsetControl ? new DeviceManagerProcess() : null) { }
 
     internal MainWindow(IHeadsetService service, bool preview) : this(service, preview, null) { }
 
@@ -34,6 +35,9 @@ public partial class MainWindow : FAAppWindow
         IConfirmationService? confirmations = null)
     {
         InitializeComponent();
+        _backdrop = new Ui.DesktopWindowBackdrop(this, useWindowsMicaAlt: false);
+        _backdrop.Changed += () => Page.SetNativeWindowBackdrop(_backdrop.Applied);
+        Page.SetNativeWindowBackdrop(_backdrop.Applied);
         Ui.Typography.ApplyTextOptions(this);
         Ui.RenderDiagnostics.Attach(this);
         AnimationYieldTriggers.AttachWindow(this);
@@ -43,7 +47,8 @@ public partial class MainWindow : FAAppWindow
         _confirmations = new WindowConfirmationService(this);
         _viewModel = new MainViewModel(service, confirmations ?? _confirmations, preview);
         Page.DataContext = _viewModel;
-        Page.SetPlatformNotice(!OperatingSystem.IsWindows());
+        Page.SetPlatformNotice(!HeyMelody.Platform.DesktopCapabilities.SupportsHeadsetControl);
+        Ui.DesktopWindowIntegration.Attach(this, _events);
         Page.ManageDevicesRequested = manager is not null ? ManageDevicesAsync : null;
         if (!preview && service is ICalibrationService calibration)
         {
@@ -55,7 +60,7 @@ public partial class MainWindow : FAAppWindow
         Opened += async (_, _) => await InitializeOnceAsync();
         Closing += OnClosing;
         if (_events is not null) _events.EventReceived += OnBackendEvent;
-        Closed += (_, _) => { if (_events is not null) _events.EventReceived -= OnBackendEvent; };
+        Closed += (_, _) => { _backdrop.Dispose(); if (_events is not null) _events.EventReceived -= OnBackendEvent; };
     }
 
     private async Task InitializeOnceAsync()

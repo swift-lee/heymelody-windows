@@ -165,7 +165,10 @@
                       HorizontalScrollBarVisibility="Disabled">
           <StackPanel x:Name="ControlStack" Margin="0,0,8,24" Spacing="8">
             <fa:FAInfoBar x:Name="PlatformNotice" Severity="Informational" IsClosable="False" IsOpen="False" IsVisible="False"
-                          Title="仅预览界面" Message="耳机控制目前仅支持 Windows。" />
+                          Title="仅预览界面" Message="当前平台不支持蓝牙耳机控制。" />
+            <fa:FAInfoBar x:Name="BluetoothPlatformNotice" Severity="Warning" IsClosable="False"
+                          IsOpen="{Binding HasPlatformWarning}" IsVisible="{Binding HasPlatformWarning}"
+                          Message="{Binding PlatformMessage}" AutomationProperties.LiveSetting="Polite" />
             <fa:FAInfoBar x:Name="DemoNotice" Severity="Informational" IsClosable="False"
                           IsOpen="{Binding IsDemoSelected}" IsVisible="{Binding IsDemoSelected}"
                           Title="布局演示" Message="控件仅模拟交互，关闭窗口后自动移除。" />

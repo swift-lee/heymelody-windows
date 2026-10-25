@@ -64,7 +64,7 @@ internal sealed partial class BackendPipeServer
 
     private bool RejectStoppingOperation(Client client, BackendRequest request)
     {
-        if (request.Operation is "exitVote" or "stoppingAck") return false;
+        if (request.Operation is "exitVote" or "stoppingAck" or "requestExit") return false;
         lock (_voteSync)
         {
             if (_exitPhase == ExitPhase.Idle || _exitPhase == ExitPhase.Voting && request.Operation is "subscribe" or "cancelCalibration") return false;

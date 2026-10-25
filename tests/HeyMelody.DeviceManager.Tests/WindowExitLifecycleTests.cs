@@ -1,4 +1,6 @@
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
 using HeyMelody.TestSupport;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.DeviceManager;
@@ -13,6 +15,22 @@ internal static class WindowExitLifecycleTests
 
     private static async Task VerifyAsync()
     {
+        if (OperatingSystem.IsMacOS())
+        {
+            var quitService = new ExitService();
+            var quitWindow = await OpenAsync(quitService);
+            await VerifyBackdropAsync(quitWindow);
+            await MacBackdropCapture.CaptureAsync(quitWindow, "device-manager");
+            var desktop = (IClassicDesktopStyleApplicationLifetime)Application.Current!.ApplicationLifetime!;
+            Check(!desktop.TryShutdown(), "Native Quit bypassed the shared exit protocol.");
+            await UntilAsync(() => quitService.ExitRequests == 1, "Manager native Quit did not request product exit.");
+            quitService.Push("requestExit", "native-quit");
+            await UntilAsync(() => quitService.Votes.Count == 1, "Manager did not vote after native Quit.");
+            quitService.Push("exitCancelled", "native-quit");
+            Check(quitWindow.IsVisible, "A cancelled native Quit closed the manager.");
+            await StopAsync(quitWindow, quitService);
+            Pass("macOS manager Quit requests global exit and waits for commit");
+        }
         var service = new ExitService();
         var window = await OpenAsync(service);
         var model = (DeviceManagerViewModel)window.FindControl<DeviceManagerView>("Page")!.DataContext!;
@@ -112,6 +130,8 @@ internal static class WindowExitLifecycleTests
         internal bool ReplayStopping, DisposeFailure;
         internal Exception? VoteFailure;
         internal int Subscriptions, Disposals, Saves;
+        internal int ExitRequests;
+        public Task RequestApplicationExitAsync(CancellationToken token) { ExitRequests++; return Task.CompletedTask; }
         internal TaskCompletionSource<UiWhitelistSaveResult>? PendingSave;
         internal TaskCompletionSource? PendingDispose;
         internal readonly List<(string Request, bool Approved)> Votes = [];

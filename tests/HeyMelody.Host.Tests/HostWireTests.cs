@@ -1,3 +1,4 @@
+using HeyMelody.Platform;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -5,7 +6,6 @@ using System.Text.Json.Serialization.Metadata;
 using System.Text.RegularExpressions;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Host;
-using HeyMelodyWindows.Windows;
 
 // HostWire.Json serves the worker stdio types from generated metadata; the pure-reflection copy is the byte baseline of the
 // previous implementation. Every instance and input below must give identical bytes through both resolvers.

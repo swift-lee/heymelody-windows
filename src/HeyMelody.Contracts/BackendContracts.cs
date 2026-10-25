@@ -52,6 +52,7 @@ public sealed class BackendEvent
     public UiCalibrationState? Calibration { get; set; }
     public UiCalibrationSpectrum? CalibrationSpectrum { get; set; }
     public UiResourceSettings? Resources { get; set; }
+    public UiPlatformStatus? Platform { get; set; }
 }
 
 public sealed class BackendSubscription
@@ -62,7 +63,10 @@ public sealed class BackendSubscription
     public IReadOnlyList<UiDevice> Devices { get; set; } = [];
     public IReadOnlyList<UiSnapshot> Snapshots { get; set; } = [];
     public IReadOnlyList<DiagnosticFailure> DiagnosticFailures { get; set; } = [];
+    public UiPlatformStatus? Platform { get; set; }
 }
+
+public sealed record UiPlatformStatus(string Platform, string BluetoothAccess, string AdapterState, string Message);
 
 // Typed Action/Data payloads; property names and order match the anonymous objects they replaced.
 public sealed record HearingSelectionArgs(int? Uid);
@@ -83,4 +87,6 @@ public interface IHeadsetEventService : IHeadsetService
     Task<UiApplyResult> ApplyAsync(string identity, long deviceGeneration, UiAction action, CancellationToken cancellationToken);
     Task AcknowledgeExitAsync(string exitRequestId, bool approved, CancellationToken cancellationToken);
     Task ActivateMainUiAsync(CancellationToken cancellationToken);
+    Task RequestApplicationExitAsync(CancellationToken cancellationToken) =>
+        Task.FromException(new PlatformNotSupportedException("当前后台不支持发起协同退出。"));
 }

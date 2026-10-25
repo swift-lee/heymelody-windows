@@ -117,3 +117,11 @@ UI-00 为 2026-10-22 界面性能轮（起点 `a13e236`）已完成项的汇总�
 | BUG-11 | `src/HeyMelody.Client/ClientBridge.cs` `ReadMessagesAsync` 结束分支 @1840a68 | 本窗口已投同意票、另一窗口否决后，若 Host 因队列溢出或写超时断开本管道，客户端可能把断管当作终止停止而关闭窗口，后台仍在运行（静态分析，触发概率未确认） | 避免误关闭窗口 | 需要区分“断管”与“收到 stopping”，补竞态检查 | 待处理 | 2026-10-25 日志与退出审计（顺带发现） |
 | BUG-12 | `src/HeyMelody.Client/ClientBridge.cs` `EnsureConnectionAsync` @1840a68 | `CommitStopping` 取消 `_stopConnecting` 后，等待连接门的调用方收到 `OperationCanceledException`，此前为 `IOException`，调用方可能误判为用户取消（静态分析，影响未确认） | 统一异常语义 | 需逐一核对调用方处理 | 待处理 | 2026-10-25 日志与退出审计（顺带发现） |
 | BUG-13 | `tests/HeyMelody.App.Tests/ArtworkPersistenceTests.cs` 设置卡片检查 @1840a68 | `--artwork-persistence-tests` 断言设置对话框恰有 8 个带图标的 `FASettingsExpanderItem`；e75453c 增加 Basic Render 卡片后顶层已有 9 张，且该查询会计入展开器内部条目，基线与本轮均在“Every setting, including the 3D frame rate, is an icon card.”失败（Linux 无头复现） | 恢复该模式其余检查的覆盖 | 断言应改为只统计顶层卡片并按名称核对，需同步确认诊断日志区的新布局 | 待处理 | 2026-10-25 日志与退出审计（顺带发现） |
+
+## macOS 后续资源验证（MAC）
+
+以下条目以移植前 `0cabb0b` 为基线，涉及本轮新增文件，按符号定位。
+
+| 编号 | 位置 | 现象与依据 | 预估收益 | 风险与依赖 | 状态 | 登记来源 |
+| --- | --- | --- | --- | --- | --- | --- |
+| MAC-01 | `src/HeyMelody.MacOS/MacBluetoothPlatform.cs`：`_events` / `Publish`（本轮新增） | 原生事件先进入无界托管队列，广播尚无按设备合并策略（静态分析）；本轮没有蓝牙实测，未测量真实积压或能耗 | 后续可按广播流量限制瞬时内存并减少重复处理；收益未测量 | 授权、断连、扫描代次和休眠事件必须可靠有序，不能简单丢弃最旧事件；需真机广播负载与取消验证 | 待处理 | 2026-10-25 macOS 移植（资源方向顺带发现） |

@@ -11,6 +11,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.LogicalTree;
 using Avalonia.VisualTree;
 using HeyMelodyWindows.Ui;
+using HeyMelody.Platform;
 
 namespace HeyMelodyWindows.App;
 
@@ -58,7 +59,7 @@ public partial class MainView : UserControl
             if (ViewModel is { } vm && HearingProfileCombo.SelectedItem is UiHearingProfile profile)
                 await vm.SelectHearingProfileAsync(profile);
         });
-        AddDeviceHost.IsEnabled = OperatingSystem.IsWindows();
+        AddDeviceHost.IsEnabled = DesktopCapabilities.SupportsHeadsetControl;
         SoundSectionsView.ItemsSource = _soundSections;
         DeviceSectionsView.ItemsSource = _deviceSections;
         SizeChanged += (_, _) => UpdateLayoutMode(Bounds.Size);
@@ -183,6 +184,11 @@ public partial class MainView : UserControl
     }
 
     public void SetPlatformNotice(bool visible) => PlatformNotice.IsOpen = PlatformNotice.IsVisible = visible;
+    internal void SetNativeWindowBackdrop(bool applied)
+    {
+        if (!OperatingSystem.IsMacOS() && !OperatingSystem.IsLinux()) return;
+        PageSurface.IsVisible = !applied;
+    }
     internal void SetModelDemo()
     {
         _modelDemo = true;
@@ -310,7 +316,8 @@ public partial class MainView : UserControl
 
     internal async Task OpenBluetoothSettingsAsync()
     {
-        if (_modelDemo || !OperatingSystem.IsWindows() || _closingWindow || _openingBluetoothSettings
+        if (_modelDemo || !DesktopCapabilities.SupportsHeadsetControl || DesktopSystemSettings.BluetoothUri is not { } settingsUri
+            || _closingWindow || _openingBluetoothSettings
             || ViewModel is not { Closing: false } vm || TopLevel.GetTopLevel(this) is not { } owner) return;
         using var cancellation = new CancellationTokenSource();
         _bluetoothSettingsCancellation = cancellation;
@@ -319,7 +326,7 @@ public partial class MainView : UserControl
         try
         {
             bool launched;
-            try { launched = await (LauncherOverride ?? owner.Launcher).LaunchUriAsync(new Uri("ms-settings:bluetooth")); }
+            try { launched = await (LauncherOverride ?? owner.Launcher).LaunchUriAsync(settingsUri); }
             catch { launched = false; }
             if (launched || _closingWindow || vm.Closing || cancellation.IsCancellationRequested) return;
             await vm.Dialogs.RunAsync(async token =>
@@ -328,7 +335,7 @@ public partial class MainView : UserControl
                 await ShowSettingsDialogAsync(new FAContentDialog
                 {
                     Title = "无法打开蓝牙设置",
-                    Content = "无法打开蓝牙设置，请在 Windows 设置中打开蓝牙与设备。",
+                    Content = "无法打开蓝牙设置，" + DesktopSystemSettings.BluetoothHelp,
                     CloseButtonText = "确定",
                     DefaultButton = FAContentDialogButton.Close
                 }, owner, token);
@@ -339,7 +346,7 @@ public partial class MainView : UserControl
         {
             _bluetoothSettingsCancellation = null;
             _openingBluetoothSettings = false;
-            AddDeviceHost.IsEnabled = !_modelDemo && OperatingSystem.IsWindows() && !_closingWindow;
+            AddDeviceHost.IsEnabled = !_modelDemo && DesktopCapabilities.SupportsHeadsetControl && !_closingWindow;
         }
     }
 
@@ -391,7 +398,7 @@ public partial class MainView : UserControl
     {
         _closingWindow = false;
         UpdateDeviceInfoCopyAvailability();
-        AddDeviceHost.IsEnabled = !_modelDemo && OperatingSystem.IsWindows() && !_openingBluetoothSettings;
+        AddDeviceHost.IsEnabled = !_modelDemo && DesktopCapabilities.SupportsHeadsetControl && !_openingBluetoothSettings;
     }
 
     private async Task ShowAppSettingsAsync(CancellationToken token)
@@ -402,7 +409,7 @@ public partial class MainView : UserControl
         var savedTheme = ThemePreferences.Load();
         var savedUiBasicRenderMode = ThemePreferences.LoadUiBasicRenderMode();
         var panel = new AppSettingsPanel(vm, savedTheme,
-            OperatingSystem.IsWindows() && ManageDevicesRequested is not null,
+            DesktopCapabilities.SupportsHeadsetControl && ManageDevicesRequested is not null,
             () => { _manageDevicesRequested = true; dialog?.Hide(); });
         panel.ThemePreviewChanged += theme => (Application.Current as App)?.ApplyTheme(theme);
         dialog = new FAContentDialog { Title = "应用设置", Content = panel, PrimaryButtonText = "保存", CloseButtonText = "取消", DefaultButton = FAContentDialogButton.Primary };

@@ -3,6 +3,7 @@ using Avalonia.Headless;
 using HeyMelodyWindows.Host;
 using HeyMelodyWindows.Ui;
 using HeyMelody.Diagnostics;
+using HeyMelody.Platform;
 
 namespace HeyMelodyWindows.App;
 
@@ -14,7 +15,8 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
-        using var loadTrace = args.Length == 0 && OperatingSystem.IsWindows() ? null : ModelLoadTrace.Start();
+        if (InstallationCheck.TryRun(args, out var installationExit)) return installationExit;
+        using var loadTrace = args.Length == 0 && DesktopCapabilities.SupportsHeadsetControl ? null : ModelLoadTrace.Start();
         if (args.FirstOrDefault() == "--model-loading-benchmark") return ModelLoadingBenchmark.Run(args);
         if (args.Length > 0 && args[0] == "--3d-demo")
         {
@@ -26,16 +28,16 @@ internal static class Program
         if (PreviewOptions.TryParse(args, out var preview, out var error))
         {
             if (error is not null) { Console.Error.WriteLine(error); return 2; }
-            if (preview!.Live && !OperatingSystem.IsWindows())
-            { Console.Error.WriteLine("真实只读预览需要 Windows 蓝牙后台。"); return 2; }
+            if (preview!.Live && !DesktopCapabilities.SupportsHeadsetControl)
+            { Console.Error.WriteLine("当前平台不支持蓝牙后台。"); return 2; }
             return PreviewRenderer.Run(preview);
         }
         if (args.Length != 0) { Console.Error.WriteLine(Usage); return 2; }
-        if (OperatingSystem.IsWindows())
+        if (DesktopCapabilities.SupportsHeadsetControl)
         {
             using var diagnostics = DiagnosticRuntime.InitializeClient(DiagnosticComponents.Main);
             using var normalLoadTrace = ModelLoadTrace.Start();
-            using var mainInstance = new Mutex(initiallyOwned: false, BackendEndpoint.MainMutexName);
+            using var mainInstance = DesktopRuntime.CreateMutex(BackendEndpoint.MainMutexName, out _);
             var ownsMain = false;
             try
             {
@@ -80,7 +82,8 @@ internal static class Program
     }
 
     public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<App>()
-        .UsePlatformDetect().UseHeyMelodyDiagnostics().UseHeyMelodyRendering().UseHeyMelodyTypography();
+        .UsePlatformDetect().With(new MacOSPlatformOptions { ShowInDock = true })
+        .UseHeyMelodyDiagnostics().UseHeyMelodyRendering().UseHeyMelodyTypography();
 
     public static AppBuilder BuildHeadlessApp()
     {

@@ -26,7 +26,7 @@ internal static class MainUiTestLayout
         Dispatcher.UIThread.RunJobs();
     }
 
-    internal static async Task<Point> ClickPointAsync(Window window, Control control, double? x = null)
+    internal static async Task<Point> ClickPointAsync(Window window, Control control, double? x = null, bool requireFullVisibility = false)
     {
         var timer = System.Diagnostics.Stopwatch.StartNew();
         Point? point = null;
@@ -41,7 +41,12 @@ internal static class MainUiTestLayout
             if (point is { } current && control.Bounds.Width > 0 && control.Bounds.Height > 0)
             {
                 hit = window.InputHitTest(current);
-                if (hit is Visual visual && (ReferenceEquals(visual, control) || visual.GetVisualAncestors().Contains(control)))
+                var scroll = requireFullVisibility ? control.GetVisualAncestors().OfType<ScrollViewer>().FirstOrDefault() : null;
+                var origin = scroll is not null ? control.TranslatePoint(default, scroll) : null;
+                bool visible = scroll is null || origin is { } offset && offset.X >= -.6 && offset.Y >= -.6
+                    && offset.X + control.Bounds.Width <= scroll.Viewport.Width + .6
+                    && offset.Y + control.Bounds.Height <= scroll.Viewport.Height + .6;
+                if (visible && hit is Visual visual && (ReferenceEquals(visual, control) || visual.GetVisualAncestors().Contains(control)))
                     return current;
             }
             await Task.Delay(20);
