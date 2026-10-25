@@ -29,9 +29,9 @@ public sealed partial class NativeHeadsetService
     }
     private DailyClient CreateDailyClient(ulong address)
     {
-        if (_catalog is null) return new(new PeerConnector(address, RecordSubmission));
+        if (_catalog is null) return new(new PeerConnector(_bluetooth, address, RecordSubmission));
         var services = _catalog.Profiles.Values.Where(p => p.CanUseControlTransport).Select(p => Guid.Parse(p.Uuid!)).Distinct().ToArray();
-        return new(new PeerConnector(address, RecordSubmission, services), id => _catalog.Find(id) is { CanUseControlTransport: true } p
+        return new(new PeerConnector(_bluetooth, address, RecordSubmission, services), id => _catalog.Find(id) is { CanUseControlTransport: true } p
             ? DeviceProfile.FromResource(p.Raw, _catalog.Sha256) : null, _appMarker, _observedProductId, _observedColor);
     }
     internal async Task<UiSnapshot> SetObservedColorAsync(string productId, byte color, CancellationToken token) =>

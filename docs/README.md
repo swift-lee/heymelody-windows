@@ -1,6 +1,8 @@
 # 文档索引
 
-当前版本为 **0.9.2**，本轮为 Windows 本地构建，尚未发布到 GitHub。初次使用先读项目 [README](../README.md)；参与开发或研究先读 [AGENTS.md](../AGENTS.md)，再按任务选择下列文档。无需一次展开所有链接。
+Apple Silicon macOS 的安装、平台边界、构建和验收见 [macOS 说明](macos.md)。版本仍为 0.9.2，蓝牙真机调试留待后续开展。
+
+当前版本为 **0.9.2**，包含 Windows 与 Apple Silicon macOS 平台实现。初次使用先读项目 [README](../README.md)；参与开发或研究先读 [AGENTS.md](../AGENTS.md)，再按任务选择下列文档。无需一次展开所有链接。
 
 ## 用户说明
 

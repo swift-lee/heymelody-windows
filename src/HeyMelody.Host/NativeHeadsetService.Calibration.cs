@@ -3,12 +3,13 @@ using HeyMelodyWindows.Calibration;
 using HeyMelodyWindows.Protocol;
 
 using HeyMelody.Diagnostics;
+using HeyMelody.Platform;
 
 namespace HeyMelodyWindows.Host;
 
 public sealed partial class NativeHeadsetService
 {
-    private readonly CalibrationHistoryStore _hearingHistory = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HeyMelody", "hearing"));
+    private readonly CalibrationHistoryStore _hearingHistory = new(Path.Combine(ApplicationPaths.DataRoot, "hearing"));
     private CalibrationEngine? _calibration;
     private CalibrationDeviceContext? _calibrationContext;
     private UiCalibrationState? _calibrationState;
@@ -98,8 +99,10 @@ public sealed partial class NativeHeadsetService
             throw new InvalidOperationException("当前设备不支持此测试，或必要的控制指令不可用。");
         if (_calibrationState is { Stage: not ("Completed" or "Failed" or "Cancelled") })
             throw new InvalidOperationException("请先完成或取消当前测试。");
+        if (_auditionPlayer is ISelectableCalibrationAuditionPlayer selectable) selectable.ResetSelection();
         _calibrationState = new() { Handle = handle, Identity = _selected!, Generation = _generation,
             Revision = ++_calibrationRevision, Workflow = kind, Stage = "Ready",
+            PreviewAudioOutputSelectionRequired = OperatingSystem.IsMacOS(),
             HearingVersion = _calibrationContext!.HearingV2 ? "V2" : "V1", SupportsEarScan = _calibrationContext.EarScan };
         _client!.SetCalibrationActive(true);
         return _calibrationState;
@@ -135,6 +138,7 @@ public sealed partial class NativeHeadsetService
             case "preview-original": await PreviewAuditionAsync(CalibrationPreviewMode.Original, token); break;
             case "preview-enhanced": await PreviewAuditionAsync(CalibrationPreviewMode.Enhanced, token); break;
             case "preview-stop": await PreviewAuditionAsync(CalibrationPreviewMode.Stopped, token); break;
+            case "selectPreviewOutput": await SelectPreviewOutputAsync(handle, input.OutputToken ?? "", token); break;
             case "save":
                 await StopLocalAuditionAsync();
                 int? replace = null;

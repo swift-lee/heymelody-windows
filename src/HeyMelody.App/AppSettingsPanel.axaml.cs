@@ -22,7 +22,7 @@ public partial class AppSettingsPanel : UserControl
     {
         InitializeComponent();
         InitializeDiagnosticSettings();
-        UiBasicRenderCard.IsVisible = OperatingSystem.IsWindows();
+        UiBasicRenderCard.IsVisible = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS();
         UiBasicRenderSwitch.IsChecked = ThemePreferences.LoadUiBasicRenderMode();
         ModelCompatibilityCard.IsVisible = !OperatingSystem.IsMacOS();
         ModelBackendChoice.ItemsSource = new[] { "Vulkan", "OpenGL" };

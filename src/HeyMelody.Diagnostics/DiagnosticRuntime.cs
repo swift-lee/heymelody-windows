@@ -122,7 +122,7 @@ public static partial class DiagnosticRuntime
             if (session.UserSessionKey != DiagnosticPaths.UserSessionKey) return false;
             candidate = Process.GetProcessById(session.OwnerProcessId);
             if (candidate.HasExited || candidate.StartTime.ToUniversalTime().Ticks != session.OwnerStartTimeUtcTicks
-                || candidate.SessionId != Process.GetCurrentProcess().SessionId)
+                || (OperatingSystem.IsWindows() && candidate.SessionId != Process.GetCurrentProcess().SessionId))
                 return false;
             owner = candidate;
             candidate = null;

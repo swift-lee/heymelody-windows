@@ -2,6 +2,7 @@
 **/obj/
 .vs/
 .idea/
+.DS_Store
 .venv/
 __pycache__/
 *.py[cod]
@@ -14,6 +15,7 @@ __pycache__/
 /research/
 /release/
 /artifacts/
+/src/HeyMelody.MacOS/native/build*/
 /outputs/
 *.pcap
 *.pcapng

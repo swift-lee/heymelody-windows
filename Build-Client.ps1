@@ -231,7 +231,7 @@ foreach ($architecture in $targetArchitectures) {
         architecture = $architecture; rid = $rid; selfContained = $true
         gui = ($architecture + '/HeyMelody.exe'); deviceManager = ($architecture + '/HeyMelody.DeviceManager.exe'); host = ($architecture + '/backend/HeyMelody.Host.exe')
         fitTest = ($architecture + '/HeyMelody.FitTest.exe'); hearingSetup = ($architecture + '/HeyMelody.HearingSetup.exe')
-        guiFramework = 'net10.0'; deviceManagerFramework = 'net10.0'; fitTestFramework = 'net10.0'; hearingSetupFramework = 'net10.0'; hostFramework = 'net10.0-windows10.0.19041.0'; uiToolkit = 'Avalonia + FluentAvalonia'
+        guiFramework = 'net10.0-windows10.0.19041.0'; deviceManagerFramework = 'net10.0-windows10.0.19041.0'; fitTestFramework = 'net10.0-windows10.0.19041.0'; hearingSetupFramework = 'net10.0-windows10.0.19041.0'; hostFramework = 'net10.0-windows10.0.19041.0'; uiToolkit = 'Avalonia + FluentAvalonia'
         guiSha256 = (Get-FileHash -LiteralPath (Join-Path $app 'HeyMelody.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
         deviceManagerSha256 = (Get-FileHash -LiteralPath (Join-Path $app 'HeyMelody.DeviceManager.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
         fitTestSha256 = (Get-FileHash -LiteralPath (Join-Path $app 'HeyMelody.FitTest.exe') -Algorithm SHA256).Hash.ToLowerInvariant()

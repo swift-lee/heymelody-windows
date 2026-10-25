@@ -9,9 +9,10 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        if (HeyMelody.Platform.InstallationCheck.TryRun(args, out var installationExit)) return installationExit;
         if (args is ["--ui-preview"]) DeviceManagerApp.Preview = true;
         else if (args.Length != 0) return 2;
-        if (!DeviceManagerApp.Preview && !OperatingSystem.IsWindows()) return 2;
+        if (!DeviceManagerApp.Preview && !HeyMelody.Platform.DesktopCapabilities.SupportsHeadsetControl) return 2;
         if (!DeviceManagerApp.Preview && DiagnosticRuntime.IsBoundLaunchExpired)
         {
             // Diagnostics are not initialized yet, so leave a trace on stderr.
@@ -25,5 +26,6 @@ internal static class Program
     }
 
     public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<DeviceManagerApp>().UsePlatformDetect()
+        .With(new MacOSPlatformOptions { ShowInDock = false })
         .UseHeyMelodyDiagnostics().UseHeyMelodyRendering().UseHeyMelodyTypography();
 }

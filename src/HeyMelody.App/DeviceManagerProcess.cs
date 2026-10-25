@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using HeyMelody.Diagnostics;
+using HeyMelody.Platform;
 
 namespace HeyMelodyWindows.App;
 
@@ -28,25 +29,8 @@ internal sealed class DeviceManagerProcess : IDeviceManagerProcess
     public async Task<DeviceManagerOutcome> RunAsync(CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        var start = new ProcessStartInfo
-        {
-            FileName = Path.Combine(AppContext.BaseDirectory, "HeyMelody.DeviceManager.exe"),
-            WorkingDirectory = AppContext.BaseDirectory,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardError = true
-        };
-        if (!File.Exists(start.FileName))
-        {
-            var project = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-                "../../../../HeyMelody.DeviceManager/bin"));
-            var dll = new[] { "Release", "Debug" }.Select(configuration =>
-                Path.Combine(project, configuration, "net10.0", "HeyMelody.DeviceManager.dll"))
-                .FirstOrDefault(File.Exists);
-            if (dll is null) throw new FileNotFoundException("设备管理组件缺失，请重启软件或重新安装。");
-            start.FileName = "dotnet";
-            start.ArgumentList.Add(dll);
-        }
+        var start = ApplicationPaths.ResolveComponent("HeyMelody.DeviceManager");
+        start.RedirectStandardError = true;
         using var process = StartPreparedProcess(start, token);
         DiagnosticLog.Info("ui.process", "launched", "Launched the device manager process",
             new { component = "HeyMelody.DeviceManager", start.FileName, args = start.ArgumentList.ToArray(), processId = TryId(process) });

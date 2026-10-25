@@ -15,7 +15,7 @@ internal sealed class TrayApplication : Application
 {
     private BackendSupervisor? _supervisor;
     private BackendPipeServer? _server;
-    private WindowsStateMonitor? _monitor;
+    private HostPlatformMonitor? _monitor;
     private EnergyPolicy? _energyPolicy;
     private EnergyController? _energy;
     private Process? _self;
@@ -76,7 +76,7 @@ internal sealed class TrayApplication : Application
                 _exiting = true;
                 StartForcedExitWatchdog();
                 try { await Dispatcher.UIThread.InvokeAsync(() => _monitor.Dispose()); }
-                catch (Exception error) { DiagnosticLog.Error("host.lifecycle", "monitorDisposeFailed", "Windows observers could not finish cleanup", error); }
+                catch (Exception error) { DiagnosticLog.Error("host.lifecycle", "monitorDisposeFailed", "Platform observers could not finish cleanup", error); }
                 try { await _server.DisposeAsync(); }
                 catch (Exception error) { DiagnosticLog.Error("host.lifecycle", "pipeDisposeFailed", "Backend pipe could not finish cleanup", error); }
                 try
@@ -122,7 +122,7 @@ internal sealed class TrayApplication : Application
 
     private async Task StartAsync()
     {
-        try { await _monitor!.StartAsync(); await _supervisor!.InitializeAsync(CancellationToken.None); }
+        try { await _monitor!.StartAsync(); await _supervisor!.InitializeAsync(CancellationToken.None, _monitor.CanEnumerate); }
         catch (Exception error)
         {
             DiagnosticLog.Error("Host", "backend.initializeFailed", "Bluetooth backend initialization failed", error);

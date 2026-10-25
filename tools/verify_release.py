@@ -257,13 +257,16 @@ def verify(root, package, evidence=None, architectures=("x64", "x86", "arm64")):
         assert declared[arch]["rid"] == "win-" + arch and declared[arch]["selfContained"] is True
         assert declared[arch]["guiSha256"] == sha(gui) and declared[arch]["hostSha256"] == sha(host)
         assert declared[arch]["deviceManagerSha256"] == sha(manager)
-        assert declared[arch]["guiFramework"] == "net10.0" and declared[arch]["hostFramework"] == "net10.0-windows10.0.19041.0"
-        assert declared[arch]["deviceManagerFramework"] == "net10.0"
+        # Retain historical portable-GUI receipts while matching the current Windows-specific GUI TFM.
+        gui_framework = declared[arch]["guiFramework"]
+        assert gui_framework in ("net10.0", "net10.0-windows10.0.19041.0")
+        assert declared[arch]["hostFramework"] == "net10.0-windows10.0.19041.0"
+        assert declared[arch]["deviceManagerFramework"] == gui_framework
         if resource_release:
             for role, executable in zip(("fitTest", "hearingSetup"), components):
                 assert declared[arch][role] == arch + "/" + executable.name
                 assert declared[arch][role + "Sha256"] == sha(executable)
-                assert declared[arch][role + "Framework"] == "net10.0"
+                assert declared[arch][role + "Framework"] == gui_framework
         gui_dependencies = None
         entrypoints = [("HeyMelody", folder), ("HeyMelody.DeviceManager", folder), ("HeyMelody.Host", host.parent)]
         entrypoints += [(path.stem, folder) for path in components]

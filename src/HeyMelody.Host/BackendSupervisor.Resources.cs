@@ -21,6 +21,8 @@ internal sealed partial class BackendSupervisor
     /// </summary>
     internal static string BundleDirectory(string baseDirectory)
     {
+        if (HeyMelody.Platform.ApplicationPaths.FindApplicationBundle(baseDirectory) is not null)
+            return Path.Combine(HeyMelody.Platform.ApplicationPaths.GetResourceRoot(baseDirectory), "ResourceBundles");
         string own = Path.Combine(baseDirectory, "ResourceBundles");
         string shared = Path.GetFullPath(Path.Combine(baseDirectory, "..", "ResourceBundles"));
         return !Directory.Exists(own) && File.Exists(Path.Combine(shared, "artwork.json")) ? shared : own;

@@ -1,3 +1,4 @@
+using HeyMelody.Platform;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Reflection;
@@ -5,7 +6,6 @@ using System.Text;
 using System.Text.Json;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Host;
-using HeyMelodyWindows.Windows;
 
 internal static class BackendTests
 {
@@ -157,9 +157,9 @@ internal static class BackendTests
             Check(backend.Select(id).CaseLid == CaseLidState.Open && backend.Select(id).ObservationFresh);
             time.Advance(TimeSpan.FromSeconds(10)); await Until(() => !backend.Select(id).ObservationFresh);
             var epoch = DateTimeOffset.UtcNow;
-            Check(!WindowsStateMonitor.IsCurrentAdvertisement(epoch.AddMilliseconds(-1), epoch, -30));
-            Check(!WindowsStateMonitor.IsCurrentAdvertisement(epoch, epoch, -127));
-            Check(WindowsStateMonitor.IsCurrentAdvertisement(epoch, epoch, -30));
+            Check(!BluetoothCandidates.IsCurrentAdvertisement(epoch.AddMilliseconds(-1), epoch, -30));
+            Check(!BluetoothCandidates.IsCurrentAdvertisement(epoch, epoch, -127));
+            Check(BluetoothCandidates.IsCurrentAdvertisement(epoch, epoch, -30));
         });
         await test("unsupported SPP initialization discards an earlier supported-product BLE cache for the same peer", async () =>
         {

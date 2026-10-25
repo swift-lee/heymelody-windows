@@ -4,7 +4,6 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
 using FluentAvalonia.UI.Windowing;
 using HeyMelodyWindows.App;
-using HeyMelodyWindows.Windowing;
 using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.DeviceManager;
@@ -12,7 +11,7 @@ namespace HeyMelodyWindows.DeviceManager;
 public partial class DeviceManagerWindow : FAAppWindow
 {
     private readonly DeviceManagerViewModel _viewModel;
-    private readonly MicaAltBackdrop _backdrop;
+    private readonly Ui.DesktopWindowBackdrop _backdrop;
     private readonly IHeadsetEventService? _events;
     private bool _closing, _closed, _backendStopping;
     private Task? _exitVote;
@@ -23,13 +22,14 @@ public partial class DeviceManagerWindow : FAAppWindow
     public DeviceManagerWindow() : this(new ClientBridge(), false) { }
     internal DeviceManagerWindow(IDeviceManagementService service, bool preview)
     {
-        _backdrop = new MicaAltBackdrop(this);
+        _backdrop = new Ui.DesktopWindowBackdrop(this);
         InitializeComponent();
         Ui.Typography.ApplyTextOptions(this);
         Ui.RenderDiagnostics.Attach(this);
         if (preview) Title = "设备管理 · 界面预览";
         _viewModel = new DeviceManagerViewModel(service);
         _events = service as IHeadsetEventService;
+        Ui.DesktopWindowIntegration.Attach(this, _events);
         if (_events is not null) _events.EventReceived += OnBackendEvent;
         Page.DataContext = _viewModel;
         _viewModel.ExitRequested += () => Dispatcher.UIThread.Post(Close);

@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using HeyMelody.Platform;
 using HeyMelodyWindows.Ui;
 
 namespace HeyMelodyWindows.DeviceManager;
@@ -13,12 +14,12 @@ public partial class DeviceManagerView : UserControl
     {
         InitializeComponent();
         SmoothScrolling.Attach(DeviceScroll);
-        BluetoothSettingsHost.IsEnabled = OperatingSystem.IsWindows();
+        BluetoothSettingsHost.IsEnabled = DesktopSystemSettings.BluetoothUri is not null;
     }
     private async void BluetoothSettings_Click(object? sender, RoutedEventArgs e) => await OpenBluetoothSettingsAsync();
     internal async Task OpenBluetoothSettingsAsync()
     {
-        if (_openingSettings || !OperatingSystem.IsWindows()
+        if (_openingSettings || DesktopSystemSettings.BluetoothUri is not { } settingsUri
             || DataContext is not DeviceManagerViewModel { CanRefresh: true } vm
             || TopLevel.GetTopLevel(this) is not { } owner) return;
         _openingSettings = true;
@@ -26,14 +27,14 @@ public partial class DeviceManagerView : UserControl
         try
         {
             var accepted = false;
-            try { accepted = await (LauncherOverride ?? owner.Launcher).LaunchUriAsync(new Uri("ms-settings:bluetooth")); }
+            try { accepted = await (LauncherOverride ?? owner.Launcher).LaunchUriAsync(settingsUri); }
             catch (Exception) { }
             if (!accepted && !vm.Closing) vm.ReportLaunchFailure();
         }
         finally
         {
             _openingSettings = false;
-            BluetoothSettingsHost.IsEnabled = !vm.Closing && OperatingSystem.IsWindows();
+            BluetoothSettingsHost.IsEnabled = !vm.Closing && DesktopSystemSettings.BluetoothUri is not null;
         }
     }
 }

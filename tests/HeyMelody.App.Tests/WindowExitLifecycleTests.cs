@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
 using HeyMelody.Rendering.Filament;
 using HeyMelody.TestSupport;
 using HeyMelodyWindows.App;
@@ -21,6 +22,23 @@ internal static class WindowExitLifecycleTests
 
     private static async Task VerifyAsync()
     {
+        if (OperatingSystem.IsMacOS())
+        {
+            var quitService = new ExitService();
+            var quitWindow = await OpenAsync(quitService);
+            await VerifyBackdropAsync(quitWindow);
+            var desktop = (IClassicDesktopStyleApplicationLifetime)Application.Current!.ApplicationLifetime!;
+            Check(!desktop.TryShutdown(), "Native Quit bypassed the coordinated exit request.");
+            await UntilAsync(() => quitService.ExitRequests == 1, "Native Quit did not request product exit.");
+            quitService.Push("requestExit", "native-quit-veto");
+            await UntilAsync(() => quitService.Votes.Count == 1, "Native Quit was not prepared.");
+            quitService.Push("exitCancelled", "native-quit-veto");
+            Check(quitWindow.IsVisible, "A cancelled native Quit closed the window.");
+            Check(!desktop.TryShutdown(), "A second native Quit bypassed coordination.");
+            await UntilAsync(() => quitService.ExitRequests == 2, "A retry of native Quit was not delivered.");
+            await StopAsync(quitWindow, quitService);
+            Pass("macOS native Quit requests global exit, a veto keeps the window, and commit closes it");
+        }
         var service = new ExitService();
         var window = await OpenAsync(service);
         var model = (MainViewModel)window.FindControl<MainView>("Page")!.DataContext!;
@@ -162,6 +180,8 @@ internal static class WindowExitLifecycleTests
         public event Action<BackendEvent>? EventReceived;
         internal readonly List<(string Request, bool Approved)> Votes = [];
         internal int Subscriptions, Disposals, ResumesAfterStop;
+        internal int ExitRequests;
+        public Task RequestApplicationExitAsync(CancellationToken token) { ExitRequests++; return Task.CompletedTask; }
         internal bool DisposeFailure, Stopping;
         internal Exception? VoteFailure;
         internal TaskCompletionSource? PendingDispose;

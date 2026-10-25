@@ -15,13 +15,14 @@ namespace HeyMelodyWindows.Ui;
 /// Without a configured family, Han characters reach Avalonia's fallback, which scores candidate faces by the
 /// text's culture or, when absent, <see cref="CultureInfo.CurrentUICulture"/>. Under an en-US Windows UI that
 /// can pick a Japanese face, so the same characters show Japanese glyph shapes. The UI only supports Simplified
-/// Chinese: it uses the system's hinted Microsoft YaHei UI and pins the Han fallback before any culture scoring.
+/// Chinese: it uses PingFang SC on macOS and hinted Microsoft YaHei UI on Windows, pinning Han fallback before culture scoring.
 /// Noto Sans SC (OFL-1.1) ships beside the executables for systems without YaHei; YaHei itself may not be bundled.
 /// </remarks>
 internal static class Typography
 {
     internal const string SystemFamily = "Microsoft YaHei UI";
     internal const string SystemLegacyFamily = "Microsoft YaHei";
+    internal const string MacOSFamily = "PingFang SC";
     internal const string BundledFamily = "Noto Sans SC";
     /// <summary>Key of <see cref="WeightMappedFontCollection"/>, which serves every family the UI names.</summary>
     internal const string CollectionKey = "fonts:HeyMelody";
@@ -53,9 +54,14 @@ internal static class Typography
         var files = bundledFallback && Directory.Exists(BundledFontDirectory)
             && Directory.EnumerateFiles(BundledFontDirectory, "*.otf").Any();
         // Fontconfig must see the bundled directory before Skia first matches a family.
-        if (files && !OperatingSystem.IsWindows()) Fontconfig.TryAddApplicationFonts(BundledFontDirectory);
+        if (files && OperatingSystem.IsLinux()) Fontconfig.TryAddApplicationFonts(BundledFontDirectory);
         string[] names;
-        if (HasSystemFamily(SystemFamily))
+        if (OperatingSystem.IsMacOS() && HasSystemFamily(MacOSFamily))
+        {
+            Source = TypographySource.MacOSSystem;
+            names = [MacOSFamily];
+        }
+        else if (HasSystemFamily(SystemFamily))
         {
             Source = TypographySource.System;
             names = [SystemFamily, SystemLegacyFamily];
@@ -171,7 +177,8 @@ internal static class Typography
 
 /// <summary>Serves the UI families from the platform fonts (or the bundled files) with real weight faces.</summary>
 /// <remarks>
-/// Microsoft YaHei UI has Light, Regular and Bold; Noto Sans SC here has Regular, Medium and Bold. A semibold request
+/// PingFang SC provides Regular, Medium and Semibold, while Microsoft YaHei UI has Light, Regular and Bold;
+/// Noto Sans SC here has Regular, Medium and Bold. A semibold request
 /// would otherwise match the lighter face and be emboldened synthetically, which smears Han strokes at UI sizes, so
 /// weights from 550 up to bold use the real bold face. Implemented on the interface because the font manager calls
 /// an internal overload of <see cref="FontCollectionBase"/> that an override would not see.
@@ -181,24 +188,31 @@ internal sealed class WeightMappedFontCollection(IFontCollection? files) : IFont
     public Uri Key { get; } = new(Typography.CollectionKey, UriKind.Absolute);
     private IFontCollection Target => files ?? FontManager.Current.SystemFonts;
 
-    internal static FontWeight Map(FontWeight weight) => (int)weight is >= 550 and < 700 ? FontWeight.Bold : weight;
+    internal static FontWeight Map(FontWeight weight, string? familyName = null)
+    {
+        // PingFang's heaviest installed face is Semibold. Request that real face for UI bold text,
+        // rather than asking CoreText to synthesize a missing 700-weight face.
+        if ((familyName == Typography.MacOSFamily || familyName is null && Typography.Source == TypographySource.MacOSSystem)
+            && weight >= FontWeight.SemiBold) return FontWeight.SemiBold;
+        return (int)weight is >= 550 and < 700 ? FontWeight.Bold : weight;
+    }
 
     public bool TryGetGlyphTypeface(string familyName, FontStyle style, FontWeight weight, FontStretch stretch,
-        [NotNullWhen(true)] out GlyphTypeface? glyphTypeface) => Target.TryGetGlyphTypeface(familyName, style, Map(weight), stretch, out glyphTypeface);
+        [NotNullWhen(true)] out GlyphTypeface? glyphTypeface) => Target.TryGetGlyphTypeface(familyName, style, Map(weight, familyName), stretch, out glyphTypeface);
 
     public bool TryMatchCharacter(int codepoint, FontStyle fontStyle, FontWeight fontWeight, FontStretch fontStretch,
         string? familyName, CultureInfo? culture, out Typeface typeface)
-        => Target.TryMatchCharacter(codepoint, fontStyle, Map(fontWeight), fontStretch, familyName, culture, out typeface);
+        => Target.TryMatchCharacter(codepoint, fontStyle, Map(fontWeight, familyName), fontStretch, familyName, culture, out typeface);
 
     public bool TryGetFamilyTypefaces(string familyName, [NotNullWhen(true)] out IReadOnlyList<Typeface>? familyTypefaces)
         => Target.TryGetFamilyTypefaces(familyName, out familyTypefaces);
 
     public bool TryCreateSyntheticGlyphTypeface(GlyphTypeface glyphTypeface, FontStyle style, FontWeight weight, FontStretch stretch,
         [NotNullWhen(true)] out GlyphTypeface? syntheticGlyphTypeface)
-        => Target.TryCreateSyntheticGlyphTypeface(glyphTypeface, style, Map(weight), stretch, out syntheticGlyphTypeface);
+        => Target.TryCreateSyntheticGlyphTypeface(glyphTypeface, style, Map(weight, glyphTypeface.FamilyName), stretch, out syntheticGlyphTypeface);
 
     public bool TryGetNearestMatch(string familyName, FontStyle style, FontWeight weight, FontStretch stretch,
-        [NotNullWhen(true)] out GlyphTypeface? glyphTypeface) => Target.TryGetNearestMatch(familyName, style, Map(weight), stretch, out glyphTypeface);
+        [NotNullWhen(true)] out GlyphTypeface? glyphTypeface) => Target.TryGetNearestMatch(familyName, style, Map(weight, familyName), stretch, out glyphTypeface);
 
     public int Count => Target.Count;
     public FontFamily this[int index] => Target[index];
@@ -212,6 +226,8 @@ internal enum TypographySource
     None,
     /// <summary>Microsoft YaHei UI from the system.</summary>
     System,
+    /// <summary>PingFang SC from macOS, using its real Regular, Medium and Semibold faces.</summary>
+    MacOSSystem,
     /// <summary>Bundled Noto Sans SC files registered with the platform font manager.</summary>
     BundledSystem,
     /// <summary>Bundled Noto Sans SC files loaded as an Avalonia font collection.</summary>

@@ -203,7 +203,8 @@ foreach ($architecture in $targetArchitectures) {
     $build = $build[0]
     Require (-not $build.hardwareExecutionVerified) ('Unexpected hardware execution claim: ' + $architecture)
     Require ($build.gui -eq ($architecture + '/HeyMelody.exe') -and $build.deviceManager -eq ($architecture + '/HeyMelody.DeviceManager.exe') -and $build.host -eq ($architecture + '/backend/HeyMelody.Host.exe')) ('Unexpected entrypoint manifest paths: ' + $architecture)
-    Require ($build.guiFramework -eq 'net10.0' -and $build.deviceManagerFramework -eq 'net10.0' -and $build.hostFramework -eq 'net10.0-windows10.0.19041.0') ('Unexpected target frameworks: ' + $architecture)
+    # Older Windows packages used the portable GUI TFM; current GUI projects target Windows explicitly.
+    Require ($build.guiFramework -in @('net10.0', 'net10.0-windows10.0.19041.0') -and $build.deviceManagerFramework -eq $build.guiFramework -and $build.hostFramework -eq 'net10.0-windows10.0.19041.0') ('Unexpected target frameworks: ' + $architecture)
     $executables = @(
         @{ role = 'gui'; relativePath = $build.gui; expectedHash = $build.guiSha256; subsystem = 2; assembly = 'HeyMelody' },
         @{ role = 'deviceManager'; relativePath = $build.deviceManager; expectedHash = $build.deviceManagerSha256; subsystem = 2; assembly = 'HeyMelody.DeviceManager' },
@@ -211,7 +212,7 @@ foreach ($architecture in $targetArchitectures) {
     )
     if ($resourceRelease) {
         Require ($build.fitTest -eq ($architecture + '/HeyMelody.FitTest.exe') -and $build.hearingSetup -eq ($architecture + '/HeyMelody.HearingSetup.exe')) ('Unexpected calibration entrypoint paths: ' + $architecture)
-        Require ($build.fitTestFramework -eq 'net10.0' -and $build.hearingSetupFramework -eq 'net10.0') ('Unexpected calibration frameworks: ' + $architecture)
+        Require ($build.fitTestFramework -eq $build.guiFramework -and $build.hearingSetupFramework -eq $build.guiFramework) ('Unexpected calibration frameworks: ' + $architecture)
         $executables += @(
             @{ role = 'fitTest'; relativePath = $build.fitTest; expectedHash = $build.fitTestSha256; subsystem = 2; assembly = 'HeyMelody.FitTest' },
             @{ role = 'hearingSetup'; relativePath = $build.hearingSetup; expectedHash = $build.hearingSetupSha256; subsystem = 2; assembly = 'HeyMelody.HearingSetup' }

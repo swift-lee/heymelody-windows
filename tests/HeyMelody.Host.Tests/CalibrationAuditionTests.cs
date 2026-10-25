@@ -122,10 +122,12 @@ internal static class CalibrationAuditionTests
                 RejectsStream("stream ends early at " + cut, new LyingStream(whole[..cut], whole.Length), unavailable);
             return Task.CompletedTask;
         });
+#if HEYMELODY_WINDOWS
+        if (OperatingSystem.IsWindows())
+        {
         await test("fatal audition render initialization drains commands and rejects future work without hanging", async () =>
         {
             // The render thread is a COM STA thread; off Windows the real player cannot even be constructed.
-            if (!OperatingSystem.IsWindows()) { Console.WriteLine("SKIP fatal audition render initialization drains commands and rejects future work without hanging"); return; }
             string directory = Path.Combine(scratch, "audition-fatal-log"); Directory.CreateDirectory(directory);
             HeyMelody.Diagnostics.DiagnosticLog.InitializeIdentity(HeyMelody.Diagnostics.DiagnosticComponents.Host, "audio-test");
             HeyMelody.Diagnostics.DiagnosticLog.Configure(new() { Enabled = true, SessionId = Guid.NewGuid().ToString("N"),
@@ -153,6 +155,11 @@ internal static class CalibrationAuditionTests
                 }
             Check(preserved, "Actual WASAPI thread initialization failure lost its original diagnostic exception");
         });
+        }
+        else Console.WriteLine("SKIP Windows WASAPI render initialization");
+#else
+        Console.WriteLine("SKIP Windows WASAPI render initialization");
+#endif
         await test("first audition waits for DSP ACK while A/B keeps the stream and pause preserves the cursor", async () =>
         {
             await using var fixture = new Fixture(scratch);

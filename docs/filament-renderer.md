@@ -118,6 +118,8 @@ pwsh -NoProfile -File tools/filament/tests/Test-FilamentArtifactCache.ps1 -Outpu
 
 ## 验证范围
 
+2026-10-25 Apple Silicon 补充：本机完成锁定 Filament 源码的 `osx-arm64` 原生构建，部署目标为 macOS 15.0，清单为 schema 2 / ABI 2 / Metal。真实 M1 GPU 检查通过引擎创建、内置模型加载、伪造摘要与篡改字节拒绝、640×580 像素读回及 320×240 缩放。完整图片保留本地，不进行整张截图审计；完整客户端和蓝牙验证边界见 [macOS 说明](macos.md)。下方带日期的 Windows、Linux 记录保持原验证范围。
+
 可移植渲染检查、默认模型运动检查及原十三个默认 runner 保持各自入口。后端选择、偏好迁移、取消、错误分类和静态回退测试使用隔离设置与替代 renderer，不依赖 GPU。
 
 2026-10-23 本轮 `dotnet run --project tests/HeyMelody.Rendering.Filament.Tests -c Release -p:NuGetAudit=false` 通过 108 项可移植检查，包括同 key 并发加入、部分／全部调用方取消、旧代成功／失败失效后的无重叠重试、runner 取消重试、expected 摘要拒绝及原始模型字节保留。另在 Windows x64 构建当前原生产物，通过 ABI smoke、九组 CNG／portable 参考向量与 GLB 对拍、`-RequireCurrent` 及 `--native-recovery`。最终产物保留装载后的 drain；使用最终 Windows x64 DLL 实际检查两内置模型 × 两后端，伪造 expected 和篡改原件尾字节均返回 `HM_NATIVE_ERROR` 与摘要不匹配错误，随后原件仍可装载、出帧和 resize。分阶段性能与验证边界见[加载实测记录](research/model-loading-performance-2026-10-23.md)。这些结果不能证明 ARM64 硬件或其它操作系统运行效果。

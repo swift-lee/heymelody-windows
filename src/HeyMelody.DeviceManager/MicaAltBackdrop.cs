@@ -1,3 +1,4 @@
+#if HEYMELODY_WINDOWS
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
@@ -100,3 +101,4 @@ internal sealed class MicaAltBackdrop : IDisposable
     [DllImport("dwmapi.dll")]
     private static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref Margins margins);
 }
+#endif

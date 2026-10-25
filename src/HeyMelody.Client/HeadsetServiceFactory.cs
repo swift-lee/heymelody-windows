@@ -2,12 +2,12 @@ namespace HeyMelodyWindows.App;
 
 public static class HeadsetServiceFactory
 {
-    public static IHeadsetService Create() => OperatingSystem.IsWindows()
+    public static IHeadsetService Create() => OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
         ? new ClientBridge() : new UnsupportedPlatformService();
     public static IHeadsetService CreatePreview() => new PreviewService();
-    public static IHeadsetService CreateLivePreview() => OperatingSystem.IsWindows()
+    public static IHeadsetService CreateLivePreview() => OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
         ? new ReadOnlyPreviewService(new ClientBridge())
-        : throw new PlatformNotSupportedException("真实耳机只读预览目前仅支持 Windows。");
+        : throw new PlatformNotSupportedException("当前平台尚未实现真实耳机只读预览。");
 }
 
 /// <summary>Explicit fallback for platforms without a Bluetooth backend.</summary>

@@ -5,7 +5,7 @@ namespace HeyMelodyWindows.Host;
 public static class BackendEndpoint
 {
     public static string UserSessionKey => DiagnosticPaths.UserSessionKey;
-    public static string PipeName => "HeyMelody-v2-" + UserSessionKey;
-    public static string HostMutexName => "Local\\HeyMelody.Host-" + UserSessionKey;
-    public static string MainMutexName => "Local\\HeyMelody.Main-" + UserSessionKey;
+    public static string PipeName => HeyMelody.Platform.DesktopRuntime.PipeName;
+    public static string HostMutexName => HeyMelody.Platform.DesktopRuntime.HostMutexName;
+    public static string MainMutexName => HeyMelody.Platform.DesktopRuntime.MainMutexName;
 }

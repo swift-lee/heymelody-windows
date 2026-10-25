@@ -177,7 +177,7 @@ internal static class MainLayoutTests
                             "The collapsed information card remains beside fit-test with no clickable Copy action.");
                         await ExpandInformationAsync(information);
                         information.BringIntoView(); Dispatcher.UIThread.RunJobs();
-                        await MainUiTestLayout.ClickPointAsync(window, copy);
+                        await MainUiTestLayout.ClickPointAsync(window, copy, requireFullVisibility: true);
                         AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
                         fitTop = fit.TranslatePoint(default, scroll)!.Value.Y;
                         informationTop = information.TranslatePoint(default, scroll)!.Value.Y;
@@ -192,7 +192,13 @@ internal static class MainLayoutTests
                             && view.GetVisualDescendants().OfType<FASettingsExpander>()
                                 .Where(expander => !ReferenceEquals(expander, information) && !ReferenceEquals(expander, anc))
                                 .All(expander => !expander.IsExpanded),
-                            "Expanding information reveals Copy below every field while optional settings stay collapsed.");
+                            $"Expanding information reveals Copy below every field while optional settings stay collapsed: "
+                            + $"expanded={information.IsExpanded}, hit={CanHit(window, copy)}, copy={copy.Bounds}, "
+                            + $"copyInInformation={copyInInformation}, fieldsTop={fieldsTop}, fields={fields.Bounds}, "
+                            + $"information={information.Bounds}, copyTop={copyTop}, viewport={scroll.Viewport}, "
+                            + $"otherExpanded={string.Join(',', view.GetVisualDescendants().OfType<FASettingsExpander>()
+                                .Where(expander => !ReferenceEquals(expander, information) && !ReferenceEquals(expander, anc) && expander.IsExpanded)
+                                .Select(expander => expander.Name))}.");
                         using var informationFrame = window.CaptureRenderedFrame()
                             ?? throw new InvalidOperationException("Missing device-information layout pixels.");
                         var informationName = $"main-information-{(demo ? "demo" : "real")}-{(dark ? "dark" : "light")}-{(int)size.Width}x{(int)size.Height}.png";

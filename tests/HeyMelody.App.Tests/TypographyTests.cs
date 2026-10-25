@@ -11,7 +11,7 @@ internal static class TypographyTests
 {
     // Characters whose Japanese and Simplified Chinese glyph shapes differ under Han unification.
     private const string ProbeText = "直骨角写画";
-    private static readonly string[] SimplifiedFamilies = [Typography.SystemFamily, Typography.SystemLegacyFamily, Typography.BundledFamily];
+    private static readonly string[] SimplifiedFamilies = [Typography.SystemFamily, Typography.SystemLegacyFamily, Typography.MacOSFamily, Typography.BundledFamily];
 
     internal static int Run(HeadlessUnitTestSession session)
     {
@@ -31,10 +31,17 @@ internal static class TypographyTests
     {
         Check(CultureInfo.CurrentUICulture.Name == "zh-CN" && CultureInfo.DefaultThreadCurrentUICulture?.Name == "zh-CN",
             "The UI culture is Simplified Chinese regardless of the system display language.");
-        Check(Typography.Source is TypographySource.System or TypographySource.BundledSystem,
-            "Microsoft YaHei UI or the bundled files opened by the platform font manager provide the UI font, not "
+        Check(Typography.Source is TypographySource.System or TypographySource.MacOSSystem or TypographySource.BundledSystem,
+            "The platform's Simplified Chinese system family or bundled files provide the UI font, not "
             + Typography.Source + ".");
-        var expected = Typography.Source == TypographySource.System ? Typography.SystemFamily : Typography.BundledFamily;
+        var expected = Typography.Source switch
+        {
+            TypographySource.System => Typography.SystemFamily,
+            TypographySource.MacOSSystem => Typography.MacOSFamily,
+            _ => Typography.BundledFamily
+        };
+        if (OperatingSystem.IsMacOS()) Check(Typography.Source == TypographySource.MacOSSystem,
+            "macOS uses its installed PingFang SC family before Windows or bundled fallback families.");
         Check(FontManager.Current.DefaultFontFamily.Name == expected, "The default family is " + expected
             + ", not " + FontManager.Current.DefaultFontFamily.Name + ".");
         Check(Application.Current!.TryFindResource(Typography.ThemeFontResourceKey, out var resource) && resource is FontFamily theme

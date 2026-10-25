@@ -7,8 +7,7 @@ namespace HeyMelodyWindows.App;
 internal static class ThemePreferences
 {
     internal static string? SettingsPathOverride { get; set; }
-    private static string SettingsPath => SettingsPathOverride ?? Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HeyMelody", "preferences.json");
+    private static string SettingsPath => SettingsPathOverride ?? Path.Combine(HeyMelody.Platform.ApplicationPaths.DataRoot, "preferences.json");
 
     public static string Load()
     {

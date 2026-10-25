@@ -1,6 +1,7 @@
 namespace HeyMelodyWindows.App;
 
 public sealed record UiHearingProfile(int? Uid, string Name, bool Current, bool CanApply);
+public sealed record UiPreviewAudioOutput(string Token, string Name);
 public sealed record UiFitResult(int Component, int Status);
 public sealed record UiHearingPoint(int Side, int FrequencyType, int Decibels);
 /// <summary>Unit-radius illustration values in ascending 80/250/1200/2400/4800/10000 Hz order.</summary>
@@ -35,6 +36,8 @@ public sealed record UiCalibrationState
     public long PreviewEpoch { get; set; }
     public bool PreviewAudioPlaying { get; set; }
     public string PreviewAudioError { get; set; } = "";
+    public string? SelectedPreviewAudioOutputToken { get; set; }
+    public bool PreviewAudioOutputSelectionRequired { get; set; }
     public UiHearingRadar? HearingRadar { get; set; }
     public byte? HearingEnhanceType { get; set; }
     public byte? RestoreDescriptionId { get; set; }
@@ -47,7 +50,7 @@ public sealed record UiCalibrationState
     public IReadOnlyList<UiHearingPoint> HearingLevels { get; set; } = [];
 }
 public sealed record UiCalibrationInput(string Action, bool? Heard = null, int? LevelIndex = null,
-    bool Released = false, string? Name = null, bool AllowReplacement = false);
+    bool Released = false, string? Name = null, bool AllowReplacement = false, string? OutputToken = null);
 public interface ICalibrationService
 {
     Task<IReadOnlyList<UiHearingProfile>> GetHearingProfilesAsync(string identity, long generation, CancellationToken token);
@@ -56,4 +59,6 @@ public interface ICalibrationService
     Task<UiCalibrationState> GetCalibrationAsync(string handle, CancellationToken token);
     Task<UiCalibrationState> AdvanceCalibrationAsync(string handle, long revision, UiCalibrationInput input, CancellationToken token);
     Task<UiCalibrationState> CancelCalibrationAsync(string handle, CancellationToken token);
+    Task<IReadOnlyList<UiPreviewAudioOutput>> GetPreviewAudioOutputsAsync(string handle, CancellationToken token) =>
+        Task.FromResult<IReadOnlyList<UiPreviewAudioOutput>>([]);
 }

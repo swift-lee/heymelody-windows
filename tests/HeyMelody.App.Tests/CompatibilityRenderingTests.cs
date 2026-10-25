@@ -144,8 +144,7 @@ internal static class CompatibilityRenderingTests
             Check(choice.SelectedIndex == 0 && Equals(choice.SelectedItem, "Vulkan"), "The rendering dropdown defaults to Vulkan.");
             Check(choice.Items.Cast<object>().Select(item => item.ToString()).SequenceEqual(["Vulkan", "OpenGL"]),
                 "The rendering dropdown contains exactly Vulkan and OpenGL.");
-            var card = dialog.GetVisualDescendants().OfType<FASettingsExpanderItem>().Single(item =>
-                Equals(item.Content, "3D模型渲染API"));
+            var card = ((AppSettingsPanel)dialog.Content!).FindControl<FASettingsExpanderItem>("ModelCompatibilityCard")!;
             Check(Equals(card.Description, "若存在渲染问题，请尝试切换到 OpenGL")
                 && Avalonia.Automation.AutomationProperties.GetName(choice) == "3D模型渲染API",
                 "The rendering API row keeps its exact title, guidance and accessibility name.");
@@ -211,8 +210,8 @@ internal static class CompatibilityRenderingTests
 
     private static FAContentDialog Settings(Window window) => window.GetVisualDescendants().OfType<FAContentDialog>()
         .Single(d => Equals(d.Title, "应用设置"));
-    private static ComboBox BackendChoice(FAContentDialog dialog) => dialog.GetVisualDescendants().OfType<ComboBox>()
-        .Single(t => t.Name == "ModelBackendChoice");
+    private static ComboBox BackendChoice(FAContentDialog dialog) =>
+        ((AppSettingsPanel)dialog.Content!).FindControl<ComboBox>("ModelBackendChoice")!;
     private static void ClickSave(Window window, FAContentDialog dialog)
     {
         var button = dialog.GetVisualDescendants().OfType<Button>().Single(b => Equals(b.Content, "保存"));

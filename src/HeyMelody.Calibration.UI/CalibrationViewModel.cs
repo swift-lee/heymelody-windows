@@ -27,6 +27,9 @@ public sealed class CalibrationViewModel(ICalibrationService service, string han
     private CalibrationPhase _phase;
     private bool _earScanCompleted;
     private long _spectrumSequence;
+    private bool _loadingOutputs;
+    public IReadOnlyList<UiPreviewAudioOutput> PreviewOutputs { get; private set; } = [];
+    public bool LoadingPreviewOutputs => _loadingOutputs;
     /// <summary>Volume steps of the V2 level test; the slider, its label and the backend share this count.</summary>
     public const int LevelCount = 12;
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -48,7 +51,8 @@ public sealed class CalibrationViewModel(ICalibrationService service, string han
     public bool CanAdjustLevel => !_cancelled && !_busy && _state.Stage == "AwaitingAnswer";
     public bool CanContinue => !_cancelled && !_busy && !LevelPending && ConfirmedSelection;
     public bool CanSave => !_cancelled && !_busy && _state.Stage is ("Results" or "ResultReady" or "Previewing") && _state.FiltersReady;
-    public bool CanPreview => CanSave && _state.CanPreview;
+    public bool CanPreview => CanSave && _state.CanPreview
+        && (!_state.PreviewAudioOutputSelectionRequired || _state.SelectedPreviewAudioOutputToken is not null);
     private bool ConfirmedSelection => _state.Stage == "AwaitingAnswer" && _state.ToneAcknowledged
         && (!_selectionActive || _state.LevelIndex == _selectedLevel);
     public string Error => _error;
@@ -83,6 +87,32 @@ public sealed class CalibrationViewModel(ICalibrationService service, string han
         UpdatePhase(previous);
         if (!_selectionActive) _selectedLevel = state.LevelIndex;
         Changed(nameof(State)); SelectionChanged();
+        if (state.PreviewAudioOutputSelectionRequired && state.CanPreview && PreviewOutputs.Count == 0 && !_loadingOutputs)
+            _ = RefreshPreviewOutputsAsync();
+    }
+    public async Task RefreshPreviewOutputsAsync()
+    {
+        if (_cancelled || _disposed || _loadingOutputs || !_state.PreviewAudioOutputSelectionRequired) return;
+        _loadingOutputs = true; Changed(nameof(LoadingPreviewOutputs));
+        try
+        {
+            PreviewOutputs = await service.GetPreviewAudioOutputsAsync(handle, _lifetime.Token);
+            Adopt(await service.GetCalibrationAsync(handle, _lifetime.Token));
+            Changed(nameof(PreviewOutputs));
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch { SetError("无法读取蓝牙音频输出，请检查系统声音设置后刷新。"); }
+        finally { _loadingOutputs = false; Changed(nameof(LoadingPreviewOutputs)); }
+    }
+    public async Task SelectPreviewOutputAsync(string token)
+    {
+        if (_cancelled || _busy || !_state.PreviewAudioOutputSelectionRequired) return;
+        await RunAsync(async () =>
+        {
+            Adopt(await service.GetCalibrationAsync(handle, _lifetime.Token));
+            Adopt(await service.AdvanceCalibrationAsync(handle, _state.Revision,
+                new UiCalibrationInput("selectPreviewOutput", OutputToken: token), _lifetime.Token));
+        });
     }
     public void AdoptSpectrum(UiCalibrationSpectrum frame)
     {
@@ -147,7 +177,7 @@ public sealed class CalibrationViewModel(ICalibrationService service, string han
         if (_cancelled) return;
         if (action == "next" && _state.HearingVersion == "V2" && _state.Stage != "ScanCompleted" && !CanContinue)
         { SetError("请等待当前音量播放确认后再继续；如果没有声音，请重试播放。"); return; }
-        if (action == "save" && !CanSave || action.StartsWith("preview-", StringComparison.Ordinal) && !CanPreview) return;
+        if (action == "save" && !CanSave || action != "preview-stop" && action.StartsWith("preview-", StringComparison.Ordinal) && !CanPreview) return;
         if (action == "save" && ValidateName() is { } nameError) { SetError(nameError); return; }
         var step = Step(_state);
         await RunAsync(async () =>

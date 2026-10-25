@@ -1,3 +1,4 @@
+#if HEYMELODY_WINDOWS
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -123,3 +124,5 @@ internal static class WasapiNative
         [PreserveSig] int GetDeviceIdConnectedTo([MarshalAs(UnmanagedType.LPWStr)] out string id);
     }
 }
+
+#endif
