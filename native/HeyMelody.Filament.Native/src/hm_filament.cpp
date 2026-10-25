@@ -1,4 +1,5 @@
 #include "hm_filament.h"
+#include "hm_depth_format.h"
 #include "hm_sha256.h"
 
 #include <filament/Camera.h>
@@ -229,6 +230,7 @@ public:
     Camera* camera = nullptr;
     Texture* color = nullptr;
     Texture* depth = nullptr;
+    Texture::InternalFormat depth_format = Texture::InternalFormat::DEPTH24;
     RenderTarget* target = nullptr;
     Skybox* skybox = nullptr;
     IndirectLight* indirect = nullptr;
@@ -293,6 +295,32 @@ public:
         if (engine) { engine->flushAndWait(); engine->pumpMessageQueues(); }
     }
 
+    void initialize_depth_format() {
+        const auto selection = hm::select_depth_format([this](hm::DepthFormat format) {
+            switch (format) {
+                case hm::DepthFormat::Depth24:
+                    return Texture::isTextureFormatSupported(*engine, Texture::InternalFormat::DEPTH24);
+                case hm::DepthFormat::Depth32F:
+                    return Texture::isTextureFormatSupported(*engine, Texture::InternalFormat::DEPTH32F);
+                default: return false;
+            }
+        });
+        const char* backend_name = diagnostics.backend == HM_BACKEND_VULKAN ? "Vulkan" :
+            diagnostics.backend == HM_BACKEND_OPENGL ? "OpenGL" : "Metal";
+        const char* selected_name = selection.format == hm::DepthFormat::Depth24 ? "DEPTH24" :
+            selection.format == hm::DepthFormat::Depth32F ? "DEPTH32F" : "none";
+        const std::string details = std::string("backend=") + backend_name +
+            " DEPTH24.supported=" + (selection.depth24_supported ? "true" : "false") +
+            " DEPTH32F.supported=" + (selection.depth32f_supported ? "true" : "false") +
+            " selected=" + selected_name;
+        emit_native_log(HM_LOG_INFORMATION, "depthFormat.selection " + details);
+        switch (selection.format) {
+            case hm::DepthFormat::Depth24: depth_format = Texture::InternalFormat::DEPTH24; break;
+            case hm::DepthFormat::Depth32F: depth_format = Texture::InternalFormat::DEPTH32F; break;
+            default: throw std::runtime_error("No supported depth attachment format: " + details);
+        }
+    }
+
     void initialize() {
         Engine::Backend requested;
         switch (diagnostics.requested_backend) {
@@ -314,6 +342,7 @@ public:
         if (diagnostics.backend != diagnostics.requested_backend)
             throw std::runtime_error("Filament did not initialize the explicitly requested backend");
         log_device_info(engine);
+        initialize_depth_format();
         renderer = engine->createRenderer();
         Renderer::ClearOptions clear{};
         clear.clearColor = {0,0,0,0};
@@ -412,7 +441,7 @@ public:
                 .format(Texture::InternalFormat::RGBA8)
                 .usage(Texture::Usage::COLOR_ATTACHMENT | Texture::Usage::SAMPLEABLE | Texture::Usage::BLIT_SRC).build(*engine);
             depth = Texture::Builder().width(value.width).height(value.height).levels(1)
-                .format(Texture::InternalFormat::DEPTH24).usage(Texture::Usage::DEPTH_ATTACHMENT).build(*engine);
+                .format(depth_format).usage(Texture::Usage::DEPTH_ATTACHMENT).build(*engine);
             target = RenderTarget::Builder().texture(RenderTarget::AttachmentPoint::COLOR, color)
                 .texture(RenderTarget::AttachmentPoint::DEPTH, depth).build(*engine);
             view->setRenderTarget(target);

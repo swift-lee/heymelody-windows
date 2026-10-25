@@ -100,6 +100,40 @@ internal static class BackendProbeChecks
         check(retryRunner.Calls == 2 && retryRunner.Backends.All(value => value == FilamentBackend.Vulkan),
             "A failed probe is retryable and never tries OpenGL automatically.");
 
+        const int depthFormatExitCode = unchecked((int)0xC0000409);
+        const string depthFormatError = "Precondition in build:251\n"
+            + "reason: Texture format 22 not supported on this platform, texture name=(none)";
+        const string depthFormatOutput = "FEngine resolved backend: Vulkan\n"
+            + "Selected physical device 'AMD Radeon(TM) Graphics' (vendor 0x1002, device 0x1681, api 1.3)";
+        // Reproduce the captured result without launching a native process that terminates with fail-fast.
+        var depthFormatRunner = new FixtureRunner((call, _, _) => Task.FromResult(call <= 2
+            ? new NativeProbeResult(depthFormatExitCode, depthFormatOutput, depthFormatError, TimedOut: false)
+            : new NativeProbeResult(0, "ready", "")));
+        var depthFormatProbe = new NativeBackendProbe(depthFormatRunner);
+        var depthFormatFailures = new List<FilamentRendererException>();
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            try { await depthFormatProbe.EnsureAvailableAsync(payload, FilamentBackend.Vulkan, default); }
+            catch (FilamentRendererException error) { depthFormatFailures.Add(error); }
+        }
+        check(depthFormatFailures.Count == 2 && depthFormatFailures.All(error =>
+                error.Kind == FilamentFailureKind.BackendUnavailable && error.Stage == FilamentFailureStage.Probe
+                && error.Backend == FilamentBackend.Vulkan
+                && error.Message.Contains($"exited with code {depthFormatExitCode}.", StringComparison.Ordinal)
+                && !error.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase)),
+            "An unsupported Vulkan depth format preserves the fail-fast exit code as a non-timeout Probe backend failure.");
+        check(depthFormatFailures.All(error => error.Message.Contains(depthFormatError, StringComparison.Ordinal)
+                && error.Message.Contains(depthFormatOutput, StringComparison.Ordinal)),
+            "The exact unsupported-texture precondition and native GPU output remain in the backend failure details.");
+        check(depthFormatRunner.Calls == 2 && depthFormatRunner.Backends.All(value => value == FilamentBackend.Vulkan),
+            "Repeated unsupported-format failures launch new Vulkan probes without automatically trying OpenGL.");
+        var depthFormatRecovery = await depthFormatProbe.EnsureAvailableAsync(payload, FilamentBackend.Vulkan, default);
+        var depthFormatCached = await depthFormatProbe.EnsureAvailableAsync(payload, FilamentBackend.Vulkan, default);
+        check(depthFormatRunner.Calls == 3 && depthFormatRecovery.Disposition == FilamentProbeDisposition.Started
+                && depthFormatCached.Disposition == FilamentProbeDisposition.Cached
+                && depthFormatRunner.Backends.All(value => value == FilamentBackend.Vulkan),
+            "A later successful Vulkan retry is cached after unsupported-format failures, with no backend fallback.");
+
         var missingRunner = new FixtureRunner((_, _, _) => throw new FileNotFoundException("missing test component"));
         var missingProbe = new NativeBackendProbe(missingRunner);
         for (int attempt = 0; attempt < 2; attempt++)
