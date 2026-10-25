@@ -176,6 +176,7 @@ try
         Check(logs.Any(row => row.GetProperty("eventName").GetString() == "beforeOwnerExit")
             && !logs.Any(row => row.GetProperty("eventName").GetString() == "afterOwnerExit"), "old component never follows next descriptor");
     }
+    CaptureChecks.Run(root, Check);
     await WriterFailureChecks.RunAsync(root, Check);
     await ChildLaunchChecks.RunAsync(root, Check);
     await LogRetentionChecks.RunAsync(Path.Combine(root, "retention"), Check);

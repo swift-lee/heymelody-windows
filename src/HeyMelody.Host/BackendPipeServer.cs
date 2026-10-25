@@ -46,21 +46,44 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
                 try
                 {
                     await pipe.WaitForConnectionAsync(_acceptLifetime.Token);
-                    if (!IsLocalSession(pipe)) { pipe.Dispose(); continue; }
-                    if (_clients.Count >= 16) { pipe.Dispose(); continue; }
+                    if (!IsLocalSession(pipe))
+                    {
+                        DiagnosticLog.Warning("host.ipc", "rejected", "Rejected a client", data: new { reason = "otherSession" });
+                        pipe.Dispose(); continue;
+                    }
+                    if (_clients.Count >= 16)
+                    {
+                        DiagnosticLog.Warning("host.ipc", "rejected", "Rejected a client", data: new { reason = "tooManyClients", count = _clients.Count });
+                        pipe.Dispose(); continue;
+                    }
                     var client = new Client(pipe, this);
                     DiagnosticLog.Info("host.ipc", "connected", "Client connected", new { client.Key });
                     _clients[client.Key] = client;
-                    if (energy is not null) client.LapseUnsubscribedAfter(energy.Time, SubscribeGrace, UpdateGuiCount);
-                    UpdateGuiCount();
-                    _ = client.RunAsync();
-                    ClientAcceptedDuringExit(client);
+                    try
+                    {
+                        if (energy is not null) client.LapseUnsubscribedAfter(energy.Time, SubscribeGrace, UpdateGuiCount);
+                        UpdateGuiCount();
+                        _ = client.RunAsync();
+                        ClientAcceptedDuringExit(client);
+                    }
+                    catch (Exception setupFailure)
+                    {
+                        // One client's setup failure must not end the accept loop.
+                        DiagnosticLog.Error("host.ipc", "acceptFailed", "Per-client setup failed; dropping this client", setupFailure, new { client.Key });
+                        _clients.TryRemove(client.Key, out _);
+                        client.Dispose();
+                    }
                 }
                 catch { pipe.Dispose(); throw; }
             }
         }
         catch (OperationCanceledException) { }
         catch (IOException) when (_acceptLifetime.IsCancellationRequested) { }
+        catch (Exception failure)
+        {
+            DiagnosticLog.Error("host.ipc", "acceptEnded", "Accept loop terminated unexpectedly; no new clients can connect", failure);
+            throw;
+        }
     }
     private static bool IsLocalSession(NamedPipeServerStream pipe)
     {
@@ -169,6 +192,12 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
             client.Reply(request.Id, data);
         }
         catch (OperationCanceledException) { client.Reply(request.Id, null, "cancelled", "操作已取消。"); }
+        catch (InvalidOperationException error) when (request.Operation is "exitVote" or "stoppingAck")
+        {
+            // Benign race: the exit phase or request changed before this message arrived.
+            DiagnosticLog.Debug("host.lifecycle", "exitMessageStale", "Ignored a stale exit message", new { client.Key, client.Role, request.Id, request.Operation, error = error.Message });
+            client.Reply(request.Id, null, "operationFailed", error.Message);
+        }
         catch (Exception error)
         {
             DiagnosticLog.Error("host.ipc", "operationFailed", "Backend operation failed", error,
@@ -243,7 +272,11 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
     {
         if (Interlocked.Exchange(ref _disposeStarted, 1) != 0) return;
         _acceptLifetime.Cancel();
-        if (_accept is not null) { try { await _accept; } catch { } }
+        if (_accept is not null)
+        {
+            try { await _accept; }
+            catch (Exception error) { DiagnosticLog.Warning("host.ipc", "acceptAwaitFailed", "Accept loop ended with an error during disposal", error); }
+        }
         if (IsStopping) await DrainStoppingClientsAsync();
         _lifetime.Cancel(); supervisor.EventPublished -= Broadcast;
         supervisor.CalibrationOwnerEventPublished -= SendOwnerEvent;

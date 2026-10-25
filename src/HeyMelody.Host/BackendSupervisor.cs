@@ -650,7 +650,11 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
         _scanDemand = demand;
         // Never call out under _sync: the monitor's handler takes its own lock, which Advertisement holds while it waits for _sync.
         if (ScanDemandChanged is { } handler)
-            ThreadPool.UnsafeQueueUserWorkItem(static h => { try { h(); } catch { } }, handler, preferLocal: false);
+            ThreadPool.UnsafeQueueUserWorkItem(static h =>
+            {
+                try { h(); }
+                catch (Exception error) { DiagnosticLog.Warning("host.scan", "demandHandlerFailed", "A scan-demand change handler threw", error); }
+            }, handler, preferLocal: false);
     }
 
     private void RetireOtherCachedProductsLocked(Peer peer, string? productId)

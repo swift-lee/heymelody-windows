@@ -7,7 +7,8 @@
       <Setter Property="FontWeight" Value="SemiBold" />
       <Setter Property="Margin" Value="1,16,0,6" />
     </Style>
-    <Style Selector="fa|FASettingsExpanderItem">
+    <!-- Cards apply to top-level rows only; rows inside an expander (and its header) keep the expander's own chrome. -->
+    <Style Selector="StackPanel#SettingsRoot > fa|FASettingsExpanderItem">
       <Setter Property="Margin" Value="0,0,0,4" />
       <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
@@ -94,38 +95,53 @@
     </fa:FASettingsExpanderItem>
 
     <TextBlock Classes="settings-group" Text="故障诊断" />
-    <fa:FASettingsExpander x:Name="DiagnosticExpander" Header="诊断日志"
-                           Description="按组件记录 Debug 日志，仅用于故障诊断">
-      <fa:FASettingsExpanderItem Content="HeyMelody">
-        <fa:FASettingsExpanderItem.Footer><CheckBox x:Name="LogMainCheck" AutomationProperties.Name="HeyMelody" /></fa:FASettingsExpanderItem.Footer>
+    <!-- The expander holds the saved draft (next-start switch and components); the directory card, the
+         current-cycle status and errors act at once and stay visible while it is collapsed. -->
+    <fa:FASettingsExpander x:Name="DiagnosticExpander" Header="在下次启动程序时记录日志"
+                           Description="保存并重启托盘后台后开始，仅记录一轮" Margin="0,0,0,4">
+      <fa:FASettingsExpander.Resources>
+        <!-- In the ~500 px dialog the chevron narrows the header below FluentAvalonia's 460 px wrap width; keep the
+             switch beside the short header text instead of on a row of its own. The header padding and minimum
+             height follow the top-level cards, so it is as tall as the other switch rows. -->
+        <x:Double x:Key="SettingsExpanderItemAdaptiveWidthTrigger">400</x:Double>
+        <Thickness x:Key="SettingsExpanderPadding">16,10</Thickness>
+        <x:Double x:Key="SettingsExpanderMinHeight">48</x:Double>
+      </fa:FASettingsExpander.Resources>
+      <fa:FASettingsExpander.IconSource><fa:FASymbolIconSource Symbol="Repair" /></fa:FASettingsExpander.IconSource>
+      <fa:FASettingsExpander.Footer>
+        <ToggleSwitch x:Name="LogNextStartSwitch" OnContent="开" OffContent="关" AutomationProperties.Name="在下次启动程序时记录日志" />
+      </fa:FASettingsExpander.Footer>
+      <!-- Fluent "select all" pattern: a parent check box (mixed while partly selected) above indented children. -->
+      <fa:FASettingsExpanderItem x:Name="LogComponentsItem">
+        <StackPanel>
+          <CheckBox x:Name="LogSelectAllCheck" Content="全部组件" AutomationProperties.Name="全部日志组件" />
+          <StackPanel x:Name="LogComponentList" Margin="28,0,0,0">
+            <CheckBox x:Name="LogMainCheck" Content="HeyMelody" AutomationProperties.Name="HeyMelody" />
+            <CheckBox x:Name="LogHostCheck" Content="HeyMelody.Host" AutomationProperties.Name="HeyMelody.Host" />
+            <CheckBox x:Name="LogManagerCheck" Content="HeyMelody.DeviceManager" AutomationProperties.Name="HeyMelody.DeviceManager" />
+            <CheckBox x:Name="LogFitCheck" Content="HeyMelody.FitTest" AutomationProperties.Name="HeyMelody.FitTest" />
+            <CheckBox x:Name="LogHearingCheck" Content="HeyMelody.HearingSetup" AutomationProperties.Name="HeyMelody.HearingSetup" />
+          </StackPanel>
+          <TextBlock x:Name="LogNoComponentHint" Classes="caption" TextWrapping="Wrap" Margin="0,4,0,2" IsVisible="False"
+                     Text="至少选择一个组件才能开启记录" />
+        </StackPanel>
       </fa:FASettingsExpanderItem>
-      <fa:FASettingsExpanderItem Content="HeyMelody.Host" Description="托盘后台、蓝牙通信及设备 worker">
-        <fa:FASettingsExpanderItem.Footer><CheckBox x:Name="LogHostCheck" AutomationProperties.Name="HeyMelody.Host" /></fa:FASettingsExpanderItem.Footer>
-      </fa:FASettingsExpanderItem>
-      <fa:FASettingsExpanderItem Content="HeyMelody.DeviceManager">
-        <fa:FASettingsExpanderItem.Footer><CheckBox x:Name="LogManagerCheck" AutomationProperties.Name="HeyMelody.DeviceManager" /></fa:FASettingsExpanderItem.Footer>
-      </fa:FASettingsExpanderItem>
-      <fa:FASettingsExpanderItem Content="HeyMelody.FitTest">
-        <fa:FASettingsExpanderItem.Footer><CheckBox x:Name="LogFitCheck" AutomationProperties.Name="HeyMelody.FitTest" /></fa:FASettingsExpanderItem.Footer>
-      </fa:FASettingsExpanderItem>
-      <fa:FASettingsExpanderItem Content="HeyMelody.HearingSetup">
-        <fa:FASettingsExpanderItem.Footer><CheckBox x:Name="LogHearingCheck" AutomationProperties.Name="HeyMelody.HearingSetup" /></fa:FASettingsExpanderItem.Footer>
-      </fa:FASettingsExpanderItem>
-      <fa:FASettingsExpanderItem Content="在下次启动程序时记录日志"
-                                 Description="保存后，退出并重新启动托盘后台开始记录；该轮后台退出后自动关闭">
-        <fa:FASettingsExpanderItem.Footer>
-          <ToggleSwitch x:Name="LogNextStartSwitch" OnContent="开" OffContent="关" AutomationProperties.Name="在下次启动程序时记录日志" />
-        </fa:FASettingsExpanderItem.Footer>
-      </fa:FASettingsExpanderItem>
-      <StackPanel Spacing="8" Margin="16,8,16,12">
-        <TextBlock Text="日志包含完整协议收发、设备标识、本地路径等运行信息，可能涉及个人信息。仅在排障时启用，分享前请自行检查。"
-                   Classes="caption" TextWrapping="Wrap" />
-        <TextBlock x:Name="LogStatusText" TextWrapping="Wrap" />
-        <TextBlock x:Name="LogDirectoryText" Classes="caption" TextWrapping="Wrap" />
-        <Button x:Name="OpenLogDirectoryButton" Content="打开日志目录" AutomationProperties.Name="打开日志目录" HorizontalAlignment="Left" />
-        <fa:FAInfoBar x:Name="LogSettingsNotice" Title="诊断日志" Severity="Warning" IsOpen="False" IsVisible="False" IsClosable="False" />
-      </StackPanel>
     </fa:FASettingsExpander>
+    <fa:FASettingsExpanderItem x:Name="LogDirectoryItem" Content="日志目录">
+      <fa:FASettingsExpanderItem.IconSource><fa:FASymbolIconSource Symbol="OpenFolder" /></fa:FASettingsExpanderItem.IconSource>
+      <fa:FASettingsExpanderItem.Footer>
+        <Button x:Name="OpenLogDirectoryButton" Content="打开日志目录" AutomationProperties.Name="打开日志目录" />
+      </fa:FASettingsExpanderItem.Footer>
+    </fa:FASettingsExpanderItem>
+    <fa:FAInfoBar x:Name="LogStatusBar" Title="正在记录日志" Severity="Informational" IsOpen="False" IsVisible="False" IsClosable="False"
+                  Margin="0,0,0,4">
+      <fa:FAInfoBar.ActionButton>
+        <Button x:Name="OpenSessionLogButton" Content="打开本轮日志" AutomationProperties.Name="打开本轮日志" />
+      </fa:FAInfoBar.ActionButton>
+    </fa:FAInfoBar>
+    <fa:FAInfoBar x:Name="LogSettingsNotice" Severity="Error" IsOpen="False" IsVisible="False" IsClosable="True" Margin="0,0,0,4" />
+    <TextBlock x:Name="LogPrivacyText" Classes="caption" TextWrapping="Wrap" Margin="2,2,0,0"
+               Text="日志包含完整协议收发、设备标识和本地路径，可能涉及个人信息；云端密钥与请求签名只记录长度和哈希前缀。分享前请自行检查。" />
 
     <TextBlock Classes="settings-group" Text="关于" />
     <fa:FASettingsExpanderItem x:Name="AboutCard" Description="社区客户端 · 通过蓝牙管理已配对的耳机">

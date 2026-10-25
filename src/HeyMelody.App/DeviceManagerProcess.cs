@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.App;
 
@@ -47,11 +48,14 @@ internal sealed class DeviceManagerProcess : IDeviceManagerProcess
             start.ArgumentList.Add(dll);
         }
         using var process = StartPreparedProcess(start, token);
+        DiagnosticLog.Info("ui.process", "launched", "Launched the device manager process",
+            new { component = "HeyMelody.DeviceManager", start.FileName, args = start.ArgumentList.ToArray(), processId = TryId(process) });
         var errors = DrainAsync(process.StandardError);
         try
         {
             await process.WaitForExitAsync(token);
             await errors;
+            DiagnosticLog.Info("ui.process", "exited", "Device manager process exited", new { component = "HeyMelody.DeviceManager", exitCode = process.ExitCode });
             return process.ExitCode switch
             {
                 0 => DeviceManagerOutcome.Saved,
@@ -61,6 +65,7 @@ internal sealed class DeviceManagerProcess : IDeviceManagerProcess
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
+            DiagnosticLog.Info("ui.process", "cancelled", "Device manager was cancelled; stopping its process");
             await StopAsync(process);
             await errors;
             throw;
@@ -70,11 +75,14 @@ internal sealed class DeviceManagerProcess : IDeviceManagerProcess
     internal static Process StartPreparedProcess(ProcessStartInfo start, CancellationToken token)
         => ClientBridge.StartOwnedComponent(start, token);
 
+    private static int? TryId(Process process) { try { return process.Id; } catch (InvalidOperationException) { return null; } }
     private static async Task DrainAsync(StreamReader reader)
     {
-        // Device identifiers and backend diagnostics must not leak into GUI logs.
-        var buffer = new char[1024];
-        try { while (await reader.ReadAsync(buffer) != 0) { } }
+        try
+        {
+            while (await reader.ReadLineAsync() is { } line)
+                DiagnosticLog.Debug("ui.process", "stderr", "Child stderr", new { component = "HeyMelody.DeviceManager", line = line.Length <= 2000 ? line : line[..2000] });
+        }
         catch (IOException) { }
     }
 
@@ -92,6 +100,7 @@ internal sealed class DeviceManagerProcess : IDeviceManagerProcess
             if (!process.HasExited) process.Kill();
             await process.WaitForExitAsync();
         }
-        catch (InvalidOperationException) { }
+        catch (InvalidOperationException error)
+        { DiagnosticLog.Debug("ui.process", "stopRaced", "The component process ended while it was being stopped", new { error = error.Message }); }
     }
 }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HeyMelody.Diagnostics;
 using HeyMelodyWindows.App;
 
 namespace HeyMelodyWindows.Host;
@@ -166,7 +167,8 @@ internal sealed class DeviceStateStore
             }
             bool saved = false;
             try { Write(document); saved = true; }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            { DiagnosticLog.Warning("Settings", "deviceState.saveFailed", "Device state cache could not be saved; it will be retried", error, new { path = _path, entries = document.Devices.Length }); }
             lock (_gate)
             {
                 if (saved) _savedVersion = version;
@@ -226,7 +228,13 @@ internal sealed class DeviceStateStore
                 }
             if (version == 1) _version++;
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
+        {
+            if (error is FileNotFoundException or DirectoryNotFoundException)
+                DiagnosticLog.Debug("Settings", "deviceState.missing", "Settings file does not exist; defaults apply", new { path = _path });
+            else
+                DiagnosticLog.Warning("Settings", "deviceState.loadFailed", "Settings file could not be read; defaults apply", error, new { path = _path });
+        }
     }
 
     private void Write(Document document)
@@ -243,7 +251,8 @@ internal sealed class DeviceStateStore
         finally
         {
             try { File.Delete(temporaryPath); }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            { DiagnosticLog.Debug("Settings", "deviceState.tempDeleteFailed", "Temporary settings file could not be deleted", new { path = temporaryPath, failure = error.Message }); }
         }
     }
 

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.App;
 
@@ -59,12 +60,17 @@ internal static class ThemePreferences
             File.Move(temporary, SettingsPath, overwrite: true);
             return true;
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return false; }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            DiagnosticLog.Warning("Settings", "preferences.saveFailed", "Preferences could not be saved", error, new { path = SettingsPath });
+            return false;
+        }
         finally
         {
             if (temporary is not null)
                 try { File.Delete(temporary); }
-                catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                { DiagnosticLog.Debug("Settings", "preferences.tempDeleteFailed", "Temporary preferences file could not be deleted", new { path = temporary, failure = error.Message }); }
         }
     }
 
@@ -72,6 +78,12 @@ internal static class ThemePreferences
     {
         try { return JsonNode.Parse(File.ReadAllText(SettingsPath)) as JsonObject ?? new(); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
-        { return new(); }
+        {
+            if (error is FileNotFoundException or DirectoryNotFoundException)
+                DiagnosticLog.Debug("Settings", "preferences.missing", "Preferences file does not exist; defaults apply", new { path = SettingsPath });
+            else
+                DiagnosticLog.Warning("Settings", "preferences.loadFailed", "Preferences could not be read; defaults apply", error, new { path = SettingsPath });
+            return new();
+        }
     }
 }

@@ -69,7 +69,11 @@ public sealed class ResourceCoordinator : IDisposable
                     // are ignored; the HeyMelody key, offline choice and cache key survive.
                     if (saved is not null) Preferences = saved;
                 }
-                catch (Exception error) when (error is IOException or JsonException) { LastError = "无法读取资源设置，已采用默认设置。"; }
+                catch (Exception error) when (error is IOException or JsonException)
+                {
+                    DiagnosticLog.Warning("Resources", "preferences.loadFailed", "Resource preferences could not be read; defaults apply.", error, new { path = preferencesFile });
+                    LastError = "无法读取资源设置，已采用默认设置。";
+                }
             }
             if (!ValidKey(Preferences.CacheEncryptionKey)) Preferences = Preferences with { CacheEncryptionKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)) };
             await SavePreferencesAsync(token).ConfigureAwait(false);
@@ -464,6 +468,7 @@ public sealed class ResourceCoordinator : IDisposable
         }
         finally { Interlocked.Decrement(ref _batchedChanges); }
         LastError = failed == 0 ? null : "部分在线资源重新下载失败，已保留原有资源。";
+        if (failed != 0) DiagnosticLog.Warning("Resources", "redownload.partialFailure", "Some online resources could not be redownloaded; existing resources were kept.", null, new { failed, updated, unchanged });
         if (Revision != before) Changed?.Invoke(this, new(Revision, catalogChanged, true));
         string message = failed != 0 ? $"{failed} 项在线资源重新下载失败，已保留原有资源。"
             : updated == 0 ? "已重新下载在线资源，配置与美术资源均已核对。" : $"已重新下载在线资源，更新了 {updated} 项美术资源。";
@@ -506,12 +511,23 @@ public sealed class ResourceCoordinator : IDisposable
                 var entry = SelectPackageEntry(candidates, role);
                 if (entry is null) return null;
                 string path = ResourcePaths.Resolve(package, entry.Path);
-                if (!File.Exists(path) || new FileInfo(path).Length != entry.Length || ResourceFiles.Sha256File(path, out _) != entry.Sha256) return null;
+                if (!File.Exists(path) || new FileInfo(path).Length != entry.Length || ResourceFiles.Sha256File(path, out _) != entry.Sha256)
+                { CacheInvalid(path, "artwork file is missing or does not match the package index"); return null; }
                 _leases[package] = _leases.GetValueOrDefault(package) + 1;
                 return new(path, entry.Kind, package, entry.Sha256, entry.Length, Revision, () => Release(package));
             }
-            catch (Exception error) when (error is IOException or InvalidDataException or JsonException or ArgumentException) { return null; }
+            catch (Exception error) when (error is IOException or InvalidDataException or JsonException or ArgumentException)
+            { CacheInvalid(package, "cached artwork package could not be read", error); return null; }
         }
+    }
+
+    // Cache and package validation failures are never fatal; they fall back to bundled or re-downloaded resources.
+    private static void CacheInvalid(string path, string reason, Exception? error = null)
+    {
+        if (error is FileNotFoundException or DirectoryNotFoundException)
+            DiagnosticLog.Debug("Resources", "cache.missing", "A resource cache file does not exist.", new { path, reason });
+        else
+            DiagnosticLog.Warning("Resources", "cache.invalid", "A resource cache or package failed validation.", error, new { path, reason });
     }
 
     /// <summary>
@@ -540,7 +556,11 @@ public sealed class ResourceCoordinator : IDisposable
     private void TryDelete(string package)
     {
         try { ResourcePaths.DeleteOwnedDirectory(_online, package); _retired.Remove(package); }
-        catch (Exception error) when (error is IOException or InvalidDataException) { /* Retain for the next cleanup attempt; never invalidate the new pointer. */ }
+        catch (Exception error) when (error is IOException or InvalidDataException)
+        {
+            // Retain for the next cleanup attempt; never invalidate the new pointer.
+            DiagnosticLog.Debug("Resources", "package.deleteDeferred", "A retired resource package could not be deleted yet.", new { package, failure = error.Message });
+        }
     }
 
     private void LoadCachedCatalog()
@@ -557,14 +577,16 @@ public sealed class ResourceCoordinator : IDisposable
                 if (candidate.Sha256 != name) continue;
                 if (newest is null || candidate.ContentVersion > newest.ContentVersion) { newest = candidate; newestDirectory = directory; }
             }
-            catch (Exception error) when (error is IOException or InvalidDataException or JsonException or CryptographicException or ArgumentException) { }
+            catch (Exception error) when (error is IOException or InvalidDataException or JsonException or CryptographicException or ArgumentException)
+            { CacheInvalid(directory, "cached configuration could not be decrypted or parsed", error); }
         }
         _catalog = ResourceCatalog.Select(Bundled.GetCatalog(), newest);
         if (Directory.Exists(root)) foreach (string directory in Directory.EnumerateDirectories(root))
             if (directory != newestDirectory && IsHash(Path.GetFileName(directory))) Retire(directory);
         string metadata = Path.Combine(ResourceRoot(), "metadata.json");
         try { if (File.Exists(metadata)) _fileVersion = JsonSerializer.Deserialize<string>(File.ReadAllBytes(metadata))!; }
-        catch (Exception error) when (error is IOException or JsonException) { }
+        catch (Exception error) when (error is IOException or JsonException)
+        { CacheInvalid(metadata, "resource metadata could not be read", error); }
     }
 
     private bool CachedCatalogExists()
@@ -575,7 +597,8 @@ public sealed class ResourceCoordinator : IDisposable
             byte[] bytes = ResourceCacheCodec.Decrypt(File.ReadAllBytes(Path.Combine(ResourceRoot(), "config", _catalog.Sha256, "config.cache")), Convert.FromBase64String(Preferences.CacheEncryptionKey));
             return Convert.ToHexStringLower(SHA256.HashData(bytes)) == _catalog.Sha256;
         }
-        catch (Exception error) when (error is IOException or InvalidDataException or CryptographicException or ArgumentException) { return false; }
+        catch (Exception error) when (error is IOException or InvalidDataException or CryptographicException or ArgumentException)
+        { CacheInvalid(Path.Combine(ResourceRoot(), "config", _catalog.Sha256), "cached configuration check failed", error); return false; }
     }
     private async Task SaveCatalogAsync(ResourceCatalog catalog, byte[] bytes, CancellationToken token)
     {
@@ -601,26 +624,29 @@ public sealed class ResourceCoordinator : IDisposable
     private static string? ReadArtworkPointer(string slot)
     {
         try { var value = JsonSerializer.Deserialize<string>(File.ReadAllBytes(Path.Combine(slot, "current.json"))); return IsPackageName(value) ? value : null; }
-        catch (Exception error) when (error is IOException or JsonException or UnauthorizedAccessException) { return null; }
+        catch (Exception error) when (error is IOException or JsonException or UnauthorizedAccessException)
+        { CacheInvalid(slot, "artwork pointer could not be read", error); return null; }
     }
     private static bool ValidArtworkPackage(string package)
     {
         try
         {
-            if (!File.Exists(Path.Combine(package, "config.json"))) return false;
+            if (!File.Exists(Path.Combine(package, "config.json"))) { CacheInvalid(package, "package config.json is missing"); return false; }
             // Packages indexed by an older extractor are re-downloaded once and served until then.
             using (var marker = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(package, ArtworkPackageExtractor.MarkerFile))))
                 if (!marker.RootElement.TryGetProperty("schemaVersion", out var schema) || !schema.TryGetInt32(out int version)
-                    || version != ArtworkPackageExtractor.SchemaVersion) return false;
+                    || version != ArtworkPackageExtractor.SchemaVersion)
+                { CacheInvalid(package, "package schema version is outdated"); return false; }
             var entries = JsonSerializer.Deserialize<ResourceArtwork[]>(File.ReadAllBytes(Path.Combine(package, "artwork.json")), ResourceJson.Options);
-            if (entries is null || entries.Length == 0) return false;
+            if (entries is null || entries.Length == 0) { CacheInvalid(package, "package artwork index is empty"); return false; }
             return entries.All(entry =>
             {
                 string path = ResourcePaths.Resolve(package, entry.Path);
                 return File.Exists(path) && new FileInfo(path).Length == entry.Length && ResourceFiles.Sha256File(path, out _) == entry.Sha256;
             });
         }
-        catch (Exception error) when (error is IOException or InvalidDataException or JsonException or ArgumentException) { return false; }
+        catch (Exception error) when (error is IOException or InvalidDataException or JsonException or ArgumentException)
+        { CacheInvalid(package, "package validation failed", error); return false; }
     }
     /// <summary>Removes interrupted downloads and superseded packages left by an earlier Host process.</summary>
     private void SweepArtwork()
@@ -639,7 +665,8 @@ public sealed class ResourceCoordinator : IDisposable
                         && Directory.Exists(Path.Combine(slot, current)) && IsPackageName(name)) Retire(directory);
                 }
             }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            { DiagnosticLog.Warning("Resources", "artwork.sweep-failed", "An artwork slot could not be swept.", error, new { slot }); }
         }
     }
 

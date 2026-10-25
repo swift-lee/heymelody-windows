@@ -13,22 +13,24 @@ internal sealed class DiagnosticWriter : IDisposable
     private readonly string _instance;
     private readonly Action<string, Exception?> _failure;
     private readonly long _rotationBytes;
+    private readonly long _backlogWarning;
     private readonly Channel<DiagnosticEntry> _queue;
     private readonly SemaphoreSlim _signal = new(0, 1);
     private readonly ManualResetEventSlim _idle = new(true);
     private readonly Task _pump;
     private Stream _file;
     private readonly Func<string, Stream>? _streamFactory;
-    private long _length, _sequence, _dropped, _pending;
+    private long _length, _sequence, _dropped, _pending, _backlogPeak, _backlogReportedAt;
     private int _part, _enabled = 1, _disposed, _overflowReported, _timeoutReported;
 
     public DiagnosticWriter(DiagnosticSessionInfo session, string component, string role, string instance,
-        Action<string, Exception?> failure, long rotationBytes, int capacity, Func<string, Stream>? streamFactory = null)
+        Action<string, Exception?> failure, long rotationBytes, int backlogWarning, Func<string, Stream>? streamFactory = null)
     {
         _session = session; _component = component; _role = role; _instance = instance;
         _failure = failure; _rotationBytes = rotationBytes; _streamFactory = streamFactory;
-        _queue = Channel.CreateBounded<DiagnosticEntry>(new BoundedChannelOptions(capacity)
-        { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = false });
+        _backlogWarning = Math.Max(1, backlogWarning);
+        // Debug capture favors completeness: a slow disk grows the backlog instead of discarding events.
+        _queue = Channel.CreateUnbounded<DiagnosticEntry>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
         Directory.CreateDirectory(session.Directory!);
         _file = OpenPart();
         _pump = Task.Run(PumpAsync);
@@ -39,15 +41,22 @@ internal sealed class DiagnosticWriter : IDisposable
     public void Enqueue(DiagnosticEntry entry)
     {
         if (!IsEnabled) return;
-        Interlocked.Increment(ref _pending);
+        var pending = Interlocked.Increment(ref _pending);
         _idle.Reset();
         if (!_queue.Writer.TryWrite(entry))
         {
+            // Only a writer that is already closing rejects entries; record the gap instead of hiding it.
             Interlocked.Decrement(ref _pending);
             if (Volatile.Read(ref _disposed) != 0) return;
             Interlocked.Increment(ref _dropped);
             if (Interlocked.Exchange(ref _overflowReported, 1) == 0)
-                _failure("日志队列已满，本组件日志出现缺口；后续可写入的事件仍将记录。", null);
+                _failure("日志写入器已关闭，本组件日志出现缺口。", null);
+        }
+        else if (pending >= _backlogWarning)
+        {
+            long peak;
+            do { peak = Interlocked.Read(ref _backlogPeak); }
+            while (pending > peak && Interlocked.CompareExchange(ref _backlogPeak, pending, peak) != peak);
         }
         Wake();
     }
@@ -68,10 +77,11 @@ internal sealed class DiagnosticWriter : IDisposable
                 var lost = Interlocked.Exchange(ref _dropped, 0);
                 if (lost != 0)
                     await WriteEntryAsync(new(DateTimeOffset.UtcNow, DiagnosticLevel.Warning, "Diagnostics", "logging.dropped",
-                        "Diagnostic queue overflow", null, Environment.CurrentManagedThreadId,
+                        "Diagnostic events were rejected after the writer closed", null, Environment.CurrentManagedThreadId,
                         JsonSerializer.SerializeToElement(new { lostEvents = lost }), null)).ConfigureAwait(false);
                 while (_queue.Reader.TryRead(out var entry))
                 {
+                    await ReportBacklogAsync().ConfigureAwait(false);
                     await WriteEntryAsync(entry).ConfigureAwait(false);
                     Interlocked.Decrement(ref _pending);
                 }
@@ -93,6 +103,17 @@ internal sealed class DiagnosticWriter : IDisposable
             _idle.Set();
             try { await _file.DisposeAsync().ConfigureAwait(false); } catch { }
         }
+    }
+
+    private async Task ReportBacklogAsync()
+    {
+        var peak = Interlocked.Read(ref _backlogPeak);
+        // Report each further doubling once, so the file shows when the disk fell behind without flooding it.
+        if (peak < _backlogWarning || peak < Interlocked.Read(ref _backlogReportedAt) * 2) return;
+        Interlocked.Exchange(ref _backlogReportedAt, peak);
+        await WriteEntryAsync(new(DateTimeOffset.UtcNow, DiagnosticLevel.Warning, "Diagnostics", "logging.backlog",
+            "Diagnostic writer is behind; events are retained in memory", null, Environment.CurrentManagedThreadId,
+            JsonSerializer.SerializeToElement(new { pendingEvents = peak, warningThreshold = _backlogWarning }), null)).ConfigureAwait(false);
     }
 
     private async Task WriteEntryAsync(DiagnosticEntry entry)

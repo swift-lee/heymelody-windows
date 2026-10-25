@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.App;
 
@@ -20,6 +21,12 @@ public static class UiRenderingPreferenceReader
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException
             or ArgumentException or NotSupportedException)
-        { return false; }
+        {
+            if (error is FileNotFoundException or DirectoryNotFoundException)
+                DiagnosticLog.Debug("Settings", "uiRendering.missing", "Preferences file does not exist; GPU rendering default applies", new { path = settingsPath });
+            else
+                DiagnosticLog.Warning("Settings", "uiRendering.loadFailed", "UI rendering preference could not be read; GPU default applies", error, new { path = settingsPath });
+            return false;
+        }
     }
 }

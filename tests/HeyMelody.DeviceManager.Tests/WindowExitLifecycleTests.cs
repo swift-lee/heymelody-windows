@@ -55,6 +55,20 @@ internal static class WindowExitLifecycleTests
         await StopAsync(window, service);
         Pass("manager client-side vote cancellation does not close its window");
 
+        service = new ExitService();
+        window = await OpenAsync(service);
+        model = (DeviceManagerViewModel)window.FindControl<DeviceManagerView>("Page")!.DataContext!;
+        // The first state notification of the preparation throws, so no approval can ever be produced.
+        var armed = false;
+        model.PropertyChanged += (_, _) => { if (armed) { armed = false; throw new InvalidOperationException("fixture preparation failed"); } };
+        armed = true;
+        service.Push("requestExit", "prepare-fails");
+        await UntilAsync(() => service.Votes.Count == 1, "A failed manager preparation left the Host waiting without any vote.");
+        Check(!service.Votes[0].Approved && service.Votes[0].Request == "prepare-fails" && window.IsVisible && service.Disposals == 0,
+            "A failed manager preparation must send a denying vote and keep the window open.");
+        await StopAsync(window, service);
+        Pass("manager preparation failure votes no instead of leaving the Host to time out");
+
         service = new ExitService { ReplayStopping = true };
         window = new DeviceManagerWindow(service, false) { ShutdownApplicationOnClose = false };
         Track(window, () => service.Push("stopping")); window.Show();

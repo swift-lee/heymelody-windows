@@ -71,12 +71,20 @@ public partial class DeviceManagerWindow : FAAppWindow
             else if (notification.Kind == "exitCancelled")
             { _exitRequestId = null; _viewModel.CancelBackendExit(); }
         }
-        catch { if (!_closing && !_backendStopping) _viewModel.CancelBackendExit(); }
+        catch (Exception error)
+        {
+            DiagnosticLog.Warning("ui.lifetime", "backendEventFailed", "Device manager could not handle a backend event", error, new { notification.Kind, notification.ExitRequestId });
+            if (!_closing && !_backendStopping) _viewModel.CancelBackendExit();
+        }
     });
 
     private async Task VoteForExitAsync(Task? previous, string requestId)
     {
-        if (previous is not null) { try { await previous; } catch { } }
+        if (previous is not null)
+        {
+            try { await previous; }
+            catch (Exception error) { DiagnosticLog.Debug("ui.lifetime", "previousVoteFailed", "The previous exit vote had failed", new { error = error.Message, requestId }); }
+        }
         if (_exitRequestId != requestId || _closing || _closed || _backendStopping) return;
         var approved = false;
         try
@@ -94,8 +102,25 @@ public partial class DeviceManagerWindow : FAAppWindow
             {
                 _backendStopping = true; _backendStop.TrySetResult(); Close();
             }
-            else if (!_closing && !_backendStopping && _exitRequestId == requestId) _viewModel.CancelBackendExit();
+            else if (!_closing && !_backendStopping && _exitRequestId == requestId)
+            {
+                if (!approved) await TryDenyExitAsync(requestId);
+                _viewModel.CancelBackendExit();
+            }
         }
+    }
+
+    // Without a denial the Host would wait for the whole vote budget on a window that already gave up.
+    private async Task TryDenyExitAsync(string requestId)
+    {
+        if (_events is null) return;
+        try
+        {
+            await _events.AcknowledgeExitAsync(requestId, false, CancellationToken.None);
+            DiagnosticLog.Info("ui.lifetime", "exitDenied", "Device manager denied the backend exit after a failed preparation", new { requestId });
+        }
+        catch (Exception error)
+        { DiagnosticLog.Warning("ui.lifetime", "exitDenyFailed", "Device manager could not deliver the denying exit vote.", error, new { requestId }); }
     }
     private async void OnClosing(object? sender, WindowClosingEventArgs e)
     {

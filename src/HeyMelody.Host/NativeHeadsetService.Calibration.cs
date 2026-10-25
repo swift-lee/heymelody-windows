@@ -177,7 +177,11 @@ public sealed partial class NativeHeadsetService
         async Task RunAsync()
         {
             try { await action(); }
-            catch (Exception) { /* The engine publishes the failure and stops its own audio. */ }
+            catch (Exception actionError)
+            {
+                // The engine publishes the failure and stops its own audio.
+                DiagnosticLog.Debug("host.calibration", "backgroundActionFailed", "A background calibration action failed", new { failure = actionError.Message, type = actionError.GetType().Name });
+            }
         }
     }
     private void EngineChanged(CalibrationSnapshot snapshot)
@@ -342,14 +346,17 @@ public sealed partial class NativeHeadsetService
             refresh = _hearingRefreshTask;
         }
         if (_client is not null) _client.Notification -= OnHearingNotification;
-        try { await refresh; } catch { }
+        try { await refresh; }
+        catch (Exception refreshError) { DiagnosticLog.Debug("host.calibration", "hearingRefreshEnded", "Hearing refresh task ended with an error during disposal", new { failure = refreshError.Message, type = refreshError.GetType().Name }); }
         _hearingRefreshLifetime?.Dispose(); _hearingRefreshLifetime = null;
         if (_calibration is null) return;
         var engine = _calibration; _calibration = null;
-        try { await engine.CancelAsync(); } catch { }
+        try { await engine.CancelAsync(); }
+        catch (Exception cancelError) { DiagnosticLog.Warning("host.calibration", "disposeCancelFailed", "Calibration cancel during disposal did not complete", cancelError); }
         engine.Changed -= EngineChanged; await engine.DisposeAsync();
         _client?.SetCalibrationActive(false);
-        try { await _calibrationBackground; } catch { }
+        try { await _calibrationBackground; }
+        catch (Exception backgroundError) { DiagnosticLog.Debug("host.calibration", "backgroundEnded", "Calibration background task ended with an error during disposal", new { failure = backgroundError.Message, type = backgroundError.GetType().Name }); }
         _calibrationState = null; _calibrationContext = null; _hearingProfiles = [];
     }
 }

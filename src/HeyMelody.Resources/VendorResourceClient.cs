@@ -122,7 +122,8 @@ public sealed class VendorResourceClient : IDisposable
         request.Headers.Add("ts", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture));
         request.Headers.Add("nonce", Guid.NewGuid().ToString()); request.Headers.Add("sign", Sign(key, body));
         DiagnosticLog.Bytes("Resources", "http.metadata-request", body,
-            new { uri = request.RequestUri, headers = request.Headers.ToString() });
+            // Structured headers let the central redactor replace the request signature by name.
+            new { uri = request.RequestUri, headers = request.Headers.ToDictionary(header => header.Key, header => string.Join(", ", header.Value)) });
         using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
         DiagnosticLog.Debug("Resources", "http.metadata-response", "Received resource metadata headers.",
             new { uri = request.RequestUri, response.StatusCode, contentLength = response.Content.Headers.ContentLength, headers = response.Headers.ToString() });

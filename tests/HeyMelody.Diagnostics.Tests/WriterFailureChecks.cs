@@ -14,20 +14,22 @@ internal static class WriterFailureChecks
         DiagnosticLog.ResetForTests();
         DiagnosticLog.InitializeIdentity(DiagnosticComponents.Main, "main");
         var blockedStream = new ControlledStream();
-        DiagnosticLog.Configure(Session("overflow"), capacity: 2, streamFactory: _ => blockedStream);
+        DiagnosticLog.Configure(Session("overflow"), backlogWarning: 2, streamFactory: _ => blockedStream);
         await blockedStream.FirstWrite.Task.WaitAsync(TimeSpan.FromSeconds(3));
         var start = System.Diagnostics.Stopwatch.StartNew();
         for (int index = 0; index < 100; index++) DiagnosticLog.Debug("Fixture", "burst", "queued", new { index });
-        check(start.Elapsed < TimeSpan.FromSeconds(1) && DiagnosticLog.LastFailure is not null && DiagnosticLog.IsEnabled,
-            "slow disk overflow is nonblocking and reports a sticky incomplete state");
+        check(start.Elapsed < TimeSpan.FromSeconds(1) && DiagnosticLog.LastFailure is null && DiagnosticLog.IsEnabled,
+            "slow disk burst is nonblocking and is not reported as a lost capture");
         blockedStream.Release.TrySetResult();
         DiagnosticLog.Stop("overflow completed");
         var rows = Encoding.UTF8.GetString(blockedStream.ToArray()).Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Select(line => JsonDocument.Parse(line).RootElement.Clone()).ToArray();
-        var dropped = rows.Where(row => row.GetProperty("eventName").GetString() == "logging.dropped")
-            .Sum(row => row.GetProperty("data").GetProperty("lostEvents").GetInt32());
-        var retained = rows.Count(row => row.GetProperty("eventName").GetString() != "logging.dropped");
-        check(dropped > 0 && retained + dropped == 102, "overflow count survives a simultaneous exit flush");
+        string Name(JsonElement row) => row.GetProperty("eventName").GetString()!;
+        var bursts = rows.Where(row => Name(row) == "burst").Select(row => row.GetProperty("data").GetProperty("index").GetInt32()).ToArray();
+        check(bursts.SequenceEqual(Enumerable.Range(0, 100)) && !rows.Any(row => Name(row) == "logging.dropped"),
+            "slow disk retains every burst event in order instead of dropping");
+        check(rows.Any(row => Name(row) == "logging.backlog" && row.GetProperty("data").GetProperty("pendingEvents").GetInt64() >= 2),
+            "writer backlog is recorded in the file");
 
         DiagnosticLog.ResetForTests();
         DiagnosticLog.InitializeIdentity(DiagnosticComponents.Main, "main");

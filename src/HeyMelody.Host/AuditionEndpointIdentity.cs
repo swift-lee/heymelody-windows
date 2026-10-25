@@ -57,9 +57,9 @@ internal static class EndpointIdentity
             }
             catch (Exception error)
             {
-                DiagnosticLog.Debug("host.audio", "endpointResolutionFailed", "Audition endpoint identity lookup failed",
+                DiagnosticLog.Warning("host.audio", "endpointResolutionFailed", "Audition endpoint identity lookup failed", error,
                     new { trace.Phase, trace.Attempts, trace.EndpointCount, trace.MatchCount,
-                        trace.LastNativeFailurePhase, trace.LastNativeFailureHResult, error.HResult, error.Message });
+                        trace.LastNativeFailurePhase, trace.LastNativeFailureHResult, error.HResult });
                 throw;
             }
         }

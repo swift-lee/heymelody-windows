@@ -101,6 +101,21 @@ internal static class ExitProtocolTests
             Check(await observer.Eof());
         });
 
+        await test("a fault while collecting votes returns the Host to idle, tells clients, and keeps ordinary RPC available", async () =>
+        {
+            // A negative vote budget makes the vote wait throw before any decision exists.
+            await using var fixture = new Fixture(scratch, voteBudget: TimeSpan.FromMilliseconds(-5));
+            await using var main = await fixture.Connect("main");
+            bool faulted = false;
+            try { await fixture.Server.RequestExitAsync(); }
+            catch (ArgumentOutOfRangeException) { faulted = true; }
+            Check(faulted);
+            string id = (await main.Event("requestExit")).ExitRequestId!;
+            Check((await main.Event("exitCancelled")).ExitRequestId == id);
+            Check((await main.Request("enumerate")).Success && fixture.Approved == 0);
+            Check(!fixture.Server.IsStopping);
+        });
+
         await test("final disposal drains a client accepted after the first stopping barrier", async () =>
         {
             await using var fixture = new Fixture(scratch);
@@ -127,12 +142,12 @@ internal static class ExitProtocolTests
         internal readonly string Name = "HeyMelody-Exit-" + Guid.NewGuid().ToString("N");
         internal int Approved, Enumerations;
         internal Func<Task>? BeforeDispose;
-        internal Fixture(string scratch, TimeSpan? stopBudget = null)
+        internal Fixture(string scratch, TimeSpan? stopBudget = null, TimeSpan? voteBudget = null)
         {
             Backend = new(new DeviceWhitelistStore(Path.Combine(scratch, Guid.NewGuid().ToString("N") + ".json")),
                 _ => { Interlocked.Increment(ref Enumerations); return Task.FromResult<IReadOnlyList<BluetoothCandidate>>([]); },
                 () => throw new InvalidOperationException("No device workers are allowed in exit protocol tests"));
-            Server = new(Backend, Name, exitVoteBudget: TimeSpan.FromSeconds(3), stoppingBudget: stopBudget ?? TimeSpan.FromSeconds(2));
+            Server = new(Backend, Name, exitVoteBudget: voteBudget ?? TimeSpan.FromSeconds(3), stoppingBudget: stopBudget ?? TimeSpan.FromSeconds(2));
             Server.ExitApproved += async () =>
             {
                 Interlocked.Increment(ref Approved);

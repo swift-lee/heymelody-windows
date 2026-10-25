@@ -155,7 +155,8 @@ internal static class NativeWorker
             DiagnosticLog.Error("worker.lifecycle", "failed", "Worker failed", failure);
             return 1;
         }
-        finally { await service.DisposeCalibrationAsync(); lifetime.Cancel(); snapshots.Writer.TryComplete(); calibrations.Writer.TryComplete(); spectra.Writer.TryComplete(); try { await Task.WhenAll(publishing, publishingCalibration, publishingSpectrum); } catch { } }
+        finally { await service.DisposeCalibrationAsync(); lifetime.Cancel(); snapshots.Writer.TryComplete(); calibrations.Writer.TryComplete(); spectra.Writer.TryComplete(); try { await Task.WhenAll(publishing, publishingCalibration, publishingSpectrum); }
+            catch (Exception publishError) { DiagnosticLog.Debug("worker.lifecycle", "publisherEnded", "A worker publisher task ended with an error during shutdown", new { failure = publishError.Message, type = publishError.GetType().Name }); } }
     }
 
     internal static async Task<int> EnumerateAsync()
@@ -242,6 +243,7 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
             {
                 _process = Process.Start(startFactory?.Invoke() ?? NativeWorker.StartInfo("--worker")) ?? throw new IOException();
                 DiagnosticLog.Info("host.worker", "started", "Peer worker started", new { _process.Id });
+                WatchExit(_process, "worker");
                 // The tray's current energy mode applies to the new worker at once and follows later changes until Stop.
                 // Publish before reading _stopped; Stop sets _stopped before it takes _energy. Both sides use full-fence exchanges,
                 // so at least one sees the other, and the exchange lets exactly one of them dispose the attachment.
@@ -327,10 +329,26 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
         Interlocked.Exchange(ref _energy, null)?.Dispose();
         foreach (var pending in _pending.Values) pending.Completion.TrySetException(new IOException("设备后台已中断。"));
         var process = _process;
-        try { if (process is { HasExited: false }) process.Kill(entireProcessTree: true); } catch { }
+        try { if (process is { HasExited: false }) process.Kill(entireProcessTree: true); }
+        catch (Exception failure) { DiagnosticLog.Debug("host.worker", "killFailed", "Peer worker could not be killed", new { processId = TryProcessId(process), failure = failure.Message }); }
         Unavailable?.Invoke();
     }
     private int _disposing;
+    private static int? TryProcessId(Process? process) { try { return process?.Id; } catch { return null; } }
+    // Records the child's exit code and time without altering how the supervisor reacts to termination.
+    private static void WatchExit(Process process, string role)
+    {
+        int pid;
+        try { pid = process.Id; process.EnableRaisingEvents = true; }
+        catch (Exception failure)
+        { DiagnosticLog.Debug("host.worker", "exitWatchFailed", "Worker exit could not be observed", new { role, failure = failure.Message }); return; }
+        process.Exited += (_, _) =>
+        {
+            int? exitCode = null; string? exitTime = null;
+            try { exitCode = process.ExitCode; exitTime = process.ExitTime.ToUniversalTime().ToString("O"); } catch { }
+            DiagnosticLog.Info("host.worker", "exited", "Worker process exited", new { role, pid, exitCode, exitTime });
+        };
+    }
     private static Task RunBackground(Func<Task> action) => Task.Run(async () =>
     {
         using var operation = DiagnosticLog.SuspendOperation();
@@ -347,10 +365,12 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
                 await RequestAsync<bool>(new() { Operation = "shutdown" }, deadline.Token);
                 await _process.WaitForExitAsync(deadline.Token);
             }
-            catch { }
+            catch (Exception failure)
+            { DiagnosticLog.Debug("host.worker", "shutdownRequestFailed", "Worker shutdown request did not complete", new { processId = TryProcessId(_process), failure = failure.Message }); }
         }
         Stop();
-        try { await _stderr.WaitAsync(TimeSpan.FromSeconds(2)); } catch { }
+        try { await _stderr.WaitAsync(TimeSpan.FromSeconds(2)); }
+        catch (Exception failure) { DiagnosticLog.Debug("host.worker", "stderrDrainTimeout", "Worker diagnostic stream did not finish", new { failure = failure.Message }); }
         _process?.Dispose();
     }
 
@@ -359,6 +379,7 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
         using var process = Process.Start(NativeWorker.StartInfo("--catalog-worker")) ?? throw new IOException();
         using var energy = HostEnergy.Controller?.Attach(process);
         DiagnosticLog.Info("host.worker", "catalogStarted", "Catalog worker started", new { process.Id });
+        WatchExit(process, "catalog-worker");
         var stderr = WorkerDiagnosticReader.DrainAsync(process.StandardError, "catalog-worker", process.Id);
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(token);
         budget.CancelAfter(TimeSpan.FromSeconds(75));
@@ -368,13 +389,24 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
             DiagnosticLog.Info("host.worker", "catalogReceive", "Received catalog worker RPC record", new { line });
             var result = JsonSerializer.Deserialize<List<BluetoothCandidate>>(line, HostWire.Json) ?? throw new InvalidDataException();
             await process.WaitForExitAsync(budget.Token);
-            if (process.ExitCode != 0 || result.Count > 4096) throw new IOException();
+            if (process.ExitCode != 0 || result.Count > 4096)
+            {
+                var failure = new IOException("Catalog worker returned an unusable result.");
+                DiagnosticLog.Error("host.worker", "catalogFailed", "Catalog worker result was rejected", failure, new
+                {
+                    exitCode = process.ExitCode, count = result.Count,
+                    reason = process.ExitCode != 0 ? "nonZeroExit" : "tooManyCandidates"
+                });
+                throw failure;
+            }
             return result;
         }
         finally
         {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
-            try { await stderr.WaitAsync(TimeSpan.FromSeconds(2)); } catch { }
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (Exception failure) { DiagnosticLog.Debug("host.worker", "killFailed", "Catalog worker could not be killed", new { processId = process.Id, failure = failure.Message }); }
+            try { await stderr.WaitAsync(TimeSpan.FromSeconds(2)); }
+            catch (Exception failure) { DiagnosticLog.Debug("host.worker", "stderrDrainTimeout", "Catalog worker diagnostic stream did not finish", new { failure = failure.Message }); }
         }
     }
 }

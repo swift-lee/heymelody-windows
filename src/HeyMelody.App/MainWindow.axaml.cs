@@ -160,8 +160,9 @@ public partial class MainWindow : FAAppWindow
             }
         }
         catch (OperationCanceledException) when (_closing) { }
-        catch (Exception)
+        catch (Exception error)
         {
+            DiagnosticLog.Warning("ui.lifetime", "backendEventFailed", "Main window could not handle a backend event", error, new { notification.Kind, notification.ExitRequestId });
             if (!_closing && !_backendStopping)
             {
                 _viewModel.CancelBackendExit();
@@ -172,7 +173,11 @@ public partial class MainWindow : FAAppWindow
 
     private async Task VoteAfterAsync(Task? previous, string requestId)
     {
-        if (previous is not null) { try { await previous; } catch { } }
+        if (previous is not null)
+        {
+            try { await previous; }
+            catch (Exception error) { DiagnosticLog.Debug("ui.lifetime", "previousVoteFailed", "The previous exit vote had failed", new { error = error.Message, requestId }); }
+        }
         if (_exitRequestId == requestId && !_closed && !_backendStopping)
             await VoteForBackendExitAsync(requestId);
     }
@@ -229,8 +234,9 @@ public partial class MainWindow : FAAppWindow
         {
             try { return await resolver.ResolveAsync(_managerLifetime.Token); }
             catch (OperationCanceledException) when (_managerLifetime.IsCancellationRequested) { throw; }
-            catch (Exception)
+            catch (Exception error)
             {
+                DiagnosticLog.Warning("ui.lifetime", "deviceResolveFailed", "Device startup resolution failed; offering recovery", error);
                 if (_closing) return null;
                 var recovery = await _viewModel.Dialogs.RunAsync(token => _confirmations.RecoverDevicesAsync(token),
                     _managerLifetime.Token);
@@ -242,7 +248,7 @@ public partial class MainWindow : FAAppWindow
                     if (await _manager!.RunAsync(_managerLifetime.Token) == DeviceManagerOutcome.Cancelled) return null;
                 }
                 catch (OperationCanceledException) when (_managerLifetime.IsCancellationRequested) { throw; }
-                catch (Exception) { }
+                catch (Exception managerError) { DiagnosticLog.Warning("ui.lifetime", "recoveryManagerFailed", "The device manager failed during explicit recovery", managerError); }
             }
         }
         return null;
@@ -265,8 +271,9 @@ public partial class MainWindow : FAAppWindow
             {
                 try { result = await _manager.RunAsync(_managerLifetime.Token); break; }
                 catch (OperationCanceledException) when (_managerLifetime.IsCancellationRequested) { throw; }
-                catch (Exception)
+                catch (Exception error)
                 {
+                    DiagnosticLog.Warning("ui.lifetime", "deviceManagerFailed", "The device manager did not complete; offering retry", error);
                     if (_closing) return;
                     var retry = await _viewModel.Dialogs.RunAsync(token => _confirmations.RetryManagerAsync(token),
                         _managerLifetime.Token);
@@ -320,13 +327,14 @@ public partial class MainWindow : FAAppWindow
             if (!_closing) await _viewModel.RefreshStateCommand.ExecuteAsync(null);
         }
         catch (OperationCanceledException) when (_managerLifetime.IsCancellationRequested) { }
-        catch (Exception)
+        catch (Exception error)
         {
+            DiagnosticLog.Warning("ui.lifetime", "calibrationLaunchFailed", "The calibration window did not start or complete", error, new { kind });
             if (!_closing) await _viewModel.Dialogs.RunAsync(token => _confirmations.AlertAsync("无法打开测试", "测试组件未能正常启动或完成，请检查耳机连接及客户端文件后重试。", token), _managerLifetime.Token);
         }
         finally
         {
-            if (state is not null) { try { await service.CancelCalibrationAsync(state.Handle, CancellationToken.None); } catch { } }
+            if (state is not null) { try { await service.CancelCalibrationAsync(state.Handle, CancellationToken.None); } catch (Exception error) { DiagnosticLog.Debug("ui.lifetime", "calibrationCancelFailed", "Final calibration cancel failed", new { error = error.Message }); } }
         }
     }
 

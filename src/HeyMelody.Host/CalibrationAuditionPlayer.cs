@@ -159,7 +159,8 @@ internal sealed class WasapiCalibrationAuditionPlayer : ICalibrationAuditionPlay
             Check(_initializeCom()); initialized = true;
             DiagnosticLog.Debug("host.audio", "threadStarted", "WASAPI audition COM thread initialized");
             // The tray may be in EcoQoS while a preview plays; the 5 ms pump must not be throttled. A failed exemption only costs efficiency.
-            try { _exemptThread(); } catch { }
+            try { _exemptThread(); }
+            catch (Exception error) { DiagnosticLog.Debug("host.audio", "threadExemptionFailed", "EcoQoS exemption for the audition thread failed", new { error.HResult, error.Message }); }
             while (!_commands.IsCompleted)
             {
                 // Idle: block until a command arrives or CompleteAdding wakes the thread; no polling while nothing plays.
@@ -170,8 +171,8 @@ internal sealed class WasapiCalibrationAuditionPlayer : ICalibrationAuditionPlay
                     catch (OperationCanceledException) { command.Completion.TrySetCanceled(command.Token); }
                     catch (Exception error)
                     {
-                        DiagnosticLog.Debug("host.audio", "commandFailed", "WASAPI audition command failed; caller receives the original exception",
-                            new { action = command.Action.Method.Name, exceptionType = error.GetType().FullName, error.HResult, error.Message });
+                        DiagnosticLog.Warning("host.audio", "commandFailed", "WASAPI audition command failed; caller receives the original exception", error,
+                            new { action = command.Action.Method.Name, exceptionType = error.GetType().FullName, error.HResult });
                         command.Completion.TrySetException(error);
                     }
                 }
@@ -188,7 +189,9 @@ internal sealed class WasapiCalibrationAuditionPlayer : ICalibrationAuditionPlay
                 catch (Exception error)
                 {
                     DiagnosticLog.Error("host.audio", "renderFailed", "WASAPI audition render pump failed", error);
-                    Cleanup(); try { Failed?.Invoke(); } catch { }
+                    Cleanup();
+                    try { Failed?.Invoke(); }
+                    catch (Exception callbackError) { DiagnosticLog.Debug("host.audio", "failedCallbackThrew", "The audition failure callback threw", new { failure = callbackError.Message }); }
                 }
             }
         }
@@ -201,7 +204,7 @@ internal sealed class WasapiCalibrationAuditionPlayer : ICalibrationAuditionPlay
         finally
         {
             try { Cleanup(); if (initialized) _uninitializeCom(); }
-            catch { }
+            catch (Exception cleanupError) { DiagnosticLog.Debug("host.audio", "threadCleanupFailed", "WASAPI audition thread cleanup failed", new { cleanupError.HResult, cleanupError.Message }); }
             finally { _finished.TrySetResult(); }
         }
     }
@@ -287,10 +290,15 @@ internal sealed class WasapiCalibrationAuditionPlayer : ICalibrationAuditionPlay
     }
     private void Cleanup()
     {
-        if (_playing) { try { _client?.Stop(); } catch { } }
+        if (_playing)
+        {
+            try { _client?.Stop(); }
+            catch (Exception stopError) { DiagnosticLog.Debug("host.audio", "clientStopFailed", "WASAPI client stop failed during cleanup", new { stopError.HResult, stopError.Message }); }
+        }
         _playing = false;
         foreach (object? value in new object?[] { _renderObject, _clientObject, _endpoint, _enumerator })
-            try { Release(value); } catch { }
+            try { Release(value); }
+            catch (Exception releaseError) { DiagnosticLog.Debug("host.audio", "releaseFailed", "A COM object could not be released during cleanup", new { releaseError.HResult, releaseError.Message }); }
         _renderObject = _clientObject = null; _render = null; _client = null; _endpoint = null; _enumerator = null;
         _wave = null; _fill = null; _cursor = 0;
     }

@@ -50,7 +50,11 @@ public sealed partial class ClientBridge
         {
             token.ThrowIfCancellationRequested();
             if (RetiredPipes.ContainsKey(BackendEndpoint.PipeName) || DiagnosticRuntime.IsBoundLaunchExpired)
+            {
+                DiagnosticLog.Info("client.lifecycle", "ownedComponentRefused", "Refused to start a component after the backend ended",
+                    new { start.FileName, retired = RetiredPipes.ContainsKey(BackendEndpoint.PipeName), expired = DiagnosticRuntime.IsBoundLaunchExpired });
                 throw new OperationCanceledException("后台已经结束，不能再启动此周期的组件。", token);
+            }
             DiagnosticRuntime.BindChildStart(start);
             token.ThrowIfCancellationRequested();
             return Process.Start(start) ?? throw new IOException("无法启动独立组件。");
@@ -66,7 +70,11 @@ public sealed partial class ClientBridge
             {
                 if (_disposed || _stopping || ExitPendingLocked || RetiredPipes.ContainsKey(_pipeName)
                     || DiagnosticRuntime.HasBoundLaunch)
+                {
+                    DiagnosticLog.Info("client.lifecycle", "backendStartRefused", "Refused to restart the backend while exiting",
+                        new { _disposed, _stopping, exitPending = ExitPendingLocked, retired = RetiredPipes.ContainsKey(_pipeName), boundLaunch = DiagnosticRuntime.HasBoundLaunch });
                     throw new IOException("后台正在退出，不能重新启动。");
+                }
                 _startBackend?.Invoke();
             }
         }
@@ -82,7 +90,11 @@ public sealed partial class ClientBridge
             peers.Add(new(this));
             RetiredPipes.TryGetValue(_pipeName, out retired);
         }
-        if (retired is not null) CommitStopping(retired, propagate: false);
+        if (retired is not null)
+        {
+            DiagnosticLog.Info("client.lifecycle", "retiredPipeReplay", "Replaying the retired pipe's terminal state", new { retired.ExitRequestId, retired.BackendInstanceId });
+            CommitStopping(retired, propagate: false);
+        }
         if (DiagnosticRuntime.HasBoundLaunch)
         {
             DiagnosticRuntime.BoundOwnerExited += BoundOwnerEnded;
@@ -90,7 +102,11 @@ public sealed partial class ClientBridge
         }
     }
 
-    private void BoundOwnerEnded() => CommitStopping(new() { Kind = "stopping", BackendInstanceId = _backendInstanceId ?? "" });
+    private void BoundOwnerEnded()
+    {
+        DiagnosticLog.Info("client.lifecycle", "boundOwnerEnded", "The bound launch owner ended; committing stopping", new { _backendInstanceId });
+        CommitStopping(new() { Kind = "stopping", BackendInstanceId = _backendInstanceId ?? "" });
+    }
 
     private void UnregisterBridge()
     {
@@ -119,6 +135,9 @@ public sealed partial class ClientBridge
                             .OfType<ClientBridge>().Where(peer => !ReferenceEquals(peer, this)).ToArray() : [];
                 }
             }
+            DiagnosticLog.Info("client.lifecycle", "commitStopping", "Committing the terminal stopping state",
+                new { notification.ExitRequestId, notification.BackendInstanceId, propagate, peers = others.Length,
+                    alreadyStopping = _stopping, ackConnection = connection is not null, fromSource = sourceConnection is not null });
             if (!_stopping)
             {
                 _stopping = true;
@@ -136,8 +155,13 @@ public sealed partial class ClientBridge
 
     private async Task SendStoppingAckAsync(Connection connection, BackendEvent notification)
     {
-        if (connection.Closed || string.IsNullOrEmpty(notification.ExitRequestId)
-            || Interlocked.Exchange(ref connection.StopAckSent, 1) != 0) return;
+        string? skipped = connection.Closed ? "connectionClosed" : string.IsNullOrEmpty(notification.ExitRequestId) ? "noExitRequestId"
+            : Interlocked.Exchange(ref connection.StopAckSent, 1) != 0 ? "alreadySent" : null;
+        if (skipped is not null)
+        {
+            DiagnosticLog.Debug("client.lifecycle", "stoppingAckSkipped", "Terminal acknowledgement not sent", new { reason = skipped, notification.ExitRequestId });
+            return;
+        }
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         budget.CancelAfter(TimeSpan.FromSeconds(2));
         try
@@ -156,12 +180,16 @@ public sealed partial class ClientBridge
             finally { connection.WriteGate.Release(); }
         }
         catch (Exception error) when (error is IOException or OperationCanceledException or ObjectDisposedException)
-        { DiagnosticLog.Debug("client.lifecycle", "stopAckEnded", "Terminal acknowledgement ended on the original pipe", new { error = error.ToString() }); }
+        { DiagnosticLog.Warning("client.lifecycle", "stopAckEnded", "Terminal acknowledgement ended on the original pipe", error); }
     }
 
     private void ReceivePrepareLocked(BackendEvent notification, Connection connection)
     {
-        if (_stopping) return;
+        if (_stopping)
+        {
+            DiagnosticLog.Debug("client.lifecycle", "prepareDropped", "Ignored requestExit after stopping", new { notification.ExitRequestId });
+            return;
+        }
         if (_exitRequest?.ExitRequestId != notification.ExitRequestId || _exitRequest?.BackendInstanceId != notification.BackendInstanceId)
         { _localExitVote = null; _preparePublished = false; }
         _exitRequest = notification;
@@ -179,7 +207,13 @@ public sealed partial class ClientBridge
     private void ReceiveExitCancelledLocked(BackendEvent notification)
     {
         if (_stopping || _exitRequest is null || notification.ExitRequestId != _exitRequest.ExitRequestId
-            || notification.BackendInstanceId != _exitRequest.BackendInstanceId) return;
+            || notification.BackendInstanceId != _exitRequest.BackendInstanceId)
+        {
+            DiagnosticLog.Debug("client.lifecycle", "exitCancelledDropped", "Ignored an exitCancelled that does not match the current request",
+                new { notification.ExitRequestId, current = _exitRequest?.ExitRequestId, _stopping });
+            return;
+        }
+        DiagnosticLog.Info("client.lifecycle", "exitCancelled", "Exit request cancelled by the Host", new { notification.ExitRequestId });
         _exitRequest = null; _exitConnection = null; _localExitVote = null; _preparePublished = false;
         _controlEvents.Writer.TryWrite(new(notification, null));
     }
@@ -220,30 +254,53 @@ public sealed partial class ClientBridge
         BackendEvent request;
         lock (_stateGate)
         {
-            if (_stopping) return;
+            if (_stopping)
+            {
+                DiagnosticLog.Debug("client.lifecycle", "voteSkipped", "Exit vote skipped because the bridge is already stopping", new { exitRequestId, approved });
+                return;
+            }
             if (_exitRequest is not { } current || current.ExitRequestId != exitRequestId || _exitConnection is null)
                 throw new OperationCanceledException("退出请求已取消或后台已变化。");
             request = current;
             connection = _exitConnection;
             _localExitVote = approved;
         }
+        DiagnosticLog.Info("client.lifecycle", "exitVote", "Voting on the original pipe", new { exitRequestId, approved, connectionClosed = connection.Closed });
         if (connection.Closed && approved)
         {
+            DiagnosticLog.Info("client.lifecycle", "stoppingSynthesized", "Original pipe closed; synthesizing stopping for an approving vote", new { exitRequestId });
             CommitStopping(new() { Kind = "stopping", BackendInstanceId = request.BackendInstanceId, ExitRequestId = exitRequestId }, sourceConnection: connection);
             return;
         }
+        var settled = false;
         try
         {
             _ = await RequestAsync<bool>(new() { Operation = "exitVote", ExitRequestId = exitRequestId,
                 Approved = approved, BackendInstanceId = request.BackendInstanceId }, TimeSpan.FromSeconds(15), token,
                 boundConnection: connection);
+            settled = true;
         }
         catch (BackendOperationException error)
         { throw new OperationCanceledException("退出投票已取消或被后台拒绝。", error); }
         catch (IOException) when (approved && (_stopping || connection.Closed))
-        { CommitStopping(new() { Kind = "stopping", BackendInstanceId = request.BackendInstanceId, ExitRequestId = exitRequestId }, sourceConnection: connection); }
+        {
+            settled = true;
+            DiagnosticLog.Info("client.lifecycle", "stoppingSynthesized", "Original pipe closed during the vote; synthesizing stopping", new { exitRequestId });
+            CommitStopping(new() { Kind = "stopping", BackendInstanceId = request.BackendInstanceId, ExitRequestId = exitRequestId }, sourceConnection: connection);
+        }
         finally
         {
+            if (!settled && approved)
+            {
+                // The approving vote did not reach the Host: the local decision is not recorded as made, so a later retry or
+                // a new requestExit starts from a clean state. A denial keeps its local state so this window stays usable.
+                lock (_stateGate)
+                    if (_exitRequest?.ExitRequestId == exitRequestId && _localExitVote == approved && !_stopping)
+                    {
+                        _localExitVote = null;
+                        DiagnosticLog.Warning("client.lifecycle", "exitVoteUndelivered", "Approving vote was not delivered; local vote reset", data: new { exitRequestId });
+                    }
+            }
             if (!approved)
             {
                 bool reconnect;

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text;
+using HeyMelody.Diagnostics;
 using HeyMelodyWindows.App;
 
 namespace HeyMelodyWindows.Calibration.UI;
@@ -192,7 +193,14 @@ public sealed class CalibrationViewModel(ICalibrationService service, string han
             }
         }
         catch (OperationCanceledException) when (_cancelled) { }
-        catch { if (!_cancelled) { _pendingLevel = null; SetError("音量调整未确认，请重试播放。"); } }
+        catch (Exception failure)
+        {
+            if (!_cancelled)
+            {
+                DiagnosticLog.Error("ui.calibration", "levelAdjustFailed", "Volume adjustment was not confirmed", failure, new { handle, kind });
+                _pendingLevel = null; SetError("音量调整未确认，请重试播放。");
+            }
+        }
         finally { _levelOperation = null; SelectionChanged(); }
     }
     private async Task ApplyLevelAsync(LevelChange change)
@@ -235,7 +243,10 @@ public sealed class CalibrationViewModel(ICalibrationService service, string han
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception error)
         {
-            try { Adopt(await service.GetCalibrationAsync(handle, _lifetime.Token)); } catch { }
+            DiagnosticLog.Error("ui.calibration", "operationFailed", "Calibration operation failed", error, new { handle, kind, stage = _state.Stage });
+            try { Adopt(await service.GetCalibrationAsync(handle, _lifetime.Token)); }
+            catch (Exception recovery)
+            { DiagnosticLog.Debug("ui.calibration", "recoveryReadFailed", "Calibration state could not be re-read after a failure", new { handle, failure = recovery.Message }); }
             SetError(error is InvalidOperationException ? error.Message : "操作未能完成，请重试或取消测试。");
         }
         finally { _busy = false; Changed(nameof(Busy)); SelectionChanged(); }
@@ -266,8 +277,9 @@ public sealed class CalibrationViewModel(ICalibrationService service, string han
             }
             return _stopConfirmed;
         }
-        catch
+        catch (Exception failure)
         {
+            DiagnosticLog.Error("ui.calibration", "cancelFailed", "Calibration stop was not confirmed", failure, new { handle, kind });
             _cancelFailed = true;
             SetError("停止测试尚未确认，请重试停止或重新连接后核实。");
             return false;

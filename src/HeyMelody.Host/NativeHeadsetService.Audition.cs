@@ -84,7 +84,8 @@ public sealed partial class NativeHeadsetService
                         else await DiscardPlayerAsync(failed);
                     }
                     if (!stopSubmitted)
-                        try { await engine.PreviewAsync(mode, CancellationToken.None); } catch { }
+                        try { await engine.PreviewAsync(mode, CancellationToken.None); }
+                        catch (Exception stopError) { DiagnosticLog.Debug("host.audio", "previewStopFailed", "Fallback preview stop after a failed start was not confirmed", new { failure = stopError.Message, type = stopError.GetType().Name }); }
                     if (epoch == Interlocked.Read(ref _previewEpoch)) PublishAuditionState(false, "试听已停止，请检查耳机音频连接后重试。");
                     if (error is OperationCanceledException) throw;
                     throw new InvalidOperationException("试听未能暂停，请检查耳机音频连接后重试。");
@@ -133,7 +134,11 @@ public sealed partial class NativeHeadsetService
                 else await DiscardPlayerAsync(player);
                 if (dspStarted)
                     try { await engine.PreviewAsync(CalibrationPreviewMode.Stopped, CancellationToken.None); }
-                    catch { /* Engine preserves unconfirmed STOP ownership and the calibration lease. */ }
+                    catch (Exception stopError)
+                    {
+                        // Engine preserves unconfirmed STOP ownership and the calibration lease.
+                        DiagnosticLog.Debug("host.audio", "previewStopFailed", "Preview stop after a failed start was not confirmed", new { failure = stopError.Message, type = stopError.GetType().Name });
+                    }
                 if (epoch == Interlocked.Read(ref _previewEpoch))
                     PublishAuditionState(false, "试听未能播放，请检查耳机音频连接后重试。");
                 if (error is OperationCanceledException) throw new OperationCanceledException(runToken);
@@ -196,7 +201,9 @@ public sealed partial class NativeHeadsetService
             var player = dispose ? Interlocked.Exchange(ref _auditionPlayer, null) : _auditionPlayer;
             if (player is null) return;
             await StopPlayerAsync(player);
-            if (dispose) try { await player.DisposeAsync(); } catch { }
+            if (dispose)
+                try { await player.DisposeAsync(); }
+                catch (Exception disposeError) { DiagnosticLog.Debug("host.audio", "playerDisposeFailed", "Audition player dispose failed", new { failure = disposeError.Message, type = disposeError.GetType().Name }); }
         }
         finally { _auditionGate.Release(); }
     }
@@ -208,14 +215,16 @@ public sealed partial class NativeHeadsetService
         {
             DiagnosticLog.Error("host.audio", "stopFailed", "Local audition player could not stop and will be discarded", error);
             Interlocked.CompareExchange(ref _auditionPlayer, null, player);
-            try { await player.DisposeAsync(); } catch { }
+            try { await player.DisposeAsync(); }
+            catch (Exception disposeError) { DiagnosticLog.Debug("host.audio", "playerDisposeFailed", "Audition player dispose failed after stop failure", new { failure = disposeError.Message, type = disposeError.GetType().Name }); }
         }
     }
     private async Task DiscardPlayerAsync(ICalibrationAuditionPlayer player)
     {
         await StopPlayerAsync(player);
         Interlocked.CompareExchange(ref _auditionPlayer, null, player);
-        try { await player.DisposeAsync(); } catch { }
+        try { await player.DisposeAsync(); }
+        catch (Exception disposeError) { DiagnosticLog.Debug("host.audio", "playerDisposeFailed", "Discarded audition player dispose failed", new { failure = disposeError.Message, type = disposeError.GetType().Name }); }
     }
     private void ThrowIfAuditionTransitionFailed(long epoch)
     {
@@ -240,7 +249,8 @@ public sealed partial class NativeHeadsetService
             PublishAuditionState(false);
             await DiscardPlayerAsync(player);
             if (_calibration is { } engine)
-                try { await engine.PreviewAsync(CalibrationPreviewMode.Stopped); } catch { }
+                try { await engine.PreviewAsync(CalibrationPreviewMode.Stopped); }
+                catch (Exception stopError) { DiagnosticLog.Debug("host.audio", "previewStopFailed", "Preview stop after discarding the player was not confirmed", new { failure = stopError.Message, type = stopError.GetType().Name }); }
             if (epoch == Interlocked.Read(ref _previewEpoch))
                 PublishAuditionState(false, "试听已停止，耳机音频输出不可用，请检查连接后重试。");
         }

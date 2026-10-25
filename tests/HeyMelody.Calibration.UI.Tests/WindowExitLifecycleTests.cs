@@ -116,6 +116,23 @@ internal static class WindowExitLifecycleTests
         Pass("terminal calibration stopping bypasses an already pending local STOP wait");
     }
 
+    private static async Task VerifyCancelFaultAsync()
+    {
+        var faulty = new ExitService();
+        var active = await OpenAsync(faulty, "fit");
+        var model = (CalibrationViewModel)typeof(CalibrationWindow).GetField("_model", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(active)!;
+        // The first state notification of the STOP throws out of CancelAsync itself, not through the service.
+        var armed = false;
+        model.PropertyChanged += (_, _) => { if (armed) { armed = false; throw new InvalidOperationException("fixture STOP preparation failed"); } };
+        armed = true;
+        faulty.Push("requestExit", "cancel-throws");
+        await UntilAsync(() => faulty.Votes.Count == 1, "A throwing calibration STOP left the Host waiting without any vote.");
+        Check(!faulty.Votes[0].Approved && faulty.Votes[0].Request == "cancel-throws" && active.IsVisible && faulty.Disposals == 0,
+            "A throwing calibration STOP must vote no and keep the window open.");
+        await StopAsync(active, faulty);
+        Pass("calibration STOP exception votes no instead of escaping the UI-thread post");
+    }
+
     private static async Task<CalibrationWindow> OpenAsync(ExitService service, string kind)
     {
         var window = new CalibrationWindow(service, "operation", kind) { ShutdownApplicationOnClose = false };

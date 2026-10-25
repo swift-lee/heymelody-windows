@@ -21,7 +21,12 @@ public sealed class CalibrationApplication : Application
     {
         if (args is not ["--handle", var handle] || string.IsNullOrWhiteSpace(handle) || handle.Length > 128 || !OperatingSystem.IsWindows()) return 2;
         Kind = kind; Handle = handle;
-        if (DiagnosticRuntime.IsBoundLaunchExpired) return 1;
+        if (DiagnosticRuntime.IsBoundLaunchExpired)
+        {
+            // Diagnostics are not initialized yet, so leave a trace on stderr.
+            Console.Error.WriteLine($"Calibration.UI ({kind}): the bound launch has already expired; exiting without starting the window.");
+            return 1;
+        }
         using var diagnostics = DiagnosticRuntime.InitializeClient(kind == "fit" ? DiagnosticComponents.FitTest : DiagnosticComponents.HearingSetup);
         if (DiagnosticRuntime.IsBoundLaunchExpired) return 1;
         try { return AppBuilder.Configure<CalibrationApplication>().UsePlatformDetect().UseHeyMelodyDiagnostics()
@@ -83,7 +88,11 @@ public sealed class CalibrationWindow : FAAppWindow
         Opened += async (_, _) =>
         {
             try { if (_events is not null) await _events.SubscribeAsync("calibration", CancellationToken.None); await _model.InitializeAsync(); }
-            catch { _allowLocalClose = true; _model.BackendUnavailable("无法连接蓝牙后台，请关闭此窗口后重试。"); }
+            catch (Exception error)
+            {
+                DiagnosticLog.Warning("ui.lifetime", "backendConnectFailed", "Calibration window could not connect to the backend.", error);
+                _allowLocalClose = true; _model.BackendUnavailable("无法连接蓝牙后台，请关闭此窗口后重试。");
+            }
         };
         Closing += ClosingAsync;
         Closed += (_, _) =>
@@ -141,10 +150,21 @@ public sealed class CalibrationWindow : FAAppWindow
 
     private async Task VoteForExitAsync(Task? previous, string requestId)
     {
-        if (previous is not null) { try { await previous; } catch { } }
+        if (previous is not null)
+        {
+            try { await previous; }
+            catch (Exception error) { DiagnosticLog.Debug("ui.lifetime", "previousVoteFailed", "The previous exit vote had failed", new { error = error.Message, requestId }); }
+        }
         if (_exitRequestId != requestId || _closed || _allowLocalClose) return;
         _completed |= _model.State.Stage == "Completed";
-        var confirmed = await _model.CancelAsync();
+        bool confirmed;
+        try { confirmed = await _model.CancelAsync(); }
+        catch (Exception error)
+        {
+            // Never let this escape the UI-thread post, and never leave the Host waiting for a vote.
+            DiagnosticLog.Warning("ui.lifetime", "exitCancelFailed", "Calibration cancel failed while preparing for backend exit; voting no.", error, new { requestId });
+            confirmed = false;
+        }
         if (_exitRequestId != requestId || _closed || _allowLocalClose) return;
         try { await _events!.AcknowledgeExitAsync(requestId, confirmed, CancellationToken.None); }
         catch (Exception error)

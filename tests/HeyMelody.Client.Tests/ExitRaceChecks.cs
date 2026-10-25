@@ -13,7 +13,7 @@ internal static class ExitRaceChecks
     private static readonly string[] Cases = ["warm-stopping-eof", "original-pipe-stopping-ack", "late-sticky-stopping",
         "full-event-queue", "vote-cancel-resume", "vote-never-reconnects", "second-bridge-cannot-relaunch",
         "atomic-cross-bridge-launch", "reconnect-baseline-backpressure", "calibration-state-backpressure",
-        "orphan-bound-launch", "unexpected-eof-recovers"];
+        "orphan-bound-launch", "unexpected-eof-recovers", "undelivered-vote-resets"];
 
     internal static async Task<int> RunAsync()
     {
@@ -80,6 +80,7 @@ internal static class ExitRaceChecks
         "calibration-state-backpressure" => CalibrationBackpressureAsync(),
         "orphan-bound-launch" => OrphanBoundLaunchAsync(),
         "unexpected-eof-recovers" => UnexpectedEofAsync(),
+        "undelivered-vote-resets" => UndeliveredVoteAsync(),
         _ => throw new ArgumentException("Unknown lifecycle case.")
     };
 
@@ -171,6 +172,30 @@ internal static class ExitRaceChecks
         await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(3));
         Require((await fixture.Bridge.EnumerateAsync(default)).Count == 0 && fixture.Starts == 0,
             "A cancelled exit did not restore ordinary communication on the existing pipe.");
+    }
+
+    private static async Task UndeliveredVoteAsync()
+    {
+        await using var fixture = await Harness.ConnectAsync(subscribe: true);
+        var request = Signal<BackendEvent>();
+        fixture.Bridge.EventReceived += value => { if (value.Kind == "requestExit") request.TrySetResult(value); };
+        string exitId = Guid.NewGuid().ToString("N");
+        await fixture.Peer.EventAsync("requestExit", exitId);
+        await request.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var field = typeof(ClientBridge).GetField("_localExitVote", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("The local vote field was renamed; update this check.");
+        // A cancelled token fails the vote before it reaches the wire while the pipe stays open.
+        using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
+        bool failed = false;
+        try { await fixture.Bridge.AcknowledgeExitAsync(exitId, true, cancelled.Token).WaitAsync(TimeSpan.FromSeconds(3)); }
+        catch (Exception) { failed = true; }
+        Require(failed, "The cancelled vote unexpectedly succeeded.");
+        Require(field.GetValue(fixture.Bridge) is null, "An approving vote that was never delivered stayed recorded as cast.");
+        Require(!fixture.Bridge.IsStopping, "An undelivered vote must not stop the bridge.");
+        await fixture.Bridge.AcknowledgeExitAsync(exitId, true, default).WaitAsync(TimeSpan.FromSeconds(3));
+        var vote = await fixture.Peer.WaitRequestAsync("exitVote");
+        Require(vote.Approved == true && vote.ExitRequestId == exitId, "The retried vote was not delivered.");
+        Require(field.GetValue(fixture.Bridge) is true, "A delivered vote was not recorded.");
     }
 
     private static async Task VoteNeverReconnectsAsync()

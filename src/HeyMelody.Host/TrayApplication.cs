@@ -41,10 +41,28 @@ internal sealed class TrayApplication : Application
             _supervisor.AttachDiagnostics();
             var menu = new NativeMenu();
             var open = new NativeMenuItem("打开主界面");
-            void OpenMain() { try { _server.ActivateMain(true); } catch { _supervisor.ReportHealth("无法打开主界面，请重启软件或重新安装。"); } }
+            void OpenMain()
+            {
+                try { _server.ActivateMain(true); }
+                catch (Exception error)
+                {
+                    if (_exiting || _server.IsStopping)
+                    {
+                        DiagnosticLog.Debug("host.lifecycle", "openMainIgnored", "Open main ignored because the Host is exiting", new { error = error.Message });
+                        return;
+                    }
+                    DiagnosticLog.Error("host.lifecycle", "openMainFailed", "The tray could not open the main GUI", error);
+                    _supervisor.ReportHealth("无法打开主界面，请重启软件或重新安装。");
+                }
+            }
             open.Click += (_, _) => OpenMain();
             var exit = new NativeMenuItem("退出");
-            exit.Click += async (_, _) => await _server.RequestExitAsync();
+            exit.Click += async (_, _) =>
+            {
+                if (_exiting) { DiagnosticLog.Debug("host.lifecycle", "exitIgnored", "Exit menu ignored; the Host is already exiting"); return; }
+                DiagnosticLog.Info("host.lifecycle", "exitMenu", "Exit chosen from the tray menu");
+                await _server.RequestExitAsync();
+            };
             // The separator keeps 退出 away from the everyday command.
             menu.Add(open); menu.Add(new NativeMenuItemSeparator()); menu.Add(exit);
             _tray = new TrayIcon { Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://HeyMelody.Host/Assets/HeyMelody.ico"))),
@@ -56,20 +74,27 @@ internal sealed class TrayApplication : Application
             _server.ExitApproved += async () =>
             {
                 _exiting = true;
+                StartForcedExitWatchdog();
                 try { await Dispatcher.UIThread.InvokeAsync(() => _monitor.Dispose()); }
                 catch (Exception error) { DiagnosticLog.Error("host.lifecycle", "monitorDisposeFailed", "Windows observers could not finish cleanup", error); }
                 try { await _server.DisposeAsync(); }
                 catch (Exception error) { DiagnosticLog.Error("host.lifecycle", "pipeDisposeFailed", "Backend pipe could not finish cleanup", error); }
-                await Dispatcher.UIThread.InvokeAsync(() =>
+                try
                 {
-                    try { _tray.Dispose(); }
-                    catch (Exception error) { DiagnosticLog.Error("host.lifecycle", "trayDisposeFailed", "Tray icon could not finish cleanup", error); }
-                    desktop.Shutdown();
-                });
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        try { _tray.Dispose(); }
+                        catch (Exception error) { DiagnosticLog.Error("host.lifecycle", "trayDisposeFailed", "Tray icon could not finish cleanup", error); }
+                        DiagnosticLog.Info("host.lifecycle", "desktopShutdown", "Requesting desktop shutdown");
+                        desktop.Shutdown();
+                    });
+                }
+                catch (Exception error) { ForceExit("Desktop shutdown could not be requested", error); }
             };
             desktop.ShutdownRequested += (_, args) =>
             {
                 if (_exiting) return;
+                DiagnosticLog.Info("host.lifecycle", "shutdownRedirected", "Shutdown request redirected to the exit protocol");
                 args.Cancel = true; _ = _server.RequestExitAsync();
             };
             desktop.Exit += (_, _) =>
@@ -82,6 +107,19 @@ internal sealed class TrayApplication : Application
         }
         base.OnFrameworkInitializationCompleted();
     }
+    // Normal exit ends the process well before this fires; it only bounds a hung UI thread or cleanup step.
+    private static void StartForcedExitWatchdog() => _ = Task.Run(async () =>
+    {
+        await Task.Delay(TimeSpan.FromSeconds(15));
+        ForceExit("Host did not exit 15 s after exit approval", null);
+    });
+    private static void ForceExit(string reason, Exception? error)
+    {
+        DiagnosticLog.Write(DiagnosticLevel.Critical, "host.lifecycle", "forcedExit", reason + "; forcing process exit", exception: error);
+        DiagnosticLog.Flush();
+        Environment.Exit(0);
+    }
+
     private async Task StartAsync()
     {
         try { await _monitor!.StartAsync(); await _supervisor!.InitializeAsync(CancellationToken.None); }

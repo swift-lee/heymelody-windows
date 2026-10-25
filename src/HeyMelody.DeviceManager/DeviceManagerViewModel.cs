@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using HeyMelody.Diagnostics;
 using HeyMelodyWindows.App;
 
 namespace HeyMelodyWindows.DeviceManager;
@@ -71,7 +72,11 @@ public sealed class DeviceManagerViewModel : ObservableObject, IAsyncDisposable
             DisplayCatalog(catalog, resetExitCode: true);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
-        catch (Exception) { _error = "无法读取已配对设备，请确认蓝牙已开启后重试。"; }
+        catch (Exception failure)
+        {
+            DiagnosticLog.Error("ui.devicemanager", "refreshFailed", "Paired devices could not be read", failure);
+            _error = "无法读取已配对设备，请确认蓝牙已开启后重试。";
+        }
     });
 
     public Task SaveAsync()
@@ -85,10 +90,19 @@ public sealed class DeviceManagerViewModel : ObservableObject, IAsyncDisposable
                 var result = await _service.SaveWhitelistAsync(identities, token);
                 token.ThrowIfCancellationRequested();
                 if (result.Saved) { ExitCode = 0; ExitRequested?.Invoke(); }
-                else _error = result.Error ?? "未能保存设备，请刷新列表后重试。";
+                else
+                {
+                    DiagnosticLog.Warning("ui.devicemanager", "saveRejected", "Backend did not save the device selection", null,
+                        new { selected = identities.Length, error = result.Error });
+                    _error = result.Error ?? "未能保存设备，请刷新列表后重试。";
+                }
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { }
-            catch (Exception) { _error = "未能保存设备，请刷新列表并确认勾选后重试。"; }
+            catch (Exception failure)
+            {
+                DiagnosticLog.Error("ui.devicemanager", "saveFailed", "Device selection could not be saved", failure, new { selected = identities.Length });
+                _error = "未能保存设备，请刷新列表并确认勾选后重试。";
+            }
         });
     }
 

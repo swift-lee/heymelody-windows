@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.Host;
 
@@ -37,7 +38,11 @@ internal sealed class DeviceWhitelistStore(string path)
         }
         catch (FileNotFoundException) { return new(StringComparer.Ordinal); }
         catch (DirectoryNotFoundException) { return new(StringComparer.Ordinal); }
-        catch (JsonException error) { throw new InvalidDataException("设备白名单文件无效。请重新选择设备。", error); }
+        catch (JsonException error)
+        {
+            DiagnosticLog.Warning("Settings", "whitelist.loadFailed", "Device whitelist file is not valid JSON", error, new { path });
+            throw new InvalidDataException("设备白名单文件无效。请重新选择设备。", error);
+        }
     }
 
     public void Save(IEnumerable<string> keys)
@@ -62,7 +67,8 @@ internal sealed class DeviceWhitelistStore(string path)
         finally
         {
             try { File.Delete(temporaryPath); }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            { DiagnosticLog.Debug("Settings", "whitelist.tempDeleteFailed", "Temporary whitelist file could not be deleted", new { path = temporaryPath, failure = error.Message }); }
         }
     }
 

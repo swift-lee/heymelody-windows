@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.Resources;
 
@@ -142,7 +143,12 @@ internal static class ArtworkPackageExtractor
                 path = extracted; kind = "model";
                 break;
             case ".glb":
-                try { using var glb = OpenRead(path); ValidateGlb(glb, 0, glb.Length); } catch (Exception error) when (error is InvalidDataException or JsonException) { return; }
+                try { using var glb = OpenRead(path); ValidateGlb(glb, 0, glb.Length); }
+                catch (Exception error) when (error is InvalidDataException or JsonException)
+                {
+                    DiagnosticLog.Warning("Resources", "cache.invalid", "A package GLB model failed validation and was skipped.", error, new { path, reason = "invalid glb" });
+                    return;
+                }
                 kind = "model";
                 break;
             case ".webp":
@@ -164,11 +170,15 @@ internal static class ArtworkPackageExtractor
         using (var source = OpenRead(container))
         {
             Span<byte> head = stackalloc byte[16];
-            if (source.Length < 40 || !TryRead(source, 0, head)) return null;
+            if (source.Length < 40 || !TryRead(source, 0, head))
+            { DiagnosticLog.Warning("Resources", "cache.invalid", "A vfxms container is too short to contain a model.", null, new { path = container, reason = "vfxms header", length = source.Length }); return null; }
             start = BinaryPrimitives.ReadInt32BigEndian(head.Slice(8, 4)); length = BinaryPrimitives.ReadInt32BigEndian(head.Slice(12, 4));
             Span<byte> magic = stackalloc byte[4];
-            if (start < 40 || length < 12 || start + length > source.Length || !TryRead(source, start, magic) || !magic.SequenceEqual("glTF"u8)) return null;
-            try { ValidateGlb(source, start, length); } catch (Exception error) when (error is InvalidDataException or JsonException) { return null; }
+            if (start < 40 || length < 12 || start + length > source.Length || !TryRead(source, start, magic) || !magic.SequenceEqual("glTF"u8))
+            { DiagnosticLog.Warning("Resources", "cache.invalid", "A vfxms container does not hold a valid embedded glTF.", null, new { path = container, reason = "vfxms glTF bounds", start, length }); return null; }
+            try { ValidateGlb(source, start, length); }
+            catch (Exception error) when (error is InvalidDataException or JsonException)
+            { DiagnosticLog.Warning("Resources", "cache.invalid", "The glTF embedded in a vfxms container failed validation.", error, new { path = container, reason = "embedded glb" }); return null; }
             string path = UniquePath(root, "model", ".glb");
             byte[] buffer = ArrayPool<byte>.Shared.Rent(65536);
             try
@@ -238,7 +248,8 @@ internal static class ArtworkPackageExtractor
             if (animation is null) continue;
             try { package.Add(IndexAnimation(package, animation, folders, out string? original) with
                 { Role = role, Kind = "lottie", Order = index, Title = listName + "[" + index + "]", Metadata = Scalars(item) }, animation, original); }
-            catch (Exception error) when (error is JsonException or InvalidDataException or IOException or ArgumentException) { }
+            catch (Exception error) when (error is JsonException or InvalidDataException or IOException or ArgumentException)
+            { DiagnosticLog.Warning("Resources", "cache.invalid", "A package animation could not be indexed and was skipped.", error, new { path = animation, reason = "animation index", role, index }); }
         }
     }
 
@@ -294,7 +305,8 @@ internal static class ArtworkPackageExtractor
                 && root.TryGetProperty("ip", out var ip) && ip.TryGetDouble(out double start)
                 && root.TryGetProperty("op", out var op) && op.TryGetDouble(out double end) && end > start;
         }
-        catch (Exception error) when (error is JsonException or IOException or InvalidOperationException) { return false; }
+        catch (Exception error) when (error is JsonException or IOException or InvalidOperationException)
+        { DiagnosticLog.Debug("Resources", "animation.rejected", "A candidate file is not a readable Lottie animation.", new { path, failure = error.Message }); return false; }
         static bool Positive(JsonElement root, string name) => root.TryGetProperty(name, out var value) && value.TryGetDouble(out double number) && number > 0;
     }
 

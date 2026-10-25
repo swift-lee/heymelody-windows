@@ -271,6 +271,10 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                 if (ExitPendingLocked) throw new IOException("退出确认必须使用原后台连接。");
             }
             var pipe = NewPipe();
+            bool launchNow = _startBackend is not null && _backendRunning?.Invoke() == false
+                && DateTimeOffset.UtcNow - _lastStart > TimeSpan.FromSeconds(10);
+            DiagnosticLog.Debug("client.ipc", "connectAttempt", "Connecting to the shared backend",
+                new { pipe = _pipeName, launchingBackend = launchNow, canLaunch = _startBackend is not null, allowExitPending });
             // Without the tray's singleton mutex nothing can answer the 300 ms probe: launch at once. A tray that is
             // still starting or already exiting holds the mutex and keeps the probe-then-launch order.
             if (_startBackend is not null && _backendRunning?.Invoke() == false
@@ -278,22 +282,37 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
             {
                 _lastStart = DateTimeOffset.UtcNow;
                 try { StartBackendIfAllowed(); await pipe.ConnectAsync(15000, token); }
-                catch { pipe.Dispose(); throw; }
+                catch (Exception failure)
+                {
+                    DiagnosticLog.Warning("client.ipc", "connectFailed", "Connecting after a backend launch failed", failure, new { pipe = _pipeName, stage = "launchConnect" });
+                    pipe.Dispose(); throw;
+                }
             }
             else
             {
                 try { await pipe.ConnectAsync(300, token); }
-                catch (TimeoutException)
+                catch (TimeoutException probeTimeout)
                 {
                     pipe.Dispose();
+                    bool launching = _startBackend is not null && DateTimeOffset.UtcNow - _lastStart > TimeSpan.FromSeconds(10);
+                    DiagnosticLog.Debug("client.ipc", "probeTimeout", "Backend probe timed out",
+                        new { pipe = _pipeName, canLaunch = _startBackend is not null, launchingBackend = launching, probeMilliseconds = 300, error = probeTimeout.Message });
                     if (_startBackend is null) throw;
                     if (DateTimeOffset.UtcNow - _lastStart > TimeSpan.FromSeconds(10))
                     { _lastStart = DateTimeOffset.UtcNow; StartBackendIfAllowed(); }
                     pipe = NewPipe();
                     try { await pipe.ConnectAsync(15000, token); }
-                    catch { pipe.Dispose(); throw; }
+                    catch (Exception failure)
+                    {
+                        DiagnosticLog.Warning("client.ipc", "connectFailed", "Backend did not accept the connection after the probe timed out", failure, new { pipe = _pipeName, stage = "afterProbe", launched = launching });
+                        pipe.Dispose(); throw;
+                    }
                 }
-                catch { pipe.Dispose(); throw; }
+                catch (Exception failure)
+                {
+                    DiagnosticLog.Warning("client.ipc", "connectFailed", "Backend probe failed", failure, new { pipe = _pipeName, stage = "probe" });
+                    pipe.Dispose(); throw;
+                }
             }
             var connection = new Connection(pipe);
             lock (_stateGate)
@@ -392,10 +411,12 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
         if (Interlocked.CompareExchange(ref _reconnecting, 1, 0) != 0) return;
         try
         {
+            int attempt = 0;
             while (CanReconnect)
             {
                 await Task.Delay(1000, _lifetime.Token).ConfigureAwait(false);
                 if (!CanReconnect) return;
+                attempt++;
                 try
                 {
                     var subscription = await SubscribeAsync(_role!, _lifetime.Token);
@@ -407,10 +428,16 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                         foreach (var snapshot in subscription.Snapshots)
                             QueueStateLocked(new BackendEvent { Kind = "snapshot", BackendInstanceId = subscription.BackendInstanceId, Snapshot = snapshot }, connection);
                     }
+                    DiagnosticLog.Info("client.ipc", "reconnected", "Reconnected to the shared backend", new { attempt });
                     return;
                 }
-                catch (BackendOperationException) when (_versionMismatch) { return; }
-                catch (Exception) when (!_lifetime.IsCancellationRequested) { }
+                catch (BackendOperationException failure) when (_versionMismatch)
+                {
+                    DiagnosticLog.Warning("client.ipc", "reconnectStopped", "Reconnect stopped because the backend version differs", failure, new { attempt });
+                    return;
+                }
+                catch (Exception failure) when (!_lifetime.IsCancellationRequested)
+                { DiagnosticLog.Warning("client.ipc", "reconnectFailed", "Reconnect attempt failed", failure, new { attempt }); }
             }
         }
         catch (OperationCanceledException) { }
@@ -445,7 +472,12 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                     DiagnosticLog.ReportExternalFailure(failure);
                 if (handlers is null) continue;
                 foreach (Action<BackendEvent> handler in handlers.GetInvocationList())
-                    try { handler(notification); } catch (Exception) { /* Subscribers cannot stop the receive pump. */ }
+                    try { handler(notification); }
+                    catch (Exception handlerError)
+                    {
+                        // Subscribers cannot stop the receive pump.
+                        DiagnosticLog.Warning("client.ipc", "subscriberFailed", "A backend event subscriber threw", handlerError, new { kind = notification.Kind });
+                    }
             }
         }
         catch (OperationCanceledException) { }
@@ -480,7 +512,8 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
     public void BeginConnect() => _ = Task.Run(async () =>
     {
         try { await EnsureConnectionAsync(_lifetime.Token).ConfigureAwait(false); }
-        catch (Exception) { }
+        catch (Exception failure)
+        { DiagnosticLog.Debug("client.ipc", "beginConnectFailed", "Background pre-connect failed; the first request will retry", new { failure = failure.Message, type = failure.GetType().Name }); }
     });
 
     private static bool BackendRunning() => DiagnosticBackendLauncher.IsRunning();

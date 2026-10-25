@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HeyMelody.Diagnostics;
 using System.Text.RegularExpressions;
 
 namespace HeyMelodyWindows.Host;
@@ -42,7 +43,8 @@ internal sealed partial class DeviceAppearanceStore(string path)
             foreach (var stale in entries.Values.OrderBy(entry => entry.UpdatedAt).Take(Math.Max(0, entries.Count - MaximumDevices)).ToArray())
                 entries.Remove(stale.Key);
             try { Write(entries.Values.OrderBy(entry => entry.Key, StringComparer.Ordinal).ToArray()); }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            { DiagnosticLog.Warning("Settings", "appearance.saveFailed", "Device appearance cache could not be saved", error, new { path }); }
             return true;
         }
     }
@@ -62,7 +64,13 @@ internal sealed partial class DeviceAppearanceStore(string path)
                     && entry.ColorSource is null or "spp" or "ble" && (entry.Color is null) == (entry.ColorSource is null))
                     _entries[entry.Key] = entry;
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
+        {
+            if (error is FileNotFoundException or DirectoryNotFoundException)
+                DiagnosticLog.Debug("Settings", "appearance.missing", "Settings file does not exist; defaults apply", new { path = path });
+            else
+                DiagnosticLog.Warning("Settings", "appearance.loadFailed", "Settings file could not be read; defaults apply", error, new { path = path });
+        }
         // A damaged or missing file is only a cache; the next observation rewrites it.
         return _entries;
     }
@@ -84,7 +92,8 @@ internal sealed partial class DeviceAppearanceStore(string path)
         finally
         {
             try { File.Delete(temporaryPath); }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            { DiagnosticLog.Debug("Settings", "appearance.tempDeleteFailed", "Temporary settings file could not be deleted", new { path = temporaryPath, failure = error.Message }); }
         }
     }
 

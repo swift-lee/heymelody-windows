@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.App;
 
@@ -19,14 +20,31 @@ internal sealed class CalibrationProcess
         }
         start.ArgumentList.Add("--handle"); start.ArgumentList.Add(handle);
         using var process = ClientBridge.StartOwnedComponent(start, token);
-        var errors = DrainAsync(process.StandardError);
-        try { await process.WaitForExitAsync(token); await errors; if (process.ExitCode is not (0 or 1)) throw new IOException("测试窗口未正常完成。"); }
+        DiagnosticLog.Info("ui.process", "launched", "Launched a calibration window process",
+            new { component, kind, start.FileName, args = start.ArgumentList.ToArray(), processId = TryId(process) });
+        var errors = DrainAsync(component, process.StandardError);
+        try
+        {
+            await process.WaitForExitAsync(token); await errors;
+            DiagnosticLog.Info("ui.process", "exited", "Calibration window process exited", new { component, exitCode = process.ExitCode });
+            if (process.ExitCode is not (0 or 1)) throw new IOException("测试窗口未正常完成。");
+        }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
-            try { await service.CancelCalibrationAsync(handle, CancellationToken.None); } catch { }
+            DiagnosticLog.Info("ui.process", "cancelled", "Calibration window was cancelled; stopping its process", new { component });
+            try { await service.CancelCalibrationAsync(handle, CancellationToken.None); }
+            catch (Exception error) { DiagnosticLog.Warning("ui.process", "cancelCalibrationFailed", "Could not cancel the calibration after its window was cancelled", error, new { component }); }
             await DeviceManagerProcess.StopAsync(process); await errors; throw;
         }
     }
-    private static async Task DrainAsync(StreamReader reader)
-    { var buffer = new char[1024]; try { while (await reader.ReadAsync(buffer) != 0) { } } catch (IOException) { } }
+    private static int? TryId(Process process) { try { return process.Id; } catch (InvalidOperationException) { return null; } }
+    private static async Task DrainAsync(string component, StreamReader reader)
+    {
+        try
+        {
+            while (await reader.ReadLineAsync() is { } line)
+                DiagnosticLog.Debug("ui.process", "stderr", "Child stderr", new { component, line = line.Length <= 2000 ? line : line[..2000] });
+        }
+        catch (IOException) { }
+    }
 }

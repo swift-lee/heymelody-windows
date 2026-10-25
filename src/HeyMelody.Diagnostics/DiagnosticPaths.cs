@@ -28,8 +28,24 @@ public static class DiagnosticPaths
     public static void OpenLogDirectory(Action<string>? opener = null)
     {
         Directory.CreateDirectory(LogRoot);
-        if (opener is not null) { opener(LogRoot); return; }
+        Open(LogRoot, opener);
+    }
+
+    /// <summary>Opens one session directory; the path comes from a user-writable descriptor, so only existing folders under the log root qualify.</summary>
+    public static void OpenLogDirectory(string sessionDirectory, Action<string>? opener = null)
+    {
+        var root = Path.GetFullPath(LogRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var target = Path.GetFullPath(sessionDirectory);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!target.StartsWith(root, comparison) || !Directory.Exists(target))
+            throw new DirectoryNotFoundException("本轮日志目录不存在或不在日志根目录下：" + sessionDirectory);
+        Open(target, opener);
+    }
+
+    private static void Open(string directory, Action<string>? opener)
+    {
+        if (opener is not null) { opener(directory); return; }
         // Shell execution can reuse Explorer and return null even when the directory was opened successfully.
-        using var process = Process.Start(new ProcessStartInfo { FileName = LogRoot, UseShellExecute = true });
+        using var process = Process.Start(new ProcessStartInfo { FileName = directory, UseShellExecute = true });
     }
 }

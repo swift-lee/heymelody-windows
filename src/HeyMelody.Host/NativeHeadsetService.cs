@@ -101,33 +101,68 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
 
     public async Task<UiSnapshot> ConnectAsync(string identity, CancellationToken token)
     {
-        if (!_devices.TryGetValue(identity, out var peer)) throw new InvalidOperationException("重新刷新设备列表后再连接。");
+        DiagnosticLog.Info("host.connection", "connectRequested", "Connection to a device was requested", new { identity });
+        if (!_devices.TryGetValue(identity, out var peer))
+        {
+            var unknown = new InvalidOperationException("重新刷新设备列表后再连接。");
+            DiagnosticLog.Warning("host.connection", "connectFailed", "Requested device is not in the current device list", unknown, new { identity, reason = "unknownIdentity" });
+            throw unknown;
+        }
         token.ThrowIfCancellationRequested();
         if (!_whitelist.Load().Contains(DeviceWhitelistStore.KeyFor(peer.Address))
             || !_enumerate().Any(device => device.Address == peer.Address && WindowsBluetooth.IsAudioCandidate(device)))
-            throw new InvalidOperationException("所选耳机未启用或已解除配对，请重新选择设备。");
-        await DisconnectAsync(token);
-        _selected = identity; _selectedName = peer.Name; _selectedAddress = peer.Address;
-        _getSubmissions = _setSubmissions = _otherSubmissions = 0;
-        _client = CreateDailyClient(peer.Address);
-        return Map(await _client.RefreshAsync(token));
+        {
+            var rejected = new InvalidOperationException("所选耳机未启用或已解除配对，请重新选择设备。");
+            DiagnosticLog.Warning("host.connection", "connectFailed", "Requested device was rejected by the whitelist or is no longer a paired audio device", rejected,
+                new { identity, name = peer.Name, reason = "whitelistOrUnpaired" });
+            throw rejected;
+        }
+        try
+        {
+            await DisconnectAsync(token);
+            _selected = identity; _selectedName = peer.Name; _selectedAddress = peer.Address;
+            _getSubmissions = _setSubmissions = _otherSubmissions = 0;
+            _client = CreateDailyClient(peer.Address);
+            var snapshot = Map(await _client.RefreshAsync(token));
+            DiagnosticLog.Info("host.connection", "connected", "Device connection established", new { identity, name = peer.Name, snapshot.ControlReady });
+            return snapshot;
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            DiagnosticLog.Warning("host.connection", "connectFailed", "Device connection failed", error, new { identity, name = peer.Name, reason = "refreshFailed" });
+            throw;
+        }
     }
 
     // This entry point is exclusively for a supervisor-owned, single-peer worker.
     // The address arrives through its private redirected stdin, never a command line.
     internal async Task<UiSnapshot> InitializePeerAsync(string identity, string name, ulong address, CancellationToken token)
     {
+        DiagnosticLog.Info("host.connection", "connectRequested", "Peer worker initialization was requested", new { identity, name });
         if (string.IsNullOrWhiteSpace(identity) || address is 0 or > 0xFFFFFFFFFFFFUL)
-            throw new InvalidDataException();
-        await DisconnectAsync(token);
-        _selected = identity; _selectedName = name; _selectedAddress = address;
-        _client = CreateDailyClient(address);
-        _client.SnapshotChanged += OnDailySnapshot;
-        var snapshot = Map(await _client.RefreshAsync(token));
-        if (snapshot.ControlReady) await _client.StartMonitoringAsync(token);
-        await InitializeCalibrationAsync(token);
-        snapshot = Map(_last!);
-        return snapshot;
+        {
+            var invalid = new InvalidDataException();
+            DiagnosticLog.Warning("host.connection", "connectFailed", "Peer worker initialization carried an invalid identity or address", invalid, new { hasIdentity = !string.IsNullOrWhiteSpace(identity), reason = "invalidRequest" });
+            throw invalid;
+        }
+        try
+        {
+            await DisconnectAsync(token);
+            _selected = identity; _selectedName = name; _selectedAddress = address;
+            _client = CreateDailyClient(address);
+            _client.SnapshotChanged += OnDailySnapshot;
+            var snapshot = Map(await _client.RefreshAsync(token));
+            if (snapshot.ControlReady) await _client.StartMonitoringAsync(token);
+            await InitializeCalibrationAsync(token);
+            snapshot = Map(_last!);
+            DiagnosticLog.Info("host.connection", "connected", "Peer worker initialized", new { identity, name, snapshot.ControlReady });
+            return snapshot;
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            DiagnosticLog.Warning("host.connection", "connectFailed", "Peer worker initialization failed", error, new { identity, name, reason = "initializeFailed" });
+            throw;
+        }
     }
 
     private void OnDailySnapshot(DailySnapshot snapshot) => SnapshotChanged?.Invoke(Map(snapshot));
@@ -135,9 +170,11 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
     public async Task DisconnectAsync(CancellationToken token)
     {
         await DisposeCalibrationAsync();
+        var previous = _selected;
         var client = _client; _client = null; _selected = null; _selectedName = ""; _selectedAddress = null;
         if (client is not null) { client.SnapshotChanged -= OnDailySnapshot; await client.DisposeAsync(); }
         lock (_snapshotGate) { _lastDailyRevision = 0; _uiRevisions.Clear(); _last = null; }
+        if (client is not null) DiagnosticLog.Info("host.connection", "disconnected", "Device connection closed", new { identity = previous });
     }
 
     public async Task<UiSnapshot> RefreshAsync(CancellationToken token)

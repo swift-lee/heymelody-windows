@@ -12,7 +12,12 @@ internal static class Program
         if (args is ["--ui-preview"]) DeviceManagerApp.Preview = true;
         else if (args.Length != 0) return 2;
         if (!DeviceManagerApp.Preview && !OperatingSystem.IsWindows()) return 2;
-        if (!DeviceManagerApp.Preview && DiagnosticRuntime.IsBoundLaunchExpired) return 1;
+        if (!DeviceManagerApp.Preview && DiagnosticRuntime.IsBoundLaunchExpired)
+        {
+            // Diagnostics are not initialized yet, so leave a trace on stderr.
+            Console.Error.WriteLine("DeviceManager: the bound launch has already expired; exiting without starting the window.");
+            return 1;
+        }
         using var diagnostics = DeviceManagerApp.Preview ? null : DiagnosticRuntime.InitializeClient(DiagnosticComponents.DeviceManager);
         if (!DeviceManagerApp.Preview && DiagnosticRuntime.IsBoundLaunchExpired) return 1;
         try { return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args); }
