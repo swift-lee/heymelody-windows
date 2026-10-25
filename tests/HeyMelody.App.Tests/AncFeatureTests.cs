@@ -229,7 +229,8 @@ internal static class AncFeatureTests
             && Contains(title) && Contains(description) && Contains(toggle)
             && toggle.Left >= Math.Max(title.Right, description.Right) + 8
             && toggle.Center.Y >= title.Top && toggle.Center.Y <= description.Bottom,
-            "The title and wrapping description remain on the left, with the complete switch on their right inside the setting row.");
+            "The title and wrapping description remain on the left, with the complete switch on their right inside the setting row. "
+            + $"State={state}; row={row}; title={title}; description={description}; toggle={toggle}.");
         Console.WriteLine($"ANC row {state}: size={row.Size} title={title} description={description} toggle={toggle}");
         return;
 

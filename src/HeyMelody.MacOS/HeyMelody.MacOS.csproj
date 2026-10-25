@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NativeBridgeDirectory>$(MSBuildProjectDirectory)/native/build-arm64</NativeBridgeDirectory>
+    <NativeBridgeOutput>$(NativeBridgeDirectory)/libHeyMelodyMac.dylib</NativeBridgeOutput>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="HeyMelody.MacOS.Tests" />
+    <ProjectReference Include="../HeyMelody.Platform/HeyMelody.Platform.csproj" />
+    <Compile Remove="native/**" />
+    <NativeBridgeSource Include="native/*.mm" />
+    <None Include="$(NativeBridgeOutput)" Link="libHeyMelodyMac.dylib" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="'$(HeyMelodyDesktopPlatform)' == 'macOS'" />
+  </ItemGroup>
+  <Target Name="BuildMacNativeBridge" BeforeTargets="BeforeBuild" Condition="'$(HeyMelodyDesktopPlatform)' == 'macOS' and $([MSBuild]::IsOSPlatform('OSX'))"
+          Inputs="@(NativeBridgeSource);$(MSBuildProjectFullPath)" Outputs="$(NativeBridgeOutput)">
+    <MakeDir Directories="$(NativeBridgeDirectory)" />
+    <Exec Command="xcrun clang++ -std=c++17 -fobjc-arc -fblocks -arch arm64 -mmacosx-version-min=15.0 -dynamiclib -install_name @rpath/libHeyMelodyMac.dylib -framework Foundation -framework AppKit -framework IOBluetooth -framework CoreBluetooth -framework CoreAudio -framework AudioToolbox @(NativeBridgeSource->'&quot;%(FullPath)&quot;', ' ') -o &quot;$(NativeBridgeOutput)&quot;" />
+  </Target>
+</Project>

@@ -1,6 +1,6 @@
 # 协作规则与文档入口
 
-本项目在 Windows 上控制 OPPO、OnePlus、realme 耳机，提供欢律的常用功能。根 [README](README.md) 面向用户；本文件是修改代码、文档和研究资料时的核心规则与导航。先读本文件，再按任务选择必要文档，不沿全部链接展开阅读。
+本项目在 Windows 和 Apple Silicon macOS 上控制 OPPO、OnePlus、realme 耳机，提供欢律的常用功能。根 [README](README.md) 面向用户；本文件是修改代码、文档和研究资料时的核心规则与导航。先读本文件，再按任务选择必要文档，不沿全部链接展开阅读。
 
 ## 按任务查文档
 

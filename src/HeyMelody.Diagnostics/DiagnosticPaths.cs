@@ -1,6 +1,5 @@
 using System.Diagnostics;
-using System.Security.Cryptography;
-using System.Text;
+using HeyMelody.Platform;
 
 namespace HeyMelody.Diagnostics;
 
@@ -8,18 +7,9 @@ public static class DiagnosticPaths
 {
     // Overrides are internal so normal launches cannot accidentally inherit a developer's test directory.
     internal static string? DataRootOverride { get; set; }
-    public static string DataRoot => DataRootOverride ?? Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HeyMelody");
+    public static string DataRoot => DataRootOverride ?? ApplicationPaths.DataRoot;
     public static string LogRoot => Path.Combine(DataRoot, "logs");
-    public static string UserSessionKey
-    {
-        get
-        {
-            var user = Environment.UserDomainName + "\\" + Environment.UserName;
-            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(user))).ToLowerInvariant()[..24];
-            return hash + "-" + Process.GetCurrentProcess().SessionId;
-        }
-    }
+    public static string UserSessionKey => DesktopRuntime.UserSessionKey;
     internal static string StateRoot => Path.Combine(DataRoot, "diagnostics", UserSessionKey);
     internal static string SettingsFile => Path.Combine(StateRoot, "settings.json");
     internal static string ReadyFile => Path.Combine(StateRoot, "ready.json");

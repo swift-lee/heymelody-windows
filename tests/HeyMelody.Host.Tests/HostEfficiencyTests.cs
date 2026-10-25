@@ -1,7 +1,7 @@
+using HeyMelody.Platform;
 using System.Text.Json;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Host;
-using HeyMelodyWindows.Windows;
 
 // Host work that happens less often than before: device-state writes, per-event serialization, BLE scan demand and the broadcast timers.
 internal static class HostEfficiencyTests

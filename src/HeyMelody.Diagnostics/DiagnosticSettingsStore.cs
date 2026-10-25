@@ -68,7 +68,7 @@ public static class DiagnosticSettingsStore
 
     private static IDisposable Lock()
     {
-        var mutex = new Mutex(false, DiagnosticPaths.SettingsMutex);
+        var mutex = HeyMelody.Platform.DesktopRuntime.CreateMutex(DiagnosticPaths.SettingsMutex, out _);
         bool acquired;
         try { acquired = mutex.WaitOne(TimeSpan.FromSeconds(2)); }
         catch (AbandonedMutexException) { acquired = true; }

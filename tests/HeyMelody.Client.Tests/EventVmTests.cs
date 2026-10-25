@@ -5,6 +5,18 @@ internal static class EventVmTests
 {
     public static async Task RunAsync(Func<string, Func<Task>, Task> test)
     {
+        await test("platform authorization warning survives device observations and clears on a fresh allowed state", async () =>
+        {
+            var service = new EventService { Platform = new("macOS", "Denied", "Unknown", "请允许蓝牙访问。") };
+            await using var vm = Create(service); await vm.InitializeAsync();
+            Check(vm.HasPlatformWarning && vm.PlatformMessage == "请允许蓝牙访问。");
+            service.Push(Next(service.Snapshots["device-a"]));
+            Check(vm.HasPlatformWarning && service.Actions.Count == 0);
+            service.Publish(new() { Kind = "platform", BackendInstanceId = "backend-a",
+                Platform = new("macOS", "Allowed", "PoweredOn", "") });
+            Check(!vm.HasPlatformWarning && vm.PlatformMessage.Length == 0 && service.Actions.Count == 0);
+        });
+
         await test("event VM preserves warning guidance and clears it on a fresh state or device switch", async () =>
         {
             var service = new EventService();
@@ -539,6 +551,7 @@ internal static class EventVmTests
         { ["device-a"] = Snapshot("device-a"), ["device-b"] = Snapshot("device-b") };
         public int Subscriptions, Refreshes, Disposals, Enumerations;
         public string? SelectionWarning;
+        public UiPlatformStatus? Platform;
         public List<string> Selections { get; } = [];
         public List<string> Pauses { get; } = [];
         public List<string> Resumes { get; } = [];
@@ -557,7 +570,7 @@ internal static class EventVmTests
             Check(role == "main"); Subscriptions++;
             return Task.FromResult(new BackendSubscription
             { BackendInstanceId = Snapshots.Values.FirstOrDefault()?.BackendInstanceId ?? "instance", Devices = Devices(),
-                Catalog = new([], SelectionWarning), Snapshots = Snapshots.Values.ToArray() });
+                Catalog = new([], SelectionWarning), Snapshots = Snapshots.Values.ToArray(), Platform = Platform });
         }
         private IReadOnlyList<UiDevice> Devices() => Snapshots.Values.Select(snapshot => new UiDevice(snapshot.Identity, snapshot.DeviceName, snapshot.Connected)).ToArray();
         public Task<IReadOnlyList<UiDevice>> EnumerateAsync(CancellationToken cancellationToken)

@@ -101,8 +101,8 @@ internal static class RenderingSettingsTests
             var panel = (AppSettingsPanel)dialog.Content!;
             var card = panel.FindControl<FASettingsExpanderItem>("UiBasicRenderCard")!;
             var toggle = panel.FindControl<ToggleSwitch>("UiBasicRenderSwitch")!;
-            Check(card.IsVisible == OperatingSystem.IsWindows() && toggle.IsChecked == false,
-                "The new row is Windows-only and initially reflects the saved preference.");
+            Check(card.IsVisible == (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()) && toggle.IsChecked == false,
+                "Supported desktop platforms expose compatibility mode and reflect the saved preference.");
             Check(Avalonia.Automation.AutomationProperties.GetName(toggle) == "使用 Basic Render 兼容模式",
                 "The compatibility switch has a distinct accessible name.");
             toggle.IsChecked = true;

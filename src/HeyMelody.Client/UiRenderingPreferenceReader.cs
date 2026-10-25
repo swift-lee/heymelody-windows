@@ -12,8 +12,7 @@ public static class UiRenderingPreferenceReader
     {
         try
         {
-            settingsPath ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "HeyMelody", "preferences.json");
+            settingsPath ??= Path.Combine(HeyMelody.Platform.ApplicationPaths.DataRoot, "preferences.json");
             using var document = JsonDocument.Parse(File.ReadAllText(settingsPath));
             return document.RootElement.ValueKind == JsonValueKind.Object
                 && document.RootElement.TryGetProperty(PreferenceName, out var value)

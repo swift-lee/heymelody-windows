@@ -1,3 +1,7 @@
+using HeyMelody.Platform;
+#if HEYMELODY_WINDOWS
+using PowerThrottlingState = HeyMelodyWindows.Windows.PowerThrottlingState;
+#endif
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
@@ -5,7 +9,6 @@ using System.Text;
 using System.Text.Json;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Host;
-using HeyMelodyWindows.Windows;
 
 // EnergyPolicy, EnergyController, the GUI count kept by the pipe server and the Windows struct layout. Nothing here touches
 // a real process priority: the applier is a fake, and the Windows-only audition check never reaches WASAPI.
@@ -109,6 +112,7 @@ internal static class EnergyTests
             policy.SetGuiCount(1); await Until(() => throwing.Calls.Count >= 2);
             Check(second.Failures == 1, "A throwing applier was not recorded exactly once");
         });
+#if HEYMELODY_WINDOWS
         await test("POWER_THROTTLING_STATE is 12 bytes with fields at 0, 4 and 8", () =>
         {
             Check(Marshal.SizeOf<PowerThrottlingState>() == 12, "Struct size");
@@ -117,6 +121,9 @@ internal static class EnergyTests
                 && Marshal.OffsetOf<PowerThrottlingState>(nameof(PowerThrottlingState.StateMask)) == 8, "Field offsets");
             return Task.CompletedTask;
         });
+#else
+        Console.WriteLine("SKIP Windows POWER_THROTTLING_STATE layout");
+#endif
         await test("pipe server counts every window role and still-unsubscribed clients, but not observers", async () =>
         {
             var clock = new FakeClock(); using var policy = new EnergyPolicy(clock); clock.Advance(TimeSpan.FromSeconds(20));
@@ -167,6 +174,7 @@ internal static class EnergyTests
         });
         await test("idle audition thread blocks without polling, applies the thread exemption once and disposes within 2 s", async () =>
         {
+#if HEYMELODY_WINDOWS
             if (!OperatingSystem.IsWindows()) { Console.WriteLine("SKIP idle audition thread blocks without polling, applies the thread exemption once and disposes within 2 s"); return; }
             int exempted = 0;
             var player = new WasapiCalibrationAuditionPlayer(() => 0, () => { }, () => { Interlocked.Increment(ref exempted); return true; });
@@ -174,6 +182,10 @@ internal static class EnergyTests
             await Task.Delay(200);
             await player.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
             Check(Volatile.Read(ref exempted) == 1, "The exemption ran more than once");
+#else
+            await Task.CompletedTask;
+            Console.WriteLine("SKIP Windows WASAPI thread lifecycle");
+#endif
         });
     }
 

@@ -32,7 +32,7 @@ public sealed class BundledResourceStore
     public IReadOnlyList<ResourceArtwork> Artwork { get; }
     public BundledResourceStore(string? directory = null)
     {
-        _directory = System.IO.Path.GetFullPath(directory ?? System.IO.Path.Combine(AppContext.BaseDirectory, "ResourceBundles"));
+        _directory = System.IO.Path.GetFullPath(directory ?? System.IO.Path.Combine(HeyMelody.Platform.ApplicationPaths.ResourceRoot, "ResourceBundles"));
         Artwork = JsonSerializer.Deserialize<ResourceArtwork[]>(ReadEmbedded("artwork.json"), ResourceJson.Options) ?? [];
     }
 

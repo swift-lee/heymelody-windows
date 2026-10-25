@@ -190,8 +190,13 @@ internal static class ArtworkPersistenceTests
             window.Show(); Dispatcher.UIThread.RunJobs();
             var operation = view.OpenSettingsDialogAsync(); await Task.Delay(20); Dispatcher.UIThread.RunJobs();
             var dialog = window.GetVisualDescendants().OfType<FAContentDialog>().Single(d => Equals(d.Title, "应用设置"));
-            var cards = dialog.GetVisualDescendants().OfType<FASettingsExpanderItem>().ToArray();
-            Check(cards.Length == 8 && cards.All(card => card.IconSource is FASymbolIconSource), "Every setting, including the 3D frame rate, is an icon card.");
+            var cards = dialog.GetVisualDescendants().OfType<FASettingsExpanderItem>()
+                .Where(card => card.IsVisible && card.Parent is StackPanel { Name: "SettingsRoot" }).ToArray();
+            int expectedCards = 8 + (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? 1 : 0) + (OperatingSystem.IsMacOS() ? 0 : 1);
+            Check(cards.Length == expectedCards && cards.All(card => card.IconSource is FASymbolIconSource)
+                && cards.Any(card => card.Name == "ModelFrameRateCard"),
+                "Every visible top-level setting, including the 3D frame rate, is an icon card; "
+                + $"expected={expectedCards}, actual={cards.Length}.");
             var button = dialog.GetVisualDescendants().OfType<Button>().Single(b => Avalonia.Automation.AutomationProperties.GetName(b) == "重新下载在线资源");
             var ring = dialog.GetVisualDescendants().OfType<FAProgressRing>().Single();
             var result = dialog.GetVisualDescendants().OfType<FAInfoBar>().Single(bar => bar.Name == "RedownloadResult");

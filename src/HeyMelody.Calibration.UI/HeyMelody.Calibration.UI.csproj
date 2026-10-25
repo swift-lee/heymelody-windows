@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><AllowUnsafeBlocks>true</AllowUnsafeBlocks></PropertyGroup>
+  <PropertyGroup><TargetFramework>$(HeyMelodyDesktopTargetFramework)</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><AllowUnsafeBlocks>true</AllowUnsafeBlocks></PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia.Desktop" Version="12.1.4" />
     <PackageReference Include="FluentAvaloniaUI" Version="3.1.0" />
@@ -11,6 +11,8 @@
     <!-- Shared window backdrop and interface icons are compiled from their owners' sources. -->
     <Compile Include="../HeyMelody.DeviceManager/MicaAltBackdrop.cs" Link="Windowing/MicaAltBackdrop.cs" />
     <Compile Include="../HeyMelody.App/AppIcons.cs" Link="Shared/AppIcons.cs" />
+    <Compile Include="../HeyMelody.App/DesktopWindowBackdrop.cs" Link="Shared/DesktopWindowBackdrop.cs" />
+    <Compile Include="../HeyMelody.App/DesktopWindowIntegration.cs" Link="Shared/DesktopWindowIntegration.cs" />
     <Compile Include="../HeyMelody.App/RenderingSetup.cs" Link="Shared/RenderingSetup.cs" />
     <Compile Include="../HeyMelody.App/WindowsWarpAdapterResolver.cs" Link="Shared/WindowsWarpAdapterResolver.cs" />
     <Compile Include="../HeyMelody.App/Typography.cs" Link="Shared/Typography.cs" />

@@ -1,3 +1,4 @@
+using HeyMelody.Platform;
 using System.IO.Pipes;
 using System.Reflection;
 using System.Text;
@@ -10,7 +11,6 @@ using HeyMelodyWindows.Devices;
 using HeyMelodyWindows.Host;
 using HeyMelodyWindows.Protocol;
 using HeyMelodyWindows.Resources;
-using HeyMelodyWindows.Windows;
 
 internal static class DeviceStateTests
 {

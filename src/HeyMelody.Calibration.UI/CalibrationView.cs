@@ -5,6 +5,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Shapes;
 using Avalonia.Controls.Documents;
+using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
@@ -58,6 +59,9 @@ public sealed class CalibrationView : UserControl
     public event Func<Task>? CloseRequested;
     private string _bodyKey = "";
     private Slider? _level;
+    private ComboBox? _outputPicker;
+    private Button? _refreshOutputs;
+    private bool _updatingOutput;
     private bool _updatingLevel, _rippleFollowsTone;
     private bool? _connectorDone;
     private Button? _next, _retryLevel, _save, _resume;
@@ -175,7 +179,7 @@ public sealed class CalibrationView : UserControl
             : !_hearing && state.Stage is "CheckingWear" or "Starting" or "Measuring" ? "正在检测…" : "";
         _progress.IsVisible = _progress.Text.Length > 0;
         var key = string.Join('/', resultPage ? "Results" : state.Stage, _model.Phase, state.HearingVersion, state.SupportsEarScan, state.StepIndex > 0,
-            state.FiltersReady, state.CanPreview, state.HearingRadar is not null,
+            state.FiltersReady, state.CanPreview, state.PreviewAudioOutputSelectionRequired, state.HearingRadar is not null,
             state.HearingLevels.Count == state.StepCount, state.FitResults.Count, state.HearingEnhanceType, state.RestoreDescriptionId, ActualThemeVariant);
         if (_bodyKey != key)
         {
@@ -184,6 +188,7 @@ public sealed class CalibrationView : UserControl
             _bodyKey = key; _body.Children.Clear(); _actions.Children.Clear(); _level = null; _next = _retryLevel = _save = _resume = null; _radar = null;
             _levelLabel = _previewLabel = _caption = _leftLabel = _rightLabel = null; _heroGlyph = null; _ripple = null; _rippleFollowsTone = false;
             _previewButtons.Clear(); _answerButtons.Clear(); _segments.Clear(); _heroes.Clear();
+            _outputPicker = null; _refreshOutputs = null;
             _nameError.IsVisible = false;
             BuildBody();
         }
@@ -212,6 +217,17 @@ public sealed class CalibrationView : UserControl
         if (_retryLevel is not null) _retryLevel.IsEnabled = _model.CanAdjustLevel && !_model.LevelPending;
         if (_save is not null) _save.IsEnabled = _model.CanSave;
         if (_resume is not null) _resume.IsEnabled = state.CanResume && !_model.Busy;
+        if (_outputPicker is not null)
+        {
+            _updatingOutput = true;
+            _outputPicker.ItemsSource = _model.PreviewOutputs;
+            _outputPicker.SelectedItem = _model.PreviewOutputs.FirstOrDefault(x => x.Token == state.SelectedPreviewAudioOutputToken);
+            _outputPicker.IsEnabled = !_model.Busy && !_model.LoadingPreviewOutputs;
+            _outputPicker.PlaceholderText = _model.LoadingPreviewOutputs ? "正在读取蓝牙音频输出…" : _model.PreviewOutputs.Count == 0
+                ? "未找到立体声蓝牙音频输出" : "选择当前耳机的音频输出";
+            _updatingOutput = false;
+        }
+        if (_refreshOutputs is not null) _refreshOutputs.IsEnabled = !_model.Busy && !_model.LoadingPreviewOutputs;
         if (_previewLabel is not null) _previewLabel.Text = state.Stage == "Previewing" && state.PreviewAudioPlaying
             ? state.PreviewMode == "Enhanced" ? "正在试听增强后 · 再次点击可暂停" : "正在试听增强前 · 再次点击可暂停"
             : "内置试听音乐 · 选择增强前或增强后开始播放";
@@ -426,6 +442,24 @@ public sealed class CalibrationView : UserControl
         {
             _previewLabel = SecondaryText("");
             var choices = new StackPanel { Spacing = 8 };
+            if (state.PreviewAudioOutputSelectionRequired)
+            {
+                _outputPicker = new ComboBox { Name = "PreviewAudioOutput", HorizontalAlignment = HorizontalAlignment.Stretch,
+                    ItemTemplate = new FuncDataTemplate<UiPreviewAudioOutput>((item, _) => new TextBlock { Text = item?.Name }) };
+                AutomationProperties.SetName(_outputPicker, "本次试听的蓝牙音频输出");
+                _outputPicker.SelectionChanged += async (_, _) =>
+                {
+                    if (!_updatingOutput && _outputPicker?.SelectedItem is UiPreviewAudioOutput output)
+                        await _model.SelectPreviewOutputAsync(output.Token);
+                };
+                _refreshOutputs = new Button { Name = "RefreshPreviewAudioOutputs", Content = "刷新", MinWidth = 64 };
+                _refreshOutputs.Click += async (_, _) => await _model.RefreshPreviewOutputsAsync();
+                var outputRow = new Grid { ColumnDefinitions = new("*,Auto"), ColumnSpacing = 8,
+                    Children = { _outputPicker, _refreshOutputs } };
+                Grid.SetColumn(_refreshOutputs, 1);
+                choices.Children.Add(SecondaryText("请选择当前耳机对应的蓝牙音频输出，本次试听会固定使用此输出。"));
+                choices.Children.Add(outputRow);
+            }
             foreach (var (text, action, mode, controlName) in new[] { ("增强前", "preview-original", "Original", "PreviewOriginal"), ("增强后", "preview-enhanced", "Enhanced", "PreviewEnhanced") })
             {
                 var icon = Symbol(FASymbol.Play, 20, Primary);

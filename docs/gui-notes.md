@@ -1,5 +1,9 @@
 # HeyMelody Avalonia 界面（0.9.2）
 
+macOS 背景使用原生 NSVisualEffectView Blur，按窗口实际协商的透明级别切换主题色调与不透明回退；主页面不再用不透明层遮住系统材料。Windows Mica/Mica Alt 保留原路径。Linux 预留动态能力提供方，只有窗口后端支持时启用；能力撤销立即恢复可读的不透明背景，细节见 [macOS 说明](macos.md#平台边界)。
+
+2026-10-25 macOS：主窗口、设备管理器和校准窗口使用原生标题栏及应用菜单；⌘Q 参与全局安全退出，⌘W 关闭当前组件。普通 UI 默认 Metal，Basic Render 映射到软件绘制；Filament 仅提供 Metal。字体使用 macOS 字体与随包后备，不执行 Linux fontconfig 注册。黄金听感结果页新增蓝牙音频输出选择器，明确选择后才准备音乐试听；具体范围见 [macOS 说明](macos.md)。本轮仅审计变更区域，不向会话载入整套截图。
+
 2026-10-23：本机 ARM64 UI 卡顿调查确认 Avalonia 默认选卡落入 WARP，X4 主图实际为 Animated WebP；实测对照、观测开销与验证边界见[本机卡顿调查](research/ui-lag-arm64-2026-10-23.md)。最初的调查阶段未修改产品渲染策略，后续产品实现如下。
 
 调查后的体验版曾用 `HEYMELODY_UI_ADAPTER=adreno` 进行显式选卡；该变量已退出产品策略。当前所有 Windows GUI 默认选择 DXGI 首适配器，不再应用 Adreno 过滤。“应用设置 → 外观 → 使用 Basic Render 兼容模式”可改用 WARP，保存后手动重新打开所有界面窗口生效，不必退出蓝牙后台；取消不保存、不即时切换渲染器。失败后备、配置恢复与验证边界见[开发说明](development.md#界面渲染与字体)。未降低画质、改变动画或修改 Filament 后端；未来 NSIS 针对旧设备初始化兼容值的工作另列待办。

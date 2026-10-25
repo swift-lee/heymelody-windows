@@ -1,25 +1,14 @@
+using HeyMelody.Platform;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.Windows;
 
-public sealed record BluetoothCandidate(ulong Address, string Name, bool Connected, bool Remembered,
-    bool Authenticated, uint ClassOfDevice);
-
 public static class WindowsBluetooth
 {
     /// <summary>Uses Windows' cached device class only; it does not verify a profile or contact the peer.</summary>
-    public static bool IsAudioCandidate(BluetoothCandidate device)
-    {
-        if (!device.Authenticated) return false;
-        uint major = (device.ClassOfDevice >> 8) & 0x1F;
-        uint minor = (device.ClassOfDevice >> 2) & 0x3F;
-        bool audioHint = (device.ClassOfDevice & 0x00200000) != 0;
-        if (major == 4)
-            return minor is 1 or 2 or 4 or 5 or 6 or 7 or 8 or 10 or 15 or 19 or 20 || audioHint;
-        return (major is 0 or 31) && audioHint;
-    }
+    public static bool IsAudioCandidate(BluetoothCandidate device) => BluetoothCandidates.IsAudioCandidate(device);
 
     /// <summary>Enumerates authenticated or remembered devices from Windows, without inquiry or pairing.
     /// This synchronous native operation has no absolute time bound; supervise the caller process.</summary>

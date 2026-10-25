@@ -1,3 +1,4 @@
+using HeyMelody.Platform;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Reflection;
@@ -6,7 +7,6 @@ using System.Text.Json;
 using HeyMelody.Diagnostics;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Host;
-using HeyMelodyWindows.Windows;
 
 internal static class DiagnosticIntegrationTests
 {

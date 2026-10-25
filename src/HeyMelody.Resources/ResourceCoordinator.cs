@@ -45,7 +45,7 @@ public sealed class ResourceCoordinator : IDisposable
 
     public ResourceCoordinator(string? storageDirectory = null, HttpClient? httpClient = null, string? bundleDirectory = null)
     {
-        _storage = Path.GetFullPath(storageDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HeyMelody", "resources"));
+        _storage = Path.GetFullPath(storageDirectory ?? Path.Combine(HeyMelody.Platform.ApplicationPaths.DataRoot, "resources"));
         _online = Path.Combine(_storage, "online");
         Bundled = new(bundleDirectory); _vendor = new(httpClient);
         _catalog = Bundled.GetCatalog();

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using HeyMelody.Diagnostics;
+using HeyMelody.Platform;
 
 namespace HeyMelodyWindows.App;
 
@@ -9,15 +10,8 @@ internal sealed class CalibrationProcess
     public async Task RunAsync(string kind, string handle, ICalibrationService service, CancellationToken token)
     {
         var component = kind switch { "fit" => "HeyMelody.FitTest", "hearing" => "HeyMelody.HearingSetup", _ => throw new ArgumentException("Unknown calibration component.", nameof(kind)) };
-        var start = new ProcessStartInfo { FileName = Path.Combine(AppContext.BaseDirectory, component + ".exe"),
-            WorkingDirectory = AppContext.BaseDirectory, UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true };
-        if (!File.Exists(start.FileName))
-        {
-            var directory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../", component, "bin"));
-            var dll = new[] { "Release", "Debug" }.Select(configuration => Path.Combine(directory, configuration, "net10.0", component + ".dll")).FirstOrDefault(File.Exists);
-            if (dll is null) throw new FileNotFoundException("无法打开测试窗口，请重启软件或重新安装。");
-            start.FileName = "dotnet"; start.ArgumentList.Add(dll);
-        }
+        var start = ApplicationPaths.ResolveComponent(component);
+        start.RedirectStandardError = true;
         start.ArgumentList.Add("--handle"); start.ArgumentList.Add(handle);
         using var process = ClientBridge.StartOwnedComponent(start, token);
         DiagnosticLog.Info("ui.process", "launched", "Launched a calibration window process",

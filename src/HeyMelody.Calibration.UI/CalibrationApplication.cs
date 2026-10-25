@@ -8,7 +8,6 @@ using FluentAvalonia.Styling;
 using FluentAvalonia.UI.Windowing;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Ui;
-using HeyMelodyWindows.Windowing;
 using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.Calibration.UI;
@@ -19,7 +18,9 @@ public sealed class CalibrationApplication : Application
     public static string Handle { get; private set; } = "";
     public static int Run(string kind, string[] args)
     {
-        if (args is not ["--handle", var handle] || string.IsNullOrWhiteSpace(handle) || handle.Length > 128 || !OperatingSystem.IsWindows()) return 2;
+        if (HeyMelody.Platform.InstallationCheck.TryRun(args, out var installationExit)) return installationExit;
+        if (args is not ["--handle", var handle] || string.IsNullOrWhiteSpace(handle) || handle.Length > 128
+            || !HeyMelody.Platform.DesktopCapabilities.SupportsHeadsetControl) return 2;
         Kind = kind; Handle = handle;
         if (DiagnosticRuntime.IsBoundLaunchExpired)
         {
@@ -30,6 +31,7 @@ public sealed class CalibrationApplication : Application
         using var diagnostics = DiagnosticRuntime.InitializeClient(kind == "fit" ? DiagnosticComponents.FitTest : DiagnosticComponents.HearingSetup);
         if (DiagnosticRuntime.IsBoundLaunchExpired) return 1;
         try { return AppBuilder.Configure<CalibrationApplication>().UsePlatformDetect().UseHeyMelodyDiagnostics()
+            .With(new MacOSPlatformOptions { ShowInDock = false })
             .UseHeyMelodyRendering().UseHeyMelodyTypography().StartWithClassicDesktopLifetime(args); }
         catch (Exception error) { DiagnosticLog.Error("Calibration.UI", "process.failed", "Calibration application failed", error); return 2; }
     }
@@ -60,7 +62,7 @@ public sealed class CalibrationWindow : FAAppWindow
     private readonly CalibrationViewModel _model;
     private readonly ICalibrationService _service;
     private readonly IHeadsetEventService? _events;
-    private readonly MicaAltBackdrop _backdrop;
+    private readonly DesktopWindowBackdrop _backdrop;
     private bool _closing, _closed, _completed, _allowLocalClose;
     private Task? _exitVote;
     private string? _exitRequestId;
@@ -72,10 +74,11 @@ public sealed class CalibrationWindow : FAAppWindow
     public CalibrationWindow(ICalibrationService service, string handle, string kind)
     {
         // Register the backdrop's window-style callback before any window property is assigned, as DeviceManager does.
-        _backdrop = new MicaAltBackdrop(this);
+        _backdrop = new DesktopWindowBackdrop(this);
         Typography.ApplyTextOptions(this);
         RenderDiagnostics.Attach(this);
         _service = service; _events = service as IHeadsetEventService;
+        DesktopWindowIntegration.Attach(this, _events);
         _model = new CalibrationViewModel(service, handle, kind);
         Title = kind == "fit" ? "耳塞贴合度测试" : "设置黄金听感";
         Icon = new Avalonia.Media.Imaging.Bitmap(AssetLoader.Open(new Uri("avares://HeyMelody.Calibration.UI/Assets/HeyMelody.ico")));

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "runtimeIdentifier": "osx-arm64",
+  "dotnet": {
+    "version": "10.0.401",
+    "url": "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.401/dotnet-sdk-10.0.401-osx-arm64.tar.gz",
+    "hashAlgorithm": "SHA512",
+    "hash": "69f64eb00dc045398755c440b152225d544301a345a146a16e86a56a0c52b7c94b2c331520e976dbb821f18d31930aafbd25bb85961e3517e0665414ce0cbcff"
+  },
+  "cmake": {
+    "version": "3.31.12",
+    "url": "https://github.com/Kitware/CMake/releases/download/v3.31.12/cmake-3.31.12-macos-universal.tar.gz",
+    "hashAlgorithm": "SHA256",
+    "hash": "799af7fd545db9bf1b9cfe72f8095880e727a2d4e0df0e3dffc3bc7b95c2d3b0"
+  },
+  "ninja": {
+    "version": "1.13.2",
+    "url": "https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-mac.zip",
+    "hashAlgorithm": "SHA256",
+    "hash": "c99048673aa765960a99cf10c6ddb9f1fad506099ff0a0e137ad8960a88f321b"
+  }
+}

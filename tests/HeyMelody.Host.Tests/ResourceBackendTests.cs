@@ -1,3 +1,4 @@
+using HeyMelody.Platform;
 using System.IO.Compression;
 using System.Net;
 using System.Reflection;
@@ -7,7 +8,6 @@ using System.Text.Json.Nodes;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Host;
 using HeyMelodyWindows.Resources;
-using HeyMelodyWindows.Windows;
 
 internal static class ResourceBackendTests
 {

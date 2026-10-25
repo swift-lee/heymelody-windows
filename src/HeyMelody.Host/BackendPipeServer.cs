@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Pipes;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -87,18 +86,13 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
     }
     private static bool IsLocalSession(NamedPipeServerStream pipe)
     {
-        if (!OperatingSystem.IsWindows()) return true;
-        try
-        {
-            if (!GetNamedPipeClientProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out uint processId)) return false;
-            using var client = Process.GetProcessById(checked((int)processId));
-            using var host = Process.GetCurrentProcess();
-            return client.SessionId == host.SessionId;
-        }
-        catch { return false; }
+#if HEYMELODY_WINDOWS
+        return HeyMelody.Windows.WindowsPipeSecurity.IsCurrentSession(pipe.SafePipeHandle);
+#else
+        // NamedPipeStream's CurrentUserOnly verifies both peers' Unix credentials.
+        return true;
+#endif
     }
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetNamedPipeClientProcessId(nint pipe, out uint processId);
 
     // One serialization serves every client of an event.
     private void Broadcast(BackendEvent value)
@@ -174,6 +168,8 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
                 case "createCalibration":
                     data = await supervisor.CreateCalibrationAsync(client.Key, Identity(), Generation(), StringArg("kind"), client.Lifetime.Token); break;
                 case "getCalibration": data = supervisor.GetCalibration(client.Key, Handle(), client.Role); break;
+                case "calibrationAudioOutputs":
+                    data = await supervisor.GetPreviewAudioOutputsAsync(client.Key, Handle(), client.Lifetime.Token); break;
                 case "advanceCalibration":
                     GenerationCheck();
                     data = await supervisor.AdvanceCalibrationAsync(client.Key, Handle(), request.Revision ?? throw new InvalidDataException(),
@@ -187,6 +183,11 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
                 case "stoppingAck":
                     ReceiveStoppingAcknowledgement(client, request); return;
                 case "activateMain": ActivateMain(false); data = true; break;
+                case "requestExit":
+                    // Reply before voting: the same client receive loop must remain free to process the vote.
+                    client.Reply(request.Id, true);
+                    _ = RequestExitFromClientAsync();
+                    return;
                 default: throw new InvalidDataException();
             }
             client.Reply(request.Id, data);
@@ -245,20 +246,7 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
             try { if (_mainLaunch is not null) _mainLaunch.PriorityClass = ProcessPriorityClass.Normal; } catch { }
         }
     }
-    private static ProcessStartInfo MainStartInfo()
-    {
-        var executable = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "HeyMelody.exe"));
-        var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true,
-            WorkingDirectory = Path.GetDirectoryName(executable)! };
-        if (File.Exists(executable)) return start;
-        foreach (var configuration in new[] { "Debug", "Release" })
-        {
-            var dll = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../HeyMelody.App/bin", configuration, "net10.0/HeyMelody.dll"));
-            if (!File.Exists(dll)) continue;
-            start.FileName = "dotnet"; start.ArgumentList.Add(dll); start.WorkingDirectory = Path.GetDirectoryName(dll)!; return start;
-        }
-        throw new FileNotFoundException("主界面组件缺失，请重启软件或重新安装。");
-    }
+    private static ProcessStartInfo MainStartInfo() => HeyMelody.Platform.ApplicationPaths.ResolveComponent("HeyMelody");
 
     private void Detach(Client client)
     {

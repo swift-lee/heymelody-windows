@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using HeyMelodyWindows.App;
-using HeyMelodyWindows.Windows;
+using HeyMelody.Platform;
 
 namespace HeyMelodyWindows.Host;
 
@@ -15,6 +15,7 @@ namespace HeyMelodyWindows.Host;
 [JsonSerializable(typeof(WorkerMessage))]
 [JsonSerializable(typeof(IReadOnlyList<BluetoothCandidate>))]
 [JsonSerializable(typeof(List<BluetoothCandidate>))]
+[JsonSerializable(typeof(UiPreviewAudioOutput[]))]
 internal partial class HostJsonContext : JsonSerializerContext;
 
 internal static class HostWire

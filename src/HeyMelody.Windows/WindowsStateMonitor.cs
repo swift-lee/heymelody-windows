@@ -1,8 +1,6 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Runtime.InteropServices;
-using HeyMelodyWindows.App;
-using HeyMelodyWindows.Protocol;
 using global::Windows.Devices.Bluetooth;
 using global::Windows.Devices.Bluetooth.Advertisement;
 using global::Windows.Devices.Enumeration;
@@ -11,11 +9,12 @@ using global::Windows.Foundation;
 using global::Windows.Storage.Streams;
 
 using HeyMelody.Diagnostics;
+using HeyMelody.Platform;
 
-namespace HeyMelodyWindows.Host;
+namespace HeyMelodyWindows.Windows;
 
 /// <summary>OS callbacks and BLE observations never perform synchronous SDP or native enumeration.</summary>
-internal sealed class WindowsStateMonitor(BackendSupervisor supervisor) : IDisposable
+internal sealed class WindowsStateMonitor(WindowsBluetoothPlatform supervisor) : IDisposable
 {
     private readonly CancellationTokenSource _lifetime = new();
     private readonly ConcurrentDictionary<string, ulong> _addresses = new(StringComparer.Ordinal);
@@ -310,7 +309,7 @@ internal sealed class WindowsStateMonitor(BackendSupervisor supervisor) : IDispo
         }
     }
     internal static bool IsCurrentAdvertisement(DateTimeOffset timestamp, DateTimeOffset startedAt, short rssi)
-        => timestamp >= startedAt && rssi != -127;
+        => BluetoothCandidates.IsCurrentAdvertisement(timestamp, startedAt, rssi);
     private void Advertisement(long generation, DateTimeOffset startedAt, BluetoothLEAdvertisementReceivedEventArgs args)
     {
         if (_disposed || _suspended || generation != Volatile.Read(ref _scanGeneration)
@@ -325,17 +324,12 @@ internal sealed class WindowsStateMonitor(BackendSupervisor supervisor) : IDispo
                 var data = new byte[reader.UnconsumedBufferLength]; reader.ReadBytes(data);
                 DiagnosticLog.Bytes("host.monitor", "advertisementReceived", data,
                     new { manufacturer.CompanyId, args.BluetoothAddress, args.BluetoothAddressType, args.Timestamp, args.RawSignalStrengthInDBm, generation });
-                if (!OppoAdvertisementParser.TryParse(manufacturer.CompanyId, data, out var parsed) || parsed is null
-                    || !parsed.TryResolveAddress(args.BluetoothAddress, args.BluetoothAddressType == BluetoothAddressType.Public, out var address)) continue;
                 lock (_observerSync)
                 {
                     if (_disposed || _suspended || generation != _scanGeneration) return;
                     _advertisementFailures = 0;
-                    supervisor.ObserveBroadcast(address, new(parsed.ProductId,
-                        parsed.CaseOpen is { } lid ? lid ? CaseLidState.Open : CaseLidState.Closed : CaseLidState.Unknown,
-                        (EarbudPlacement)parsed.LeftPlacement, (EarbudPlacement)parsed.RightPlacement,
-                        parsed.LeftBattery, parsed.RightBattery, parsed.CaseBattery, null, null, null, args.Timestamp)
-                        { Color = parsed.Color });
+                    supervisor.ObserveAdvertisement(manufacturer.CompanyId, data, args.BluetoothAddress,
+                        args.BluetoothAddressType == BluetoothAddressType.Public, args.Timestamp, args.RawSignalStrengthInDBm);
                 }
             }
         }

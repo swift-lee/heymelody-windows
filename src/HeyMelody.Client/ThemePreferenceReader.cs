@@ -11,8 +11,7 @@ public static class ThemePreferenceReader
         string? path = null;
         try
         {
-            path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "HeyMelody", "preferences.json");
+            path = Path.Combine(HeyMelody.Platform.ApplicationPaths.DataRoot, "preferences.json");
             using var document = JsonDocument.Parse(File.ReadAllText(path));
             if (document.RootElement.ValueKind != JsonValueKind.Object
                 || !document.RootElement.TryGetProperty("theme", out var value)

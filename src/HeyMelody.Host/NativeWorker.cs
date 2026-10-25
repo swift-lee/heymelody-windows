@@ -4,7 +4,7 @@ using System.Text.Json;
 using System.Threading.Channels;
 using HeyMelody.Diagnostics;
 using HeyMelodyWindows.App;
-using HeyMelodyWindows.Windows;
+using HeyMelody.Platform;
 
 namespace HeyMelodyWindows.Host;
 
@@ -128,6 +128,7 @@ internal static class NativeWorker
                         "diagnostics" => service.Diagnostics(),
                         "createCalibration" => service.CreateCalibration(request.Handle, request.CalibrationKind),
                         "getCalibration" => service.GetCalibration(request.Handle),
+                        "calibrationAudioOutputs" => await service.GetPreviewAudioOutputsAsync(request.Handle, budget.Token),
                         "advanceCalibration" => await service.AdvanceCalibrationAsync(request.Handle, request.Revision, request.Input ?? throw new InvalidDataException(), budget.Token),
                         "cancelCalibration" => await service.CancelCalibrationAsync(request.Handle, budget.Token),
                         "hearingProfiles" => await service.ReadHearingProfilesAsync(budget.Token),
@@ -164,7 +165,8 @@ internal static class NativeWorker
         try
         {
             Console.OutputEncoding = new UTF8Encoding(false);
-            var line = JsonSerializer.Serialize(WindowsBluetooth.EnumeratePaired(), HostWire.Json);
+            using var platform = HostPlatformFactory.CreateBluetooth();
+            var line = JsonSerializer.Serialize(await platform.EnumeratePairedAsync(CancellationToken.None), HostWire.Json);
             if (line.Length > RpcWire.MaximumLineCharacters) return 1;
             await Console.Out.WriteLineAsync(line); await Console.Out.FlushAsync(); return 0;
         }
@@ -177,25 +179,15 @@ internal static class NativeWorker
 
     internal static ProcessStartInfo StartInfo(string mode)
     {
-        var file = Environment.ProcessPath ?? throw new IOException();
-        var start = new ProcessStartInfo(file)
-        {
-            UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
-            StandardInputEncoding = new UTF8Encoding(false), StandardOutputEncoding = new UTF8Encoding(false),
-            StandardErrorEncoding = new UTF8Encoding(false), WorkingDirectory = AppContext.BaseDirectory
-        };
-        if (Path.GetFileNameWithoutExtension(file).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
-            start.ArgumentList.Add(typeof(Program).Assembly.Location);
-        else if (!Path.GetFileNameWithoutExtension(file).Equals("HeyMelody.Host", StringComparison.OrdinalIgnoreCase))
-        {
-            // Test and tooling hosts run the actual backend apphost rather than themselves.
-            var apphost = Path.Combine(Path.GetDirectoryName(typeof(Program).Assembly.Location)!, "HeyMelody.Host.exe");
-            start.FileName = File.Exists(apphost) ? apphost : "dotnet";
-            if (!File.Exists(apphost)) start.ArgumentList.Add(typeof(Program).Assembly.Location);
-        }
-        start.ArgumentList.Add(mode); return start;
+        var start = ApplicationPaths.ResolveComponent("HeyMelody.Host");
+        start.UseShellExecute = false; start.CreateNoWindow = true;
+        start.RedirectStandardInput = true; start.RedirectStandardOutput = true; start.RedirectStandardError = true;
+        start.StandardInputEncoding = new UTF8Encoding(false); start.StandardOutputEncoding = new UTF8Encoding(false);
+        start.StandardErrorEncoding = new UTF8Encoding(false);
+        start.ArgumentList.Add(mode);
+        return start;
     }
+
 }
 
 internal interface IPeerWorker : IAsyncDisposable

@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../HeyMelody.Platform/HeyMelody.Platform.csproj" />
     <InternalsVisibleTo Include="HeyMelody.Diagnostics.Tests" />
     <InternalsVisibleTo Include="HeyMelody.Host.Tests" />
     <InternalsVisibleTo Include="HeyMelody.Client.Tests" />

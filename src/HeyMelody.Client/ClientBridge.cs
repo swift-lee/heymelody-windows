@@ -195,7 +195,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
         try
         {
             connection = boundConnection ?? await EnsureConnectionAsync(linked.Token,
-                request.Operation is "subscribe" or "cancelCalibration");
+                request.Operation is "subscribe" or "cancelCalibration" or "requestExit");
             if (connection.Closed) throw new IOException("原后台连接已关闭。");
             if (boundConnection is null) lock (_stateGate) request.BackendInstanceId = _backendInstanceId;
             await connection.WriteGate.WaitAsync(linked.Token);
@@ -328,7 +328,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
         finally { _connectGate.Release(); }
     }
 
-    private NamedPipeClientStream NewPipe() => new(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+    private NamedPipeClientStream NewPipe() => new(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
 
     private async Task ReadMessagesAsync(Connection connection)
     {

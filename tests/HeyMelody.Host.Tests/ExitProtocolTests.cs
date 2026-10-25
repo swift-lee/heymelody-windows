@@ -1,10 +1,10 @@
+using HeyMelody.Platform;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Host;
-using HeyMelodyWindows.Windows;
 
 internal static class ExitProtocolTests
 {

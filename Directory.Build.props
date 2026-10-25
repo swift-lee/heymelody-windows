@@ -1,0 +1,14 @@
+<Project>
+  <PropertyGroup>
+    <HeyMelodyDesktopPlatform Condition="'$(HeyMelodyDesktopPlatform)' == '' and $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('win-'))">Windows</HeyMelodyDesktopPlatform>
+    <HeyMelodyDesktopPlatform Condition="'$(HeyMelodyDesktopPlatform)' == '' and $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('osx-'))">macOS</HeyMelodyDesktopPlatform>
+    <HeyMelodyDesktopPlatform Condition="'$(HeyMelodyDesktopPlatform)' == '' and $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('linux-'))">Linux</HeyMelodyDesktopPlatform>
+    <HeyMelodyDesktopPlatform Condition="'$(HeyMelodyDesktopPlatform)' == '' and $([MSBuild]::IsOSPlatform('Windows'))">Windows</HeyMelodyDesktopPlatform>
+    <HeyMelodyDesktopPlatform Condition="'$(HeyMelodyDesktopPlatform)' == '' and $([MSBuild]::IsOSPlatform('OSX'))">macOS</HeyMelodyDesktopPlatform>
+    <HeyMelodyDesktopPlatform Condition="'$(HeyMelodyDesktopPlatform)' == ''">Linux</HeyMelodyDesktopPlatform>
+    <DefineConstants Condition="'$(HeyMelodyDesktopPlatform)' == 'macOS'">$(DefineConstants);HEYMELODY_MACOS</DefineConstants>
+    <DefineConstants Condition="'$(HeyMelodyDesktopPlatform)' == 'Windows'">$(DefineConstants);HEYMELODY_WINDOWS</DefineConstants>
+    <HeyMelodyDesktopTargetFramework Condition="'$(HeyMelodyDesktopPlatform)' == 'Windows'">net10.0-windows10.0.19041.0</HeyMelodyDesktopTargetFramework>
+    <HeyMelodyDesktopTargetFramework Condition="'$(HeyMelodyDesktopTargetFramework)' == ''">net10.0</HeyMelodyDesktopTargetFramework>
+  </PropertyGroup>
+</Project>

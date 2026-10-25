@@ -174,10 +174,10 @@ static async Task LauncherAsync()
         window.Show(); Dispatcher.UIThread.RunJobs();
         await view.OpenBluetoothSettingsAsync();
         Check(service.Enumerations == 1 && service.Saves == 0, "Opening settings never enumerates devices or persists a selection.");
-        if (OperatingSystem.IsWindows())
-            Check(launcher.Uris is [{ OriginalString: "ms-settings:bluetooth" }] && vm.HasError,
+        if (HeyMelody.Platform.DesktopSystemSettings.BluetoothUri is { } settingsUri)
+            Check(launcher.Uris.Count == 1 && launcher.Uris[0] == settingsUri && vm.HasError,
                 "A launcher rejection gives an actionable error for the documented settings URI.");
-        else Check(launcher.Uris.Count == 0, "Non-Windows preview cannot launch a Windows URI.");
+        else Check(launcher.Uris.Count == 0, "A platform without a settings target cannot launch a system URI.");
     }
     finally { window.Close(); }
 }

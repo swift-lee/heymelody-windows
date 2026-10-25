@@ -15,7 +15,7 @@ internal static class DemoDeviceTests
     public static int Run(HeadlessUnitTestSession session, string output, List<object> receipts)
     {
         var passed = 0;
-        if (OperatingSystem.IsWindows())
+        if (HeyMelody.Platform.DesktopCapabilities.SupportsHeadsetControl)
         {
             Run("add-device release before two seconds keeps the normal short click", ShortClickAsync);
             Run("two-second hold adds one demo and releases without opening settings", HoldAsync);
@@ -23,7 +23,7 @@ internal static class DemoDeviceTests
             Run("keyboard input during a hold keeps its mouse release suppressed", KeyboardDuringHoldAsync);
             Run("moving away, capture loss, disabling and detaching cancel the pending hold", CancellationAsync);
         }
-        else Console.WriteLine("SKIP 5 Windows add-device gesture tests: Windows required.");
+        else Console.WriteLine("SKIP 5 add-device gesture tests: headset control is unavailable on this platform.");
         Run("demo loads the exact Dynaudio asset and corrects only its runtime material", DynaudioArtworkAsync);
         Run("demo fit and hearing buttons never launch calibration delegates", CalibrationButtonsAsync);
         foreach (var dark in new[] { false, true })
@@ -47,7 +47,9 @@ internal static class DemoDeviceTests
         Check(!fixture.Vm.IsDemoSelected, "A hold shorter than two seconds must not add a demo.");
         fixture.Release();
         await UntilAsync(() => fixture.Launcher.Uris.Count == 1);
-        Check(fixture.Launcher.Uris.Single().OriginalString == "ms-settings:bluetooth"
+        var expectedUri = OperatingSystem.IsMacOS()
+            ? "x-apple.systempreferences:com.apple.BluetoothSettings" : "ms-settings:bluetooth";
+        Check(fixture.Launcher.Uris.Single().OriginalString == expectedUri
             && fixture.Vm.Devices.Count == 0 && fixture.Service.Calls == 1,
             "The original short click still opens Bluetooth settings once and does not query devices.");
     }
@@ -170,12 +172,13 @@ internal static class DemoDeviceTests
         foreach (var label in new[] { "开始测试", "设置黄金听感" })
         {
             var button = fixture.View.GetVisualDescendants().OfType<Button>().Single(button => Equals(button.Content, label));
-            button.BringIntoView(); Dispatcher.UIThread.RunJobs();
-            Click(fixture.Window, button);
+            var point = await MainUiTestLayout.ClickPointAsync(fixture.Window, button);
+            fixture.Window.MouseDown(point, MouseButton.Left); fixture.Window.MouseUp(point, MouseButton.Left);
+            Dispatcher.UIThread.RunJobs();
             var action = label == "开始测试" ? "耳塞贴合度测试" : label;
             Check(launches == 0 && fixture.Vm.Status.Contains(action, StringComparison.Ordinal)
                 && fixture.Vm.Status.Contains(DemoDeviceData.Notice, StringComparison.Ordinal),
-                "Demo test actions provide feedback without invoking a calibration process.");
+                $"Demo action '{label}' provides feedback without invoking a calibration process; status: {fixture.Vm.Status}.");
         }
         Check(fixture.Service.Calls == 1 && fixture.Vm.CanSetupHearing && fixture.Vm.CanFitTest,
             "Demo test controls are enabled without contacting the headset service.");
@@ -224,11 +227,6 @@ internal static class DemoDeviceTests
             "The screenshots cover the entire controls column and rendering never queries demo artwork or a headset.");
     }
 
-    private static void Click(Window window, Control control)
-    {
-        var point = control.TranslatePoint(new Point(control.Bounds.Width / 2, control.Bounds.Height / 2), window)!.Value;
-        window.MouseDown(point, MouseButton.Left); window.MouseUp(point, MouseButton.Left); Dispatcher.UIThread.RunJobs();
-    }
     private static async Task UntilAsync(Func<bool> condition)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);

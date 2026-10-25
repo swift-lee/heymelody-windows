@@ -1,11 +1,27 @@
+using HeyMelody.Platform;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Host;
-using HeyMelodyWindows.Windows;
 
 internal static class BridgeExitIntegrationTests
 {
     internal static async Task RunAsync(Func<string, Func<Task>, Task> test, string scratch)
     {
+        await test("client exit RPC replies before votes and uses the shared terminal lifecycle", async () =>
+        {
+            await using var fixture = new Fixture(scratch);
+            await using var main = fixture.Bridge();
+            var allowVote = Signal<bool>();
+            var stopped = Watch(main, prepare: () => allowVote.Task);
+            await main.SubscribeAsync("main", default);
+            await main.RequestApplicationExitAsync(default).WaitAsync(TimeSpan.FromSeconds(2));
+            await main.RequestApplicationExitAsync(default).WaitAsync(TimeSpan.FromSeconds(2));
+            Check(fixture.Approved == 0 && !stopped.IsCompleted);
+            allowVote.TrySetResult(true);
+            await stopped.WaitAsync(TimeSpan.FromSeconds(4));
+            for (int i = 0; fixture.Approved == 0 && i < 50; i++) await Task.Delay(10);
+            Check(fixture.Approved == 1 && main.IsStopping && fixture.Launches == 0);
+        });
+
         await test("real bridges for main, manager, calibration and warm startup stop together without launching another backend", async () =>
         {
             await using var fixture = new Fixture(scratch);

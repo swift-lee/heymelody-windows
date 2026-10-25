@@ -1,8 +1,8 @@
-# HeyMelody for Windows
+# HeyMelody for Windows / macOS
 
-在 Windows 上查看和调整 OPPO 耳机设置，让欢律里的常用功能也能在电脑上使用。
+在 Windows 和 Apple Silicon Mac 上查看和调整 OPPO 耳机设置，让欢律里的常用功能也能在电脑上使用。
 
-这是一个社区维护的 Windows 客户端，使用 Avalonia 和 FluentAvalonia 构建。项目提供耳机状态、降噪、均衡器和校准界面，支持 OPPO、OnePlus、realme 的部分耳机型号；与 OPPO 官方没有隶属关系。
+这是一个社区维护的桌面客户端，使用 Avalonia 和 FluentAvalonia 构建。项目提供耳机状态、降噪、均衡器和校准界面，支持 OPPO、OnePlus、realme 的部分耳机型号；与 OPPO 官方没有隶属关系。
 
 [下载与发布](https://github.com/CberYellowstone/heymelody-windows/releases) · [使用说明](docs/usage.md) · [版本记录](docs/history/release-notes.md) · [反馈问题](https://github.com/CberYellowstone/heymelody-windows/issues)
 
@@ -19,7 +19,9 @@
 
 ## 安装与开始使用
 
-平台基线为 **Windows 10 2004（Build 19041）及以上**。发布包自带 .NET 运行时，日常使用无需安装 SDK；下载时以发布页实际提供的架构为准。
+Apple Silicon Mac 需要 **macOS 15 及以上**，打开 DMG 后将完整的 `HeyMelody.app` 复制到“应用程序”，详见 [macOS 安装说明](docs/macos.md#使用)。
+
+Windows 平台基线为 **Windows 10 2004（Build 19041）及以上**，以下步骤适用于 Windows。发布包自带 .NET 运行时，日常使用无需安装 SDK；下载时以发布页实际提供的架构为准。
 
 1. 在[发布页](https://github.com/CberYellowstone/heymelody-windows/releases)选择可用的预编译包，完整解压到一个目录。单架构包应与 Windows 架构匹配。
 2. 先在 Windows 蓝牙设置中配对并连接耳机。
@@ -36,7 +38,11 @@
 
 ## 当前进展
 
-当前源码版本为 **0.9.2**，用于本轮 Windows 本地构建，尚未发布到 GitHub。修复控制服务缓存缺失或过期可能阻止连接的问题，并在连接失败时显示具体步骤和原因。双击底栏中的当前耳机刷新状态，三击重新连接（也可按 F5／Shift+F5）。Air4 Pro 真机恢复与 ARM64 硬件尚未验证；改动与验证范围见[版本记录](docs/history/release-notes.md)。
+本分支增加 **macOS 15+ / Apple Silicon** 原生实现，版本保持 **0.9.2**。DMG 内含自包含运行时，将 `HeyMelody.app` 复制到“应用程序”后启动；先在系统设置中配对连接耳机，再通过应用的设备管理器保存名单。后台位于菜单栏，关闭窗口后继续运行；⌘Q 或菜单栏“退出”执行所有窗口的协同退出。黄金听感音乐试听需要明确选择蓝牙音频输出。
+
+本轮 DMG 使用本地 ad-hoc 签名，尚未公证。macOS 蓝牙连接、控制和校准效果尚待耳机真机验证；本机 Metal、离线与包验收边界及构建方法见 [macOS 说明](docs/macos.md)。
+
+Windows 部分沿用 **0.9.2** 的控制服务缓存修复，并在连接失败时显示具体步骤和原因。双击底栏中的当前耳机刷新状态，三击重新连接（也可按 F5／Shift+F5）。Air4 Pro 真机恢复与 Windows ARM64 硬件尚未验证；改动与验证范围见[版本记录](docs/history/release-notes.md)。
 
 项目仍在完善设备适配。不同型号、蓝牙适配器、手机同时控制及 ARM64 硬件行为需要分别验证；OTA 固件更新、录音、翻译和健康功能尚未提供。默认开启在线资源，可在设置中关闭；缓存和本地设置的说明见[使用说明](docs/usage.md#资源与本地数据)。
 
@@ -50,9 +56,9 @@ dotnet build src/HeyMelody.App/HeyMelody.App.csproj -c Release
 
 普通构建使用仓库自带的资源包，不需要原始 APK 或本地研究档案。模块、运行、测试和打包步骤见[开发指南](docs/development.md)。
 
-本独立试验分支使用 Filament 渲染三维模型，默认 Vulkan；在应用设置的“3D模型渲染API”下拉框选择 OpenGL。不可用时显示静态外观，并在 Vulkan 失败时提示手动选择 OpenGL。模型帧率可选 30帧、60帧、无限制三档，默认无限制。提供 Windows x64、ARM64 构建，实际运行验收使用 x64；macOS、Linux 提供渲染层构建准备，见 [Filament 构建说明](docs/filament-renderer.md)。
+本分支使用 Filament 渲染三维模型：Windows 默认 Vulkan，也可手动选择 OpenGL；macOS 使用 Metal。模型帧率可选 30帧、60帧、无限制，默认无限制。Linux 目前保留渲染构建与平台接口，完整蓝牙后端留待后续实现，见 [Filament 构建说明](docs/filament-renderer.md)。
 
-欢迎通过 [Issues](https://github.com/CberYellowstone/heymelody-windows/issues) 提交问题、设备兼容性反馈和功能建议，也欢迎提交 Pull Request。反馈时请注明应用版本、Windows 版本、耳机型号与固件、配置内容版本和复现步骤；分享日志前移除蓝牙地址、密钥等个人数据。开始修改项目时，请阅读[协作规则与文档导航](AGENTS.md)。
+欢迎通过 [Issues](https://github.com/CberYellowstone/heymelody-windows/issues) 提交问题、设备兼容性反馈和功能建议，也欢迎提交 Pull Request。反馈时请注明应用版本、操作系统版本与架构、耳机型号与固件、配置内容版本和复现步骤；分享日志前移除蓝牙地址、密钥等个人数据。开始修改项目时，请阅读[协作规则与文档导航](AGENTS.md)。
 
 ## 许可与来源
 

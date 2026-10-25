@@ -25,6 +25,8 @@ public sealed partial class MainViewModel
         if (_closing || EventService is null) return;
         if (notification.Kind == "resources" && notification.Resources is { } resources && AcceptBackend(notification.BackendInstanceId))
         { PresentResourceSettings(resources); return; }
+        if (notification.Kind == "platform" && AcceptBackend(notification.BackendInstanceId))
+        { PresentPlatformStatus(notification.Platform); return; }
         if (notification.Kind == "unavailable")
         {
             _subscribed = false;
@@ -79,6 +81,7 @@ public sealed partial class MainViewModel
         if (EventService is not { } events || _subscribed) return;
         var subscription = await events.SubscribeAsync("main", _lifetime.Token);
         if (!AcceptBackend(subscription.BackendInstanceId)) return;
+        PresentPlatformStatus(subscription.Platform);
         foreach (var snapshot in subscription.Snapshots) CacheSnapshot(snapshot);
         BackendStartupDevices = subscription.Devices.Count != 0 && subscription.Catalog.SelectionWarning is null
             ? subscription.Devices : null;

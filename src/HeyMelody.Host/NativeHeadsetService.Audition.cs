@@ -39,6 +39,7 @@ public sealed partial class NativeHeadsetService
         {
             if (_calibrationState is not { } state) return;
             _calibrationState = state with { PreviewEpoch = _previewEpoch, PreviewAudioPlaying = playing,
+                SelectedPreviewAudioOutputToken = (_auditionPlayer as ISelectableCalibrationAuditionPlayer)?.SelectedOutputToken,
                 PreviewAudioError = error, Revision = ++_calibrationRevision };
             DiagnosticLog.Debug("host.audio", "state", "Audition state changed",
                 new { epoch = _previewEpoch, playing, error, state.Handle, state.Stage, state.PreviewMode });
