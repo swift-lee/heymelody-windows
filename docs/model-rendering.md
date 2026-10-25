@@ -8,6 +8,10 @@
 
 Vulkan 不可用时显示静态 detail 外观并提示手动选择 OpenGL，不自动选择 OpenGL 或修改偏好；OpenGL 不可用时显示普通不可用提示。没有同款图片的内置演示使用通用耳机图标。损坏资源和缺失组件单独归类，不提示无效的后端切换。
 
+原生 Engine 初始化时按所选后端的实际能力选择深度纹理格式：优先使用 `DEPTH24`，不支持时使用 `DEPTH32F`；两者均不支持时返回受控初始化失败，沿用现有静态外观与错误提示。原生日志 `depthFormat.selection` 记录后端、两种格式的支持情况和最终使用的格式，便于定位深度纹理创建失败。
+
+2026-10-25 的 Radeon 680M／驱动 31.0.22013.1007 [本地用户日志](../research/rdna2-novulkan-logs/)来自版本 `0cabb0b`：Vulkan 已识别 AMD 设备并报告 feature level 3，随后原先硬编码的 `DEPTH24`（Filament 格式编号 22）被拒绝，三次 probe 均以 `0xC0000409` 结束；同周期 OpenGL probe 和模型加载成功。此次修改针对这个深度格式能力差异；新产物在该显卡与驱动上的实机回测仍待用户确认。
+
 当前运行验收范围为 Windows x64 的 Vulkan、OpenGL；ARM64 为交叉构建和静态校验。macOS Metal、Linux Vulkan／EGLHeadless 的构建准备、ABI 2、探测程序及验证边界见 [Filament 构建与接口](filament-renderer.md)。完整截图留在本地，只检查本轮变更的模型和设置区域。
 
 帧复制与让路：`PresentLatestFrame` 从 `ApplyCamera` 等请求新帧（`_frameRequested`）起轮询渲染器，直到已取到帧且距最后一次请求满 0.25 s 才停止，因为锁定 `WriteableBitmap` 即使不写入也会使 Skia 快照失效并触发一次纹理上传；连续请求可能重叠，先取到的帧未必是最后姿态，宽限期保证停止转动时最后一帧仍会呈现；位图尺寸与配置相同且 `RowBytes == 宽×4` 时，渲染器直接写入已锁定的位图，托管 `_frameBuffer` 逐行复制只作为步幅或尺寸不符、渲染器拒绝较小目标缓冲时的回退（`DirectCopyDisabled`）。`AnimationYield`（`HeyMelody.Artwork`）在设置展开（脉冲 600 ms）、滚动（300 ms）和主窗口失活期间要求装饰动画降到 30 fps：空闲自转（`Motion.Phase == Idle`）改用独立的 30 fps `ModelFramePacer`，`Motion.Step` 仍逐回调推进以保持自转时间连续；拖动和惯性仍用用户设定的帧率。Lottie 同样只在 30 fps 步进变化时重绘；停在末帧的 Product 动画在有 GPU 上下文时只渲染一次并以 `SKImage` 重绘，循环动画从不缓存。这些都是离线验证，30 fps 让路的实际流畅度与 GPU 缓存效果需 Windows 实机确认。

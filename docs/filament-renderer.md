@@ -80,6 +80,8 @@ GLES 头文件与链接库是另外两项构建要求。Ubuntu 24.04 的 `GLES3/
 
 Linux 默认构建与 CI 执行现有 `hm_filament_smoke` 无参数入口，检查实际动态加载、C ABI 2 结构体布局和非法后端拒绝；该入口无需 GPU 或窗口。按 baseline / fixed 隔离项目和产物、保留完整日志与真实退出码的复现流程见 [Linux Filament 构建复现工具](../tools/research/filament-linux-build/README.md)。
 
+原生单测入口 `hm_filament_depth_format_tests` 使用给定的格式能力组合，检查优先 `DEPTH24`、回退 `DEPTH32F` 和两者均不支持时的不可用结果。该入口无需 GPU 或窗口，验证格式选择逻辑；实际显卡与驱动的支持情况仍由 probe 和硬件回测确认。
+
 Windows ARM64 使用 -RuntimeIdentifier win-arm64。它复用同版本 x64 主机工具，resgen 生成 C 数组交给 ARM64 编译器，BlueGL 使用上游已有的类型化 C++ 分发实现；原始 Filament clone 保持不变。macOS/Linux 使用对应 RID，构建工具验证实际 OS、CPU 和产物架构，不能只改 RID 重命名文件。
 
 Windows/Linux 同时启用 Vulkan 和 OpenGL，由上游材质编译参数一次生成双后端 archive。runtimes/<rid>/native 包含库、探测程序、materials/gltfio.uberz、清单及许可证。schema 2 清单记录 ABI 2、commit、RID、supportedBackends、defaultBackend、材质后端集合和逐文件 SHA256；它描述编译能力，不宣称机器驱动可用。历史 schema 1 包仍可静态校验，新构建必须通过 -RequireCurrent。

@@ -177,3 +177,13 @@ endif()
 if(WIN32)
     target_link_libraries(hm_filament_sha256_tests PRIVATE bcrypt)
 endif()
+
+# Depth capability policy is tested without Filament, an Engine, or GPU resources.
+add_executable(hm_filament_depth_format_tests tools/depth_format_tests.cpp)
+target_include_directories(hm_filament_depth_format_tests PRIVATE src)
+if(MSVC)
+    set_property(TARGET hm_filament_depth_format_tests PROPERTY MSVC_RUNTIME_LIBRARY MultiThreaded)
+    target_compile_options(hm_filament_depth_format_tests PRIVATE /W4 /EHsc)
+else()
+    target_compile_options(hm_filament_depth_format_tests PRIVATE -Wall -Wextra)
+endif()
