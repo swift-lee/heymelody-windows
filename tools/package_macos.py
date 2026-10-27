@@ -76,7 +76,7 @@ def verify_metal_backend(bundle: Path) -> dict:
     if result.returncode or expected not in result.stdout.splitlines():
         raise RuntimeError(f"Installed Metal probe failed ({result.returncode}): "
                            f"{(result.stdout + result.stderr)[-2000:]}")
-    return {"success": True, "abiVersion": 2, "requestedBackend": "Metal", "actualBackend": "Metal",
+    return {"executed": True, "success": True, "abiVersion": 2, "requestedBackend": "Metal", "actualBackend": "Metal",
             "scope": "signed installed payload; native engine creation and destruction; no screenshots or Bluetooth"}
 
 
@@ -217,6 +217,12 @@ def sign_inner(repo: Path, bundle: Path) -> None:
             repo / "packaging/macos/entitlements.plist", helper)
 
 
+def _restore_probe_executable(native_root: Path) -> None:
+    # Artifact transports can strip executable bits. Only repair the staged copy.
+    probe = native_root / "hm_filament_probe"
+    probe.chmod(probe.stat().st_mode | 0o111)
+
+
 def thin_native_libraries(bundle: Path) -> None:
     # NuGet's macOS graphics packages can contain universal2 binaries. Produce
     # an arm64-only distribution without changing cached NuGet packages.
@@ -286,6 +292,7 @@ def stage(args: argparse.Namespace) -> None:
         for symbols in base.rglob("*.pdb"):
             symbols.unlink()
     shutil.copytree(args.filament_runtime, main, dirs_exist_ok=True)
+    _restore_probe_executable(main)
     for name in ("SOURCE-NOTES.md",):
         shutil.copy2(repo / "packaging" / name, resources / name)
     shutil.copy2(repo / "packaging/macos/README.md", resources / "README-使用说明.md")
@@ -341,7 +348,8 @@ def dmg(args: argparse.Namespace) -> None:
                         run("ditto", Path(mount) / "HeyMelody.app", installed_bundle)
                         installed_report = check_bundle(installed_bundle, args.version)
                         entry_reports = verify_entry_points(installed_bundle, args.version)
-                        metal_report = verify_metal_backend(installed_bundle)
+                        metal_report = ({"executed": False, "reason": "Metal probe skipped by explicit build option"}
+                                        if args.skip_metal_check else verify_metal_backend(installed_bundle))
                 finally:
                     run("hdiutil", "detach", mount)
         image_path.replace(output)
@@ -349,8 +357,11 @@ def dmg(args: argparse.Namespace) -> None:
               "version": args.version, "runtimeIdentifier": "osx-arm64", "signing": "ad-hoc", "notarized": False,
               "diskImageSignatureVerified": True,
               "runtimeChecksExecuted": not args.skip_runtime_checks,
+              "metalProbeExecuted": not args.skip_runtime_checks and not args.skip_metal_check,
               "scope": ("package assembly, signing and integrity only; further tests stopped at user request"
-                        if args.skip_runtime_checks else "package, mounted installation and native runtime verification"),
+                        if args.skip_runtime_checks else
+                        "package, mounted installation and entry-point verification; Metal probe explicitly skipped"
+                        if args.skip_metal_check else "package, mounted installation and native runtime verification"),
               "bluetoothHardwareVerified": False, "mainExecutableSha256": sha256(bundle / "Contents/MacOS/HeyMelody"),
               "bundleVerification": check_bundle(bundle, args.version), "mountedImageVerification": mounted_report,
               "installedCopyVerification": installed_report, "installedEntryPointVerification": entry_reports,
@@ -376,6 +387,8 @@ def main() -> None:
             child.add_argument("--filament-runtime", type=Path, required=True)
         else:
             child.add_argument("--output", type=Path, required=True)
+            child.add_argument("--skip-metal-check", action="store_true",
+                               help="Skip only the Metal engine probe; retain mounted installation and entry-point checks")
     args = parser.parse_args()
     if not re.fullmatch(r"\d+\.\d+\.\d+", args.version):
         parser.error("version must have three numeric components")

@@ -153,6 +153,8 @@ GitHub Actions 的 Windows x64、ARM64 应用包由 push 和手动运行发布�
 
 Windows 原生 Filament 运行时另存为 30 天 artifact 缓存，应用构建和 portability 的 Windows job 共用恢复入口。命中后校验并跳过原生编译，缓存不可用时在当前 job 重建；可信 push／手动运行会重新上传已验证运行时，滚动续存 30 天。手动运行可勾选 `force_native_rebuild` 强制重建。缓存依据、错误回退和离线检查见[Filament 构建说明](filament-renderer.md#github-actions-原生缓存)。
 
+macOS 应用包由同一 Filament workflow 的 `macos-package` job 构建，复用该运行的 Metal 原生产物；使用 Apple Silicon macOS 15，输出 ad-hoc、未公证 DMG 和 JSON 收据。CI 保留五入口及挂载安装复验，单独跳过真实 Metal probe；触发、保留规则和运行边界见 [macOS CI 说明](macos.md#github-actions-构建)。
+
 自 0.9.0 起所有 `dotnet publish` 统一启用 ReadyToRun（`-p:PublishReadyToRun=true`），预编译只含 IL 的界面库，避免首次展开设置、拖动模型或打开向导时的 JIT 停顿；发布包因此变大，x64 机器可交叉编译 ARM64。`-Architectures x64` 或 `-Architectures arm64` 可选择单架构；`-SkipTests` 跳过默认 runner。普通构建拒绝已有目标目录或 ZIP；可用 `-OutputRoot release/arm64` 将另一架构构建放在独立目录，校验时传入同一参数。`-FinalizeOnly` 要求对应目录已存在且 ZIP 尚不存在，并跳过默认测试与 `dotnet publish`，封装已有输出。调整参数前先阅读脚本入口与条件，避免把跳过测试的产物称为完整验证。
 
 App、DeviceManager、FitTest、HearingSetup 共用每个 GUI 目录的运行时与依赖，Host 位于 `backend`。离线资源 `ResourceBundles`（约 34 MB）只随 GUI 目录发布一份：Host 自身目录没有该目录时读取 `..\ResourceBundles`，并把其中的路径交给界面；从构建输出直接运行的 Host 仍使用自己旁边的副本。`Build-Client.ps1` 删除 `backend/ResourceBundles` 并在清单写入 `hostResourceBundles: gui`，两个发布校验脚本据此要求后台不含第二份，旧的双副本包仍按原规则校验。GUI 和后台分别携带 `HeyMelody.Resources.dll` 及第三方声明；提取资源、Filament 和 Skottie 的声明必须随包保留。脚本从 `packaging/README.md` 复制用户说明，从 `packaging/SOURCE-NOTES.md` 复制来源与验证说明，两者是发布素材，更新时需核对发布消费关系。

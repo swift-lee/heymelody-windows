@@ -5,6 +5,10 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      version:
+        description: macOS package version (x.y.z); leave blank to use the project default.
+        required: false
+        type: string
       force_native_rebuild:
         description: Bypass the cache and rebuild the Windows native runtime.
         required: false
@@ -26,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-24.04]
+        os: [windows-latest, macos-15, ubuntu-24.04]
     steps:
       - name: Check out project
         uses: actions/checkout@v4
@@ -50,6 +54,9 @@ jobs:
         run: |
           $prefix = if ($IsWindows) { 'win' } elseif ($IsMacOS) { 'osx' } else { 'linux' }
           $architecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant()
+          if ($IsMacOS -and ($architecture -ne 'arm64' -or [Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'Arm64')) {
+            throw 'The macOS runtime and package jobs require an Apple silicon runner.'
+          }
           "rid=$prefix-$architecture" >> $env:GITHUB_OUTPUT
       - name: Check cache restore and retention rules
         if: runner.os == 'Windows'
@@ -102,4 +109,64 @@ jobs:
             artifacts/filament-cache-checks/summary.json
           if-no-files-found: error
           retention-days: ${{ steps.filament.outputs.receipt-retention-days }}
+          overwrite: true
+
+  macos-package:
+    name: macOS package (arm64)
+    needs: renderer
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      DOTNET_NOLOGO: "true"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
+      DOTNET_CLI_UI_LANGUAGE: en
+      NUGET_PACKAGES: ${{ github.workspace }}/artifacts/nuget-cache
+      NUGET_HTTP_CACHE_PATH: ${{ github.workspace }}/artifacts/nuget-http-cache
+      MSBUILDDISABLENODEREUSE: "1"
+      DOTNET_CLI_USE_MSBUILD_SERVER: "0"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore macOS NuGet cache
+        uses: actions/cache@v4
+        with:
+          path: artifacts/nuget-cache
+          key: nuget-macos-arm64-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Build.targets', 'NuGet.Config') }}
+          restore-keys: nuget-macos-arm64-
+      # Native files come from this run and checkout, never a latest artifact in another run.
+      - name: Download this run's Metal runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: filament-osx-arm64
+          path: artifacts
+      - name: Check and build ad-hoc macOS package
+        id: package
+        shell: pwsh
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: ./tools/ci/Invoke-MacOSPackage.ps1
+      - name: Upload macOS DMG and verification receipt
+        if: success() && steps.package.outputs.package-publish-eligible == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: HeyMelody_macOS_${{ steps.package.outputs.version }}_arm64_${{ steps.package.outputs.commit }}
+          path: |
+            release/macos/*.dmg
+            release/macos/*.json
+          if-no-files-found: error
+          retention-days: ${{ steps.package.outputs.package-retention-days }}
+          overwrite: true
+      - name: Upload macOS checks and complete build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-checks-arm64-${{ github.sha }}
+          path: artifacts/macos-ci/
+          if-no-files-found: warn
+          retention-days: 1
           overwrite: true

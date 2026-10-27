@@ -109,6 +109,8 @@ def check_bundle(bundle: Path, version: str | None = None) -> dict:
         raise ValueError("Filament material archive checksum mismatch")
     if not (native_root / "libHeyMelody.Filament.Native.dylib").is_file() or not (native_root / "hm_filament_probe").is_file():
         raise ValueError("Filament native library or probe is missing")
+    if not os.access(native_root / "hm_filament_probe", os.X_OK):
+        raise ValueError("Filament native probe is not executable")
     native_count = 0
     for path in bundle.rglob("*"):
         if path.is_symlink():
