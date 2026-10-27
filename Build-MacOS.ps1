@@ -11,6 +11,7 @@ param(
     [ValidateRange(1,64)][int]$Parallel = 2,
     [switch]$SkipTests,
     [switch]$SkipRuntimeChecks,
+    [switch]$SkipMetalCheck,
     [switch]$TestsOnly,
     [switch]$StageOnly,
     [switch]$FinalizeOnly
@@ -154,6 +155,7 @@ try {
     $dmg = Join-Path $OutputRoot "HeyMelody-${Version}-macos-arm64.dmg"
     $finalArguments = @($packager, 'dmg', '--repo', $repo, '--bundle', [IO.Path]::GetFullPath($BundlePath), '--output', $dmg, '--version', $Version)
     if ($SkipRuntimeChecks) { $finalArguments += '--skip-runtime-checks' }
+    if ($SkipMetalCheck) { $finalArguments += '--skip-metal-check' }
     if ($ValidationPath) { $finalArguments += @('--validation', [IO.Path]::GetFullPath($ValidationPath)) }
     & $python @finalArguments
     if ($LASTEXITCODE -ne 0) { throw 'DMG creation or verification failed.' }

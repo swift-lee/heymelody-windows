@@ -27,6 +27,18 @@ pwsh -NoProfile -File Build-MacOS.ps1
 
 遵循 [Avalonia macOS 打包说明](https://docs.avaloniaui.net/docs/deployment/macos/)，还需签署各 `Contents/MacOS` 目录中的托管文件和配置。此类通用签名保存在扩展属性中，复制时须保留；用户通过 Finder 安装完整 App，开发验收使用 `ditto` 并在 DMG 挂载、复制后重新检查签名。不要使用会丢弃扩展属性的文件复制方式处理已签名 App。
 
+## GitHub Actions 构建
+
+`filament-build.yml` 的 `macos-package` job 在原生构建矩阵成功后打包，原生和应用构建均使用 `macos-15` Apple Silicon runner。应用复用同一次运行、同一提交的 `filament-osx-arm64` artifact；下载后先验证 RID、ABI、清单及文件摘要，缺少产物时直接失败。SDK 使用 .NET 10，版本输入留空时使用 `Build-MacOS.ps1` 的默认版本。
+
+push 和手动运行成功后，在该次 Actions 的 Artifacts 下载 macOS 包，解压后使用其中的 DMG；签名仍为 ad-hoc，未公证。main 分支应用包保留 7 天，其他分支 1 天；PR 完成构建和校验但不发布应用包。限定范围的构建日志、工具链和验证收据始终保留 1 天。DMG 保留完整应用所需的签名与扩展属性，不将裸 `.app` 目录作为 artifact 分发。
+
+发布任务沿用 Windows CI 的 `-SkipTests` 策略，另外执行 Platform、MacOS 离线检查和打包专项测试；Filament job 保留已有的渲染离线验收。它们不代表完整应用测试集或真实耳机通信通过。
+
+无人值守打包使用 `-SkipMetalCheck`，仅跳过真实 Metal probe，仍执行五入口 `--verify-installation`、DMG 挂载、`ditto` 安装副本及副本完整复验。收据中 `runtimeChecksExecuted=true`、`metalProbeExecuted=false`，并说明 Metal 显式跳过；真实蓝牙保持未验证。普通本地构建不传此参数时继续执行 Metal 检查。原有 `-SkipRuntimeChecks` 仍跳过全部运行和安装检查，两者同时指定时以后者为准。
+
+打包器在签名前恢复 bundle 内 probe 的执行位，校验器要求 probe 可执行；下载的原生来源文件及其清单保持原样。签后 bundle 清单描述签后文件，来源清单 SHA 仍指向原始下载产物。
+
 ## 平台边界
 
 窗口背景在 macOS 通过 Avalonia 的 `AcrylicBlur`／`Blur` 请求 NSVisualEffectView 系统材料。确认实际透明级别后使用浅色或深色色调，移除遮住效果的主页面不透明层；无法协商时使用不透明背景，保持文字可读。Windows 原有 Mica/Mica Alt 路径保留。
@@ -37,7 +49,7 @@ Linux 预留 UI 层的动态背景能力提供方：只有提供方和窗口后�
 
 Unix 使用稳定的用户标识、跨 shell 会话单例及长度不超过 100 个 UTF-8 字节的绝对管道路径；父目录检查当前用户、非符号链接及 `0700` 权限。Linux 复用该基础设施，蓝牙适配器仍待实现。Windows 的命名管道名称及登录会话隔离保持兼容。
 
-## 本轮验收边界
+## 初始移植阶段的本地验收边界
 
 本机为 M1 MacBook Air。构建日志、离线测试、原生窗口和包收据保存在忽略的 `artifacts/` 与 `release/` 中；这些本地证据不随普通 Git clone 提供。
 
