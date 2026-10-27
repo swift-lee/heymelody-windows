@@ -41,7 +41,7 @@ def entry_reports() -> list[dict]:
 def image_fixture(skip_runtime: bool = False, skip_metal: bool = False):
     """Move real temporary files while simulating the external image tools."""
     with tempfile.TemporaryDirectory(prefix="macos-package-test-") as directory:
-        root = Path(directory)
+        root = Path(directory).resolve()
         repo, bundle = root / "repo", root / "HeyMelody.app"
         write(repo / "packaging/macos/README.md")
         write(bundle / "Contents/MacOS/HeyMelody")
@@ -50,6 +50,19 @@ def image_fixture(skip_runtime: bool = False, skip_metal: bool = False):
                                   skip_metal_check=skip_metal)
         commands = []
         image_root = None
+        original_readlink = os.readlink
+        simulated_links = set()
+        applications_reads = []
+
+        def link_key(path):
+            # Compare lexical absolute paths without recursing through Path.resolve().
+            return os.path.normcase(os.path.abspath(os.fsdecode(path)))
+
+        def read_link(path, *arguments, **options):
+            if not arguments and not options and link_key(path) in simulated_links:
+                applications_reads.append(Path(path))
+                return "/Applications"
+            return original_readlink(path, *arguments, **options)
 
         def run(*arguments):
             nonlocal image_root
@@ -62,6 +75,7 @@ def image_fixture(skip_runtime: bool = False, skip_metal: bool = False):
             elif arguments[:2] == ("hdiutil", "attach"):
                 mount = Path(arguments[arguments.index("-mountpoint") + 1])
                 shutil.copytree(image_root / "HeyMelody.app", mount / "HeyMelody.app")
+                simulated_links.add(link_key(mount / "Applications"))
             elif arguments[0] != "codesign" and arguments[:2] not in (
                     ("hdiutil", "verify"), ("hdiutil", "detach")):
                 raise AssertionError(f"Unexpected external command: {arguments}")
@@ -69,17 +83,34 @@ def image_fixture(skip_runtime: bool = False, skip_metal: bool = False):
         with ExitStack() as stack:
             stack.enter_context(mock.patch.object(package, "run", side_effect=run))
             stack.enter_context(mock.patch.object(Path, "symlink_to"))
-            readlink = stack.enter_context(mock.patch.object(package.os, "readlink", return_value="/Applications"))
+            readlink = stack.enter_context(mock.patch.object(package.os, "readlink", side_effect=read_link))
             check = stack.enter_context(mock.patch.object(package, "check_bundle", return_value={"success": True}))
             entries = stack.enter_context(mock.patch.object(package, "verify_entry_points", return_value=entry_reports()))
             metal = stack.enter_context(mock.patch.object(package, "verify_metal_backend",
                                                         return_value={"executed": True, "success": True}))
             stack.enter_context(redirect_stdout(io.StringIO()))
             yield argparse.Namespace(args=args, commands=commands, check=check, entries=entries,
-                                     metal=metal, readlink=readlink)
+                                     metal=metal, readlink=readlink, applications_reads=applications_reads)
 
 
 class DiskImageTests(unittest.TestCase):
+    def test_readlink_mock_preserves_non_image_path_resolution(self):
+        original_readlink = os.readlink
+        with mock.patch.object(os, "readlink", wraps=original_readlink) as delegate:
+            with image_fixture() as fixture:
+                root = fixture.args.bundle.parent
+                missing = root / "missing-unrelated-link"
+                delegate.reset_mock()
+                with self.assertRaises(OSError):
+                    package.os.readlink(missing, dir_fd=None)
+                delegate.assert_called_once_with(missing, dir_fd=None)
+                if os.name == "posix":
+                    target = write(root / "real-target")
+                    link = root / "real-unrelated-link"
+                    os.symlink(target.name, link)
+                    self.assertEqual(link.resolve(), target.resolve())
+                self.assertEqual(fixture.applications_reads, [])
+
     def test_dmg_cli_keeps_installation_checks_when_only_metal_is_skipped(self):
         arguments = ["package_macos.py", "dmg", "--repo", ".", "--bundle", "HeyMelody.app",
                      "--version", VERSION, "--output", "HeyMelody.dmg", "--skip-metal-check"]
@@ -108,7 +139,8 @@ class DiskImageTests(unittest.TestCase):
                         self.assertEqual(len(mounts), int(not skip_runtime))
                         self.assertEqual(len(detaches), int(not skip_runtime))
                         if not skip_runtime:
-                            fixture.readlink.assert_called_once()
+                            mount = Path(mounts[0][mounts[0].index("-mountpoint") + 1])
+                            self.assertEqual(fixture.applications_reads, [mount / "Applications"])
                             self.assertEqual(len(report["installedEntryPointVerification"]), 5)
                             self.assertIn("安装检查.app", str(fixture.entries.call_args.args[0]))
                             self.assertNotEqual(fixture.entries.call_args.args[0], fixture.args.bundle)
