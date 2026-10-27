@@ -1,4 +1,5 @@
 using HeyMelody.Platform;
+using HeyMelody.Diagnostics;
 using System.Text.Json;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Host;
@@ -9,10 +10,22 @@ if (args is ["--fake-peer"]) return await BackendTests.FakePeerMainAsync();
 if (args is ["--diagnostic-fake-peer", var capture]) return await DiagnosticIntegrationTests.FakePeerMainAsync(capture);
 
 int passed = 0;
-string scratch = Path.Combine(Path.GetTempPath(), "HeyMelody-HostTests-" + Guid.NewGuid().ToString("N"));
+bool efficiencyOnly = args is ["--efficiency-tests"];
+bool captureDiagnostics = efficiencyOnly || args is ["--full-diagnostics-tests"];
+bool preserveScratch = false;
+int privateLogGeneration = 0;
+string scratchRoot = captureDiagnostics ? DiagnosticScratchRoot() : Path.GetTempPath();
+string scratch = Path.Combine(scratchRoot, "HeyMelody-HostTests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(scratch);
 try
 {
+    if (captureDiagnostics) StartPrivateDiagnostics();
+    if (efficiencyOnly)
+    {
+        await HostEfficiencyTests.RunAsync(Test, scratch);
+        Console.WriteLine(JsonSerializer.Serialize(new { passed, success = true, nativeBluetoothCalls = 0 }));
+        return 0;
+    }
     if (args is ["--diagnostics-tests"])
     {
         await DiagnosticIntegrationTests.RunAsync(Test, scratch);
@@ -215,21 +228,50 @@ try
 }
 catch (Exception failure)
 {
+    preserveScratch = captureDiagnostics;
     HeyMelody.Diagnostics.DiagnosticLog.Error("Tests", "runner.failed", "Host offline test runner failed", failure);
     Console.Error.WriteLine(failure);
     return 1;
 }
 finally
 {
+    if (captureDiagnostics) DiagnosticLog.Stop("Host diagnostic test runner finished");
     string absoluteScratch = Path.GetFullPath(scratch);
-    string temporaryRoot = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-    if (absoluteScratch.StartsWith(temporaryRoot, StringComparison.OrdinalIgnoreCase))
+    string temporaryRoot = Path.GetFullPath(captureDiagnostics ? scratchRoot : Path.GetTempPath())
+        .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+    if (preserveScratch) Console.Error.WriteLine((efficiencyOnly ? "Retained efficiency test scratch: "
+        : "Retained full diagnostics test scratch: ") + absoluteScratch);
+    else if (absoluteScratch.StartsWith(temporaryRoot, StringComparison.OrdinalIgnoreCase))
         Directory.Delete(absoluteScratch, recursive: true);
+}
+
+static string DiagnosticScratchRoot()
+{
+    for (DirectoryInfo? directory = new(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        if (File.Exists(Path.Combine(directory.FullName, "tests", "HeyMelody.Host.Tests", "HeyMelody.Host.Tests.csproj")))
+            return Path.Combine(directory.FullName, "artifacts", "host-efficiency-tests");
+    throw new DirectoryNotFoundException("Diagnostic tests require a repository checkout for private artifacts.");
+}
+
+void StartPrivateDiagnostics()
+{
+    string logDirectory = Path.Combine(scratch, "diagnostics",
+        (++privateLogGeneration).ToString("D2", System.Globalization.CultureInfo.InvariantCulture));
+    Directory.CreateDirectory(logDirectory);
+    DiagnosticLog.InitializeIdentity(DiagnosticComponents.Host, "test");
+    DiagnosticLog.Configure(new() { Enabled = true, SessionId = Guid.NewGuid().ToString("N"),
+        Directory = logDirectory, Components = [DiagnosticComponents.Host] });
+    if (!DiagnosticLog.IsEnabled) throw new IOException("Private Host test logging could not be enabled.");
 }
 
 DeviceWhitelistStore Store(string name) => new(Path.Combine(scratch, name + ".json"));
 static BluetoothCandidate Audio(ulong address, string name = "耳机") => new(address, name, false, true, true, 0x404);
-async Task Test(string name, Func<Task> action) { await action(); passed++; Console.WriteLine("PASS " + name); }
+async Task Test(string name, Func<Task> action)
+{
+    // Some existing cases own and stop a temporary writer; resume only between cases.
+    if (captureDiagnostics && !DiagnosticLog.IsEnabled) StartPrivateDiagnostics();
+    await action(); passed++; Console.WriteLine("PASS " + name);
+}
 static void Check(bool condition) { if (!condition) throw new InvalidOperationException("Assertion failed."); }
 static async Task Throws<T>(Func<Task> action) where T : Exception
 {

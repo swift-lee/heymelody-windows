@@ -24,6 +24,12 @@ try
         Console.WriteLine(JsonSerializer.Serialize(new { passed, success = true, nativeBluetoothCalls = 0 }));
         return 0;
     }
+    if (args is ["--rpc-line-reader-tests"])
+    {
+        await RpcLineReaderTests.RunAsync(Test);
+        Console.WriteLine(JsonSerializer.Serialize(new { passed, success = true, nativeBluetoothCalls = 0 }));
+        return 0;
+    }
     await Test("RPC rejects an incomplete EOF record", async () =>
         await Throws<InvalidDataException>(() => new RpcLineReader(new MemoryStream("{}"u8.ToArray())).ReadLineAsync(default).AsTask()));
     await Test("RPC bounds records before deserialization", async () =>

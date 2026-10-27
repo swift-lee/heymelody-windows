@@ -30,6 +30,8 @@ Windows 端使用 .NET SDK 10，通过仓库 `NuGet.Config` 中的官方 NuGet �
 
 macOS Apple Silicon 使用相同的 .NET 10 SDK 和通用 `net10.0`，额外原生接口通过 Objective-C C ABI 提供，不要求安装 .NET macOS workload。公共平台层只依赖 BCL；Host 根据 `HeyMelodyDesktopPlatform` 选择 Windows 或 macOS 适配器。Windows RID 交叉编译仍选择 Windows TFM，不能仅按开发机 OS 选择依赖。
 
+组件路径解析只把包含 `Contents/MacOS` 的 `.app` 目录视为 macOS 应用包，普通 `src/HeyMelody.App` 源码目录仍按仓库布局查找后台。在 Windows 同时存在通用与 Windows TFM 输出时优先使用 Windows 输出；只有通用输出时保留回退。引用桌面入口的跨平台测试使用 `$(HeyMelodyDesktopTargetFramework)`，仅限 Windows 的 Probe 检查使用对应 Windows TFM。
+
 本地工具、完整原生运行时、离线验收及 DMG 入口见 [macOS 说明](macos.md)。`Build-MacOS.ps1` 使用五个独立自包含 bundle，资源集中于外层 `Contents/Resources/ResourceBundles`；Windows 继续使用原有 `Build-Client.ps1`。平台测试使用 `dotnet run --project tests/HeyMelody.Platform.Tests -c Release`，包含跨会话单例与真实 Unix 管道，受限沙箱需要允许本地进程和套接字。
 
 按修改涉及的入口构建，例如：
@@ -76,6 +78,17 @@ dotnet run --project tests/HeyMelody.Protocol.Tests/HeyMelody.Protocol.Tests.csp
 dotnet run --project tests/HeyMelody.App.Tests/HeyMelody.App.Tests.csproj -c Release
 ```
 
+Windows 本地自动检查可通过 `tools/QuietProcess.psm1` 的 `Invoke-QuietProcess` 启动子进程。它按进程设置可继承的错误模式及 WER 无界面策略，分别保存 stdout/stderr 和真实退出码；失败时在终端输出异常摘要及日志路径，并过滤终端提示音控制字符，结束后恢复调用进程的原策略。进程与输出捕获共用超时预算，捕获不完整时通过 `CaptureSucceeded=false` 和 `CaptureError` 明确报告。验证继承时读取子进程错误模式即可，无需故意触发崩溃。`FilePath` 使用绝对可执行文件路径，日志路径须为尚不存在的新文件，例如：
+
+```powershell
+Import-Module ./tools/QuietProcess.psm1
+$checkOutput = Join-Path $PWD ('artifacts/local-check-' + [Guid]::NewGuid().ToString('N'))
+$checkResult = Invoke-QuietProcess -FilePath (Join-Path ${env:ProgramFiles} 'dotnet/dotnet.exe') -ArgumentList @('run', '--project', 'tests/HeyMelody.Protocol.Tests', '-c', 'Release', '--disable-build-servers', '-p:UseSharedCompilation=false') -WorkingDirectory $PWD.Path -OutputPath (Join-Path $checkOutput 'stdout.log') -ErrorPath (Join-Path $checkOutput 'stderr.log')
+if ($checkResult.ExitCode -ne 0 -or $checkResult.TimedOut -or -not $checkResult.CaptureSucceeded) { throw '本地检查失败，请查看记录。' }
+```
+
+Host.Tests 的 `--efficiency-tests` 可单独检查能耗策略与状态写盘，`--full-diagnostics-tests` 则为完整默认流程开启测试私有日志，均位于仓库 `artifacts/host-efficiency-tests`；失败保留目录并输出路径，成功清理，不启用用户的诊断记录安排。Client.Tests 的 `--rpc-line-reader-tests` 可隔离验收真实管道的完整行、静默写端与 EOF。无头鼠标检查需等待平滑滚动的控件位置和滚动范围稳定后再点击，仍使用真实指针事件及原业务断言。
+
 平滑滚动及设备栏可分别运行定向检查（无真实设备操作），以覆盖滚轮动画、触摸板连续输入和末端惯性、有界回弹、标题触摸模拟、嵌套边界、直接定位、内容收缩后的布局和横向居中：
 
 ```powershell
@@ -90,7 +103,7 @@ dotnet run --project tests/HeyMelody.App.Tests/HeyMelody.App.Tests.csproj -c Rel
 完整默认检查入口为：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Build-Client.ps1 -TestsOnly
+pwsh.exe -NoProfile -File .\Build-Client.ps1 -TestsOnly
 ```
 
 `Build-Client.ps1` 保留原十三个默认 runner，并加入独立 Filament 便携检查，包含资源、校准、GUI 和 `Windows.OfflineChecks`。默认检查通过模拟、资源与静态断言验证实现；应按改动选取验证，完整发布不是每次编辑的默认步骤。`HeyMelody.ModelPreview.Tests` 是独立模型检查；App、DeviceManager 和模型相关的 Windows 原生窗口检查也需单独运行。具体命令和适用条件见[三维模型渲染](model-rendering.md)及[研究文档索引](research/README.md)。

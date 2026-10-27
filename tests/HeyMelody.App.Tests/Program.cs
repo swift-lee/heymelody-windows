@@ -241,8 +241,14 @@ try
     passed += frameLoopChecks;
     var gestureChecks = DeviceGestureTests.Run(session);
     passed += gestureChecks;
-    Check(passed == (OperatingSystem.IsWindows() ? 66 : 63) + demoChecks + renderingChecks + animationChecks + layoutChecks + selectionChecks
-        + gameAudioChecks + typographyChecks + frameLoopChecks + gestureChecks + ancFeatureChecks, "Every UI scenario and interaction case must finish");
+    // 54 = 21 layout/bound-control + 9 interaction + 11 visual + 10 artwork + 3 rendering-preference cases.
+    int expected = (5 * 2 * 2) + 1 + 9 + 11 + 10 + 3
+        + (HeyMelody.Platform.DesktopCapabilities.SupportsHeadsetControl ? 9 : 7)
+        + startupChecks + settingsManagementChecks
+        + demoChecks + renderingChecks + animationChecks + layoutChecks + selectionChecks
+        + gameAudioChecks + typographyChecks + frameLoopChecks + gestureChecks + ancFeatureChecks;
+    Check(passed == expected, $"Every UI scenario and interaction case must finish: passed={passed}, expected={expected}, "
+        + $"startupChecks={startupChecks}, settingsManagementChecks={settingsManagementChecks}");
     var report = new { schemaVersion = 1, version = AppVersion.Display, passed, success = true, nativeBluetoothCalls = 0,
         verificationScope = "source/mock checks; not a packaged executable or hardware execution receipt",
         screenshotScope = "headless Skia layout/content only; native titlebar and real 3D renderer pixels are not verified", screenshots = receipts };

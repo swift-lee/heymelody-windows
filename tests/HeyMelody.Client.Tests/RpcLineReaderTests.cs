@@ -187,19 +187,37 @@ internal static class RpcLineReaderTests
             using var server = new AnonymousPipeServerStream(PipeDirection.Out);
             using var client = new AnonymousPipeClientStream(PipeDirection.In, server.ClientSafePipeHandle);
             var lines = new RpcLineReader(client);
-            await server.WriteAsync(data);
-            await server.FlushAsync();
-            // The writer stays open and silent: every record must arrive anyway.
-            for (int index = 0; index < 4; index++)
+            // The pipe can hold less than the full payload, so consume while the producer writes.
+            var writing = Task.Run(async () =>
             {
-                string? line = await lines.ReadLineAsync(default).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
-                if (line is null || !line.StartsWith("{\"" + (char)('a' + index) + "\"")) throw new InvalidOperationException($"pipe {total} bytes, record {index}: {line?.Length}");
+                await server.WriteAsync(data);
+                await server.FlushAsync();
+            });
+            var verified = false;
+            try
+            {
+                // The writer stays open and silent: every record must arrive anyway.
+                for (int index = 0; index < 4; index++)
+                {
+                    string? line = await lines.ReadLineAsync(default).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+                    if (line is null || !line.StartsWith("{\"" + (char)('a' + index) + "\"")) throw new InvalidOperationException($"pipe {total} bytes, record {index}: {line?.Length}");
+                }
+                await writing;
+                var next = lines.ReadLineAsync(default).AsTask();
+                await Task.Delay(100);
+                if (next.IsCompleted) throw new InvalidOperationException("A record appeared without data.");
+                server.Dispose();
+                if (await next.WaitAsync(TimeSpan.FromSeconds(5)) is not null) throw new InvalidOperationException("Closed pipe did not end the stream.");
+                verified = true;
             }
-            var next = lines.ReadLineAsync(default).AsTask();
-            await Task.Delay(100);
-            if (next.IsCompleted) throw new InvalidOperationException("A record appeared without data.");
-            server.Dispose();
-            if (await next.WaitAsync(TimeSpan.FromSeconds(5)) is not null) throw new InvalidOperationException("Closed pipe did not end the stream.");
+            finally
+            {
+                // Release a blocked producer before observing it; preserve the original test failure.
+                client.Dispose();
+                server.Dispose();
+                try { await writing; }
+                catch (Exception) when (!verified) { }
+            }
         }
     }
 
