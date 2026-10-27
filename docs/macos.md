@@ -35,6 +35,8 @@ push 和手动运行成功后，在该次 Actions 的 Artifacts 下载 macOS 包
 
 发布任务沿用 Windows CI 的 `-SkipTests` 策略，另外执行 Platform、MacOS 离线检查和打包专项测试；Filament job 保留已有的渲染离线验收。它们不代表完整应用测试集或真实耳机通信通过。
 
+跨会话单例测试让父子进程继承同一运行时用户同步存储根，同时保留不同 Unix session 和工作目录。自 .NET 10.0.13 起，macOS 的用户私有 `TMPDIR` 会影响用户域 mutex 的存储位置，不能在该测试中无意更换；绝对管道测试仍单独覆盖不同 `TMPDIR`，见 [.NET 目录规则说明](https://github.com/dotnet/docs/issues/56396)。
+
 无人值守打包使用 `-SkipMetalCheck`，仅跳过真实 Metal probe，仍执行五入口 `--verify-installation`、DMG 挂载、`ditto` 安装副本及副本完整复验。收据中 `runtimeChecksExecuted=true`、`metalProbeExecuted=false`，并说明 Metal 显式跳过；真实蓝牙保持未验证。普通本地构建不传此参数时继续执行 Metal 检查。原有 `-SkipRuntimeChecks` 仍跳过全部运行和安装检查，两者同时指定时以后者为准。
 
 打包器在签名前恢复 bundle 内 probe 的执行位，校验器要求 probe 可执行；下载的原生来源文件及其清单保持原样。签后 bundle 清单描述签后文件，来源清单 SHA 仍指向原始下载产物。
