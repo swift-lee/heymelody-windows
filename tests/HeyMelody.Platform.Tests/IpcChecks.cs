@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using HeyMelody.Platform;
@@ -13,22 +14,27 @@ internal static class IpcChecks
         if (OperatingSystem.IsWindows()) throw new SkipException("Real os.setsid check applies to Unix session scope.");
         using var scope = new TestDirectory(); var name = DesktopRuntime.MutexName("Test-" + Guid.NewGuid().ToString("N"));
         using var owner = DesktopRuntime.CreateMutex(name, out var created);
-        Program.Require(created && owner.WaitOne(0), "The initial isolated singleton could not be acquired.");
+        Program.Require(created && owner.WaitOne(0), "The initial isolated singleton could not be acquired. "
+            + JsonSerializer.Serialize(RuntimeSnapshot()));
         bool held = true;
         try
         {
-            using (var child = Program.ReadChild(Program.ChildStart("--mutex-child", name, newSession: true, scope.DirectoryAt("child-one"))))
+            // User-scoped macOS mutexes need the same temporary backing root across Unix sessions.
+            using (var child = Program.ReadChild(Program.ChildStart("--mutex-child", name, newSession: true,
+                scope.DirectoryAt("child-one"), inheritTemporaryDirectory: true)))
             {
                 var data = child.RootElement;
-                Program.Require(data.GetProperty("sessionId").GetInt32() != Program.SessionId, "The child did not enter a different Unix session.");
-                Program.Require(data.GetProperty("opened").GetBoolean() && !data.GetProperty("createdNew").GetBoolean(), "Existing singleton was not discovered across processes and sessions.");
-                Program.Require(!data.GetProperty("acquired").GetBoolean(), "A second process acquired an owned singleton.");
-                Program.Require(data.GetProperty("userKey").GetString() == DesktopRuntime.UserSessionKey, "User identity depends on the Unix session.");
+                string diagnostic = DescribeChild(data);
+                Program.Require(data.GetProperty("sessionId").GetInt32() != Program.SessionId, "The child did not enter a different Unix session. " + diagnostic);
+                Program.Require(data.GetProperty("opened").GetBoolean() && !data.GetProperty("createdNew").GetBoolean(), "Existing singleton was not discovered across processes and sessions. " + diagnostic);
+                Program.Require(!data.GetProperty("acquired").GetBoolean(), "A second process acquired an owned singleton. " + diagnostic);
+                Program.Require(data.GetProperty("userKey").GetString() == DesktopRuntime.UserSessionKey, "User identity depends on the Unix session. " + diagnostic);
             }
             owner.ReleaseMutex(); held = false;
-            using var released = Program.ReadChild(Program.ChildStart("--mutex-child", name, newSession: true, scope.DirectoryAt("child-two")));
+            using var released = Program.ReadChild(Program.ChildStart("--mutex-child", name, newSession: true,
+                scope.DirectoryAt("child-two"), inheritTemporaryDirectory: true));
             Program.Require(released.RootElement.GetProperty("opened").GetBoolean() && released.RootElement.GetProperty("acquired").GetBoolean(),
-                "A later process could not acquire the released singleton.");
+                "A later process could not acquire the released singleton. " + DescribeChild(released.RootElement));
         }
         finally { if (held) owner.ReleaseMutex(); }
     }
@@ -39,9 +45,29 @@ internal static class IpcChecks
         using var mutex = DesktopRuntime.CreateMutex(name, out var createdNew);
         bool acquired = mutex.WaitOne(200);
         if (acquired) mutex.ReleaseMutex();
-        Console.WriteLine(JsonSerializer.Serialize(new { opened, createdNew, acquired, sessionId = Program.SessionId, userKey = DesktopRuntime.UserSessionKey }));
+        Console.WriteLine(JsonSerializer.Serialize(new { opened, createdNew, acquired, sessionId = Program.SessionId,
+            userKey = DesktopRuntime.UserSessionKey, runtime = RuntimeSnapshot() }));
         return 0;
     }
+
+    private static string DescribeChild(JsonElement child) => JsonSerializer.Serialize(new
+    {
+        parent = new { sessionId = Program.SessionId, userKey = DesktopRuntime.UserSessionKey, runtime = RuntimeSnapshot() },
+        child
+    });
+
+    private static object RuntimeSnapshot() => new
+    {
+        frameworkDescription = RuntimeInformation.FrameworkDescription,
+        runtimeIdentifier = RuntimeInformation.RuntimeIdentifier,
+        osArchitecture = RuntimeInformation.OSArchitecture.ToString(),
+        processArchitecture = RuntimeInformation.ProcessArchitecture.ToString(),
+        processPath = Environment.ProcessPath,
+        runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory(),
+        TMPDIR = Environment.GetEnvironmentVariable("TMPDIR"),
+        DOTNET_HOST_PATH = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH"),
+        DOTNET_ROOT = Environment.GetEnvironmentVariable("DOTNET_ROOT")
+    };
 
     public static async Task AbsolutePipeAsync()
     {

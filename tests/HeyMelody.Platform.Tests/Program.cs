@@ -44,7 +44,8 @@ internal static class Program
         throw new InvalidOperationException("Expected IOException was not raised.");
     }
 
-    internal static ProcessStartInfo ChildStart(string command, string value, bool newSession, string temporaryDirectory)
+    internal static ProcessStartInfo ChildStart(string command, string value, bool newSession, string temporaryDirectory,
+        bool inheritTemporaryDirectory = false)
     {
         var executable = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
         if (string.IsNullOrWhiteSpace(executable) || !File.Exists(executable)) executable = Environment.ProcessPath!;
@@ -64,7 +65,8 @@ internal static class Program
             start.ArgumentList.Add(executable);
         }
         foreach (var argument in childArguments) start.ArgumentList.Add(argument);
-        start.Environment["TMPDIR"] = temporaryDirectory + Path.DirectorySeparatorChar;
+        if (!inheritTemporaryDirectory)
+            start.Environment["TMPDIR"] = temporaryDirectory + Path.DirectorySeparatorChar;
         return start;
     }
 
