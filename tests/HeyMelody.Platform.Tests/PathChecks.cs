@@ -82,6 +82,17 @@ internal static class PathChecks
             Program.Require(actual.FileName == Path.GetFullPath(expected) && actual.WorkingDirectory == Path.GetDirectoryName(Path.GetFullPath(expected)), "A renamed bundle component resolved incorrectly: " + component);
         }
         Program.ThrowsIOException(() => ApplicationPaths.ResolveComponent("HeyMelody.Missing", helperBase));
+
+        var outerWithoutHelpers = scope.DirectoryAt("Container.app");
+        Directory.CreateDirectory(Path.Combine(outerWithoutHelpers, "Contents", "MacOS"));
+        var inner = Path.Combine(outerWithoutHelpers, "Contents", "PlugIns", "Standalone.app");
+        var innerBase = Path.Combine(inner, "Contents", "MacOS");
+        TestDirectory.FileAt(Path.Combine(innerBase, Executable("HeyMelody")));
+        Program.Require(ApplicationPaths.FindApplicationBundle(innerBase) == inner,
+            "An outer bundle without shared helpers replaced the nearest valid inner bundle.");
+        Program.Require(ApplicationPaths.ResolveComponent("HeyMelody.App", innerBase).FileName
+                == Path.GetFullPath(Path.Combine(innerBase, Executable("HeyMelody"))),
+            "A valid standalone inner bundle did not resolve its own executable.");
     }
 
     public static void SourceFallback()
@@ -92,6 +103,8 @@ internal static class PathChecks
         var host = Path.Combine(repo, "src/HeyMelody.Host/bin/Release/net10.0/HeyMelody.Host.dll");
         var app = Path.Combine(repo, "src/HeyMelody.App/bin/Release/net10.0", RuntimeInformation.RuntimeIdentifier, "HeyMelody.dll");
         var manager = Path.Combine(repo, "src/HeyMelody.DeviceManager/bin/Debug/net10.0/HeyMelody.DeviceManager.dll");
+        var windowsHost = Path.Combine(repo, "src/HeyMelody.Host/bin/Release/net10.0-windows10.0.19041.0/HeyMelody.Host.dll");
+        Directory.CreateDirectory(Path.GetDirectoryName(windowsHost)!);
         foreach (var path in new[] { host, app, manager }) TestDirectory.FileAt(path);
         foreach (var (component, expected) in new[] { ("HeyMelody.Host", host), ("HeyMelody.App", app), ("HeyMelody.DeviceManager", manager) })
         {
@@ -99,6 +112,36 @@ internal static class PathChecks
             Program.Require(actual.ArgumentList.Count == 1 && actual.ArgumentList[0] == Path.GetFullPath(expected), "Source DLL fallback is incorrect: " + component);
         }
         Program.Require(ApplicationPaths.GetResourceRoot(caller) == repo, "Source resource root did not resolve the checkout.");
+
+        var appCaller = Path.Combine(repo, "src/HeyMelody.App/bin/Release/net10.0");
+        Program.Require(ApplicationPaths.FindApplicationBundle(appCaller) is null,
+            "The ordinary HeyMelody.App source project was mistaken for a macOS bundle.");
+        Program.Require(ApplicationPaths.GetResourceRoot(appCaller) == repo,
+            "An App source caller did not resolve the checkout resource root.");
+        Program.Require(ApplicationPaths.ResolveComponent("HeyMelody.Host", appCaller).ArgumentList.Single()
+                == Path.GetFullPath(host),
+            "An App source caller failed to fall back to the available portable Host output.");
+
+        TestDirectory.FileAt(windowsHost);
+        var preferredHost = OperatingSystem.IsWindows() ? windowsHost : host;
+        Program.Require(ApplicationPaths.ResolveComponent("HeyMelody.Host", caller).ArgumentList.Single()
+                == Path.GetFullPath(preferredHost),
+            "Windows did not prefer its Windows TFM, or a non-Windows host changed its portable TFM policy.");
+
+        var ordinaryParent = scope.DirectoryAt("Ordinary Parent.app");
+        Directory.CreateDirectory(Path.Combine(ordinaryParent, "Contents", "Helpers"));
+        var loose = Path.Combine(ordinaryParent, "published client");
+        var looseApp = Path.Combine(loose, Executable("HeyMelody"));
+        var looseHost = Path.Combine(loose, "backend", Executable("HeyMelody.Host"));
+        TestDirectory.FileAt(looseApp); TestDirectory.FileAt(looseHost);
+        Directory.CreateDirectory(Path.Combine(loose, "ResourceBundles"));
+        Program.Require(ApplicationPaths.FindApplicationBundle(loose) is null,
+            "An ordinary .app ancestor without Contents/MacOS was mistaken for a bundle.");
+        Program.Require(ApplicationPaths.ResolveComponent("HeyMelody.App", loose).FileName == Path.GetFullPath(looseApp)
+                && ApplicationPaths.ResolveComponent("HeyMelody.Host", loose).FileName == Path.GetFullPath(looseHost),
+            "A loose publish layout beneath an ordinary .app directory did not resolve its App and backend Host.");
+        Program.Require(ApplicationPaths.GetResourceRoot(loose) == loose,
+            "A loose publish layout beneath an ordinary .app directory lost its resource root.");
     }
 
     private static string Executable(string name) => name + (OperatingSystem.IsWindows() ? ".exe" : "");

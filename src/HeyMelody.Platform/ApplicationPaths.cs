@@ -30,9 +30,10 @@ public static class ApplicationPaths
         string? candidate = null;
         foreach (var directory in Ancestors(baseDirectory))
         {
-            if (!directory.Name.EndsWith(".app", StringComparison.OrdinalIgnoreCase)) continue;
-            candidate = directory.FullName;
-            if (Directory.Exists(Path.Combine(candidate, "Contents", "Helpers"))) return candidate;
+            if (!directory.Name.EndsWith(".app", StringComparison.OrdinalIgnoreCase)
+                || !Directory.Exists(Path.Combine(directory.FullName, "Contents", "MacOS"))) continue;
+            candidate ??= directory.FullName;
+            if (Directory.Exists(Path.Combine(directory.FullName, "Contents", "Helpers"))) return directory.FullName;
         }
         return candidate;
     }
@@ -78,7 +79,9 @@ public static class ApplicationPaths
                 if (!Directory.Exists(output)) continue;
                 var frameworks = Directory.EnumerateDirectories(output, "net10.0*")
                     .Where(p => OperatingSystem.IsWindows() ? Path.GetFileName(p).Contains("windows") || Path.GetFileName(p) == "net10.0"
-                        : Path.GetFileName(p) == "net10.0").OrderBy(p => p, StringComparer.Ordinal);
+                        : Path.GetFileName(p) == "net10.0")
+                    .OrderBy(p => OperatingSystem.IsWindows() && Path.GetFileName(p) == "net10.0" ? 1 : 0)
+                    .ThenBy(p => p, StringComparer.Ordinal);
                 foreach (var framework in frameworks)
                 {
                     var dll = Path.Combine(framework, assemblyName + ".dll");

@@ -133,7 +133,7 @@ internal static class WriteQueueTests
             Check(service.Actions.Count == 1 && !click.IsCompleted, "The click chains after the save instead of being lost.");
             gate.SetResult(); await dialogs.AlertEntered.Task.WaitAsync(Deadline);
             dialogs.AlertRelease.SetResult(); await Task.WhenAll(save, click).WaitAsync(Deadline);
-            Check(service.Actions.Count == 1 && vm.SelectedPreset?.Key == 0, "The unconfirmed save discards the click.");
+            Check(service.Actions.Count == 1 && vm.SelectedPreset?.Key == 0, $"The unconfirmed save discards the click. Actions.Count={service.Actions.Count}; SelectedPreset.Key={vm.SelectedPreset?.Key.ToString() ?? "<null>"}.");
         });
     }
 

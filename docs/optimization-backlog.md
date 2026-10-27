@@ -118,6 +118,8 @@ UI-00 为 2026-10-22 界面性能轮（起点 `a13e236`）已完成项的汇总�
 | BUG-12 | `src/HeyMelody.Client/ClientBridge.cs` `EnsureConnectionAsync` @1840a68 | `CommitStopping` 取消 `_stopConnecting` 后，等待连接门的调用方收到 `OperationCanceledException`，此前为 `IOException`，调用方可能误判为用户取消（静态分析，影响未确认） | 统一异常语义 | 需逐一核对调用方处理 | 待处理 | 2026-10-25 日志与退出审计（顺带发现） |
 | BUG-13 | `tests/HeyMelody.App.Tests/ArtworkPersistenceTests.cs` 设置卡片检查 @1840a68 | `--artwork-persistence-tests` 断言设置对话框恰有 8 个带图标的 `FASettingsExpanderItem`；e75453c 增加 Basic Render 卡片后顶层已有 9 张，且该查询会计入展开器内部条目，基线与本轮均在“Every setting, including the 3D frame rate, is an icon card.”失败（Linux 无头复现） | 恢复该模式其余检查的覆盖 | 断言应改为只统计顶层卡片并按名称核对，需同步确认诊断日志区的新布局 | 待处理 | 2026-10-25 日志与退出审计（顺带发现） |
 
+2026-10-26 合并后的 Windows 本地复核仍复现 BUG-06／BUG-07：完整 Host 检查先后在 `HostEfficiencyTests:42`、`:57` 等待落盘超时，效率隔离入口通过，随后完整私有诊断模式 132 项通过，BUG-06 根因仍未闭合；Client 失败消息现分别记录 `Actions.Count=1`、`SelectedPreset.Key=2`，将 BUG-07 范围缩小到显示恢复的观测时序。两处相关产品实现与合并前 `2494901` 相同，保留原业务断言。完整结果和失败日志索引见[本地验证档案](../artifacts/local-windows-validation-20261026/README.md)，不随 clone 提供。
+
 ## macOS 后续资源验证（MAC）
 
 以下条目以移植前 `0cabb0b` 为基线，涉及本轮新增文件，按符号定位。
