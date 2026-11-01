@@ -9,6 +9,7 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
 }
 $OutputPath = [IO.Path]::GetFullPath($OutputPath)
 Import-Module (Join-Path $repoRoot 'tools/filament/FilamentArtifactCache.psm1') -Force
+Import-Module (Join-Path $repoRoot 'tools/ci/ArtifactPolicy.psm1') -Force
 $checks = [Collections.Generic.List[object]]::new()
 $httpReceipts = [Collections.Generic.List[object]]::new()
 $scratchParent = [IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetTempPath()) 'heymelody-filament-cache-tests'))
@@ -370,7 +371,7 @@ try {
 
     foreach ($event in @('push', 'workflow_dispatch')) {
         Invoke-Check "$event publishes trusted native cache and main application packages for seven days" {
-            $policy = Get-FilamentArtifactPolicy -EventName $event -GitRef refs/heads/main
+            $policy = Get-CiArtifactPolicy -EventName $event -GitRef refs/heads/main
             Assert-True $policy.CachePublishEligible 'Trusted builds should publish native cache'
             Assert-True $policy.PackagePublishEligible 'Trusted builds should publish application packages'
             Assert-Equal $policy.PackageRetentionDays 7 'Main package retention'
@@ -380,7 +381,7 @@ try {
 
     foreach ($ref in @('refs/heads/feature/cache', 'refs/tags/v0.9.2', 'refs/heads/main-feature')) {
         Invoke-Check "Non-main ref $ref retains packages for one day" {
-            $policy = Get-FilamentArtifactPolicy -EventName push -GitRef $ref
+            $policy = Get-CiArtifactPolicy -EventName push -GitRef $ref
             Assert-True $policy.PackagePublishEligible 'Non-main push still publishes its package'
             Assert-Equal $policy.PackageRetentionDays 1 'Only the exact main branch gets seven days'
         }
@@ -388,7 +389,7 @@ try {
 
     foreach ($event in @('pull_request', 'pull_request_target', 'schedule')) {
         Invoke-Check "$event cannot publish trusted cache or duplicate packages" {
-            $policy = Get-FilamentArtifactPolicy -EventName $event -GitRef refs/heads/main
+            $policy = Get-CiArtifactPolicy -EventName $event -GitRef refs/heads/main
             Assert-True (-not $policy.CachePublishEligible) 'Untrusted/unsupported event cannot populate trusted cache'
             Assert-True (-not $policy.PackagePublishEligible) 'PR does not publish application packages'
             Assert-Equal $policy.ReceiptRetentionDays 1 'Receipt retention'
@@ -440,7 +441,7 @@ try {
         Assert-Equal $state.Builds 0 'A warm cache must skip the native builder'
         Assert-Equal $state.Downloads 1 'One valid artifact download is sufficient'
         Assert-True (-not $warm.CachePublishEligible) 'PR must not seed the trusted cache pool'
-        Assert-True (-not $warm.PackagePublishEligible) 'PR must not duplicate package uploads'
+        Assert-Equal $warm.CacheRetentionDays 30 'PR restore preserves the native cache retention policy'
         Assert-Equal $warm.SourceRunId 101L 'Provenance should identify the producer run'
     }
 

@@ -18,16 +18,7 @@
     <PackageReference Include="SmoothScroll.Avalonia.Interaction" Version="12.0.0.15-heymelody.2" />
     <ProjectReference Include="../HeyMelody.Client/HeyMelody.Client.csproj" />
     <ProjectReference Include="../HeyMelody.Artwork/HeyMelody.Artwork.csproj" />
-    <!-- Rendering and typography setup are compiled from the main window's sources, not a new assembly. -->
-    <Compile Include="../HeyMelody.App/DesktopWindowBackdrop.cs" Link="Shared/DesktopWindowBackdrop.cs" />
-    <Compile Include="../HeyMelody.App/DesktopWindowIntegration.cs" Link="Shared/DesktopWindowIntegration.cs" />
-    <Compile Include="../HeyMelody.App/RenderingSetup.cs" Link="Shared/RenderingSetup.cs" />
-    <Compile Include="../HeyMelody.App/WindowsWarpAdapterResolver.cs" Link="Shared/WindowsWarpAdapterResolver.cs" />
-    <Compile Include="../HeyMelody.App/Typography.cs" Link="Shared/Typography.cs" />
-    <Compile Include="../HeyMelody.App/UiMetrics.cs" Link="Shared/UiMetrics.cs" />
-    <Compile Include="../HeyMelody.App/SmoothScrolling.cs" Link="Shared/SmoothScrolling.cs" />
-    <Compile Include="../HeyMelody.App/UiDiagnosticLogging.cs" Link="Shared/UiDiagnosticLogging.cs" />
-    <AvaloniaXaml Include="../HeyMelody.App/Styles/HeyMelodyTheme.axaml" Link="Styles/HeyMelodyTheme.axaml" />
+    <ProjectReference Include="../HeyMelody.Desktop/HeyMelody.Desktop.csproj" />
     <AvaloniaResource Include="../HeyMelody.App/Assets/HeyMelody.ico" Link="Assets/HeyMelody.ico" />
     <InternalsVisibleTo Include="HeyMelody.DeviceManager.Tests" />
   </ItemGroup>

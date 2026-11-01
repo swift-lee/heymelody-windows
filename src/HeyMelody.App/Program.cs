@@ -83,7 +83,7 @@ internal static class Program
 
     public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<App>()
         .UsePlatformDetect().With(new MacOSPlatformOptions { ShowInDock = true })
-        .UseHeyMelodyDiagnostics().UseHeyMelodyRendering().UseHeyMelodyTypography();
+        .UseHeyMelodyDiagnostics().UseHeyMelodyRendering(UiRenderingPreferenceReader.Load()).UseHeyMelodyTypography();
 
     public static AppBuilder BuildHeadlessApp()
     {
@@ -93,6 +93,6 @@ internal static class Program
         HeroLoadingIndicator.Delay = TimeSpan.Zero;
         return AppBuilder.Configure<App>()
             .UseSkia().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
-            .UseHeyMelodyRendering().UseHeyMelodyTypography();
+            .UseHeyMelodyRendering(UiRenderingPreferenceReader.Load()).UseHeyMelodyTypography();
     }
 }

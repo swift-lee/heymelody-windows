@@ -3,6 +3,6 @@
              x:Class="HeyMelodyWindows.DeviceManager.DeviceManagerApp">
   <Application.Styles>
     <styling:FluentAvaloniaTheme PreferSystemTheme="True" PreferUserAccentColor="True" />
-    <StyleInclude Source="avares://HeyMelody.DeviceManager/Styles/HeyMelodyTheme.axaml" />
+    <StyleInclude Source="avares://HeyMelody.Desktop/Styles/HeyMelodyTheme.axaml" />
   </Application.Styles>
 </Application>

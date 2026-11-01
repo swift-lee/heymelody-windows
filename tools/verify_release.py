@@ -181,6 +181,23 @@ def checked_file(directory, relative):
     return path
 
 
+def verify_shared_desktop(entrypoints):
+    desktop_release = any(
+        any(key.startswith("HeyMelody.Desktop/") for key in libraries)
+        or (directory / "HeyMelody.Desktop.dll").exists()
+        for _, directory, libraries in entrypoints
+    )
+    if not desktop_release:
+        return
+    expected = {"HeyMelody", "HeyMelody.DeviceManager", "HeyMelody.Host",
+                "HeyMelody.FitTest", "HeyMelody.HearingSetup"}
+    assert {name for name, _, _ in entrypoints} == expected, "Incomplete shared desktop entrypoints"
+    for name, directory, libraries in entrypoints:
+        checked_file(directory, "HeyMelody.Desktop.dll")
+        assert any(key.startswith("HeyMelody.Desktop/") for key in libraries), \
+            "Missing shared desktop dependency: " + name
+
+
 def verify_resource_bundle(directory):
     bundle = directory / "ResourceBundles"
     index = checked_file(bundle, "artwork.json")
@@ -271,6 +288,7 @@ def verify(root, package, evidence=None, architectures=("x64", "x86", "arm64")):
         entrypoints = [("HeyMelody", folder), ("HeyMelody.DeviceManager", folder), ("HeyMelody.Host", host.parent)]
         entrypoints += [(path.stem, folder) for path in components]
         runtime_versions = set()
+        desktop_entrypoints = []
         for name, directory in entrypoints:
             runtime = json.loads((directory / (name + ".runtimeconfig.json")).read_text("utf-8-sig"))["runtimeOptions"]
             assert runtime["tfm"] == "net10.0" and runtime.get("includedFrameworks")
@@ -280,14 +298,16 @@ def verify(root, package, evidence=None, architectures=("x64", "x86", "arm64")):
             assert dependencies["runtimeTarget"]["name"].endswith("/win-" + arch)
             assert (directory / "LICENSE.txt").is_file() and (directory / "THIRD-PARTY-NOTICES.txt").is_file()
             libraries = dependencies["libraries"]
+            desktop_entrypoints.append((name, directory, libraries))
             assert any(key.startswith("Avalonia/") for key in libraries)
             assert any(key.startswith("FluentAvaloniaUI/") for key in libraries)
             if name == "HeyMelody":
                 gui_dependencies = dependencies
             elif directory == folder:
-                for name, item in libraries.items():
+                for library, item in libraries.items():
                     if item["type"] == "package":
-                        assert name in gui_dependencies["libraries"] and item["sha512"] == gui_dependencies["libraries"][name]["sha512"]
+                        assert library in gui_dependencies["libraries"] and item["sha512"] == gui_dependencies["libraries"][library]["sha512"]
+        verify_shared_desktop(desktop_entrypoints)
         assert len(runtime_versions) == 1, "Entrypoints do not share the exact runtime"
         renderer_packages = [key.split("/", 1) for key in gui_dependencies["libraries"]
                              if key.split("/", 1)[0].casefold() == "ava3dcontrol"]

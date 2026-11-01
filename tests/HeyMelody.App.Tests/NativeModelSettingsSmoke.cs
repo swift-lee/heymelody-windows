@@ -39,7 +39,7 @@ internal static class NativeModelSettingsSmoke
                 ModelRenderingPreferences.Reload();
                 Check(ModelRenderingPreferences.Backend == FilamentBackend.Vulkan
                     && ModelRenderingPreferences.FrameRate == ModelFrameRate.Unlimited, "Isolated preferences default to Vulkan and unlimited.");
-                AppBuilder.Configure<SmokeApplication>().UsePlatformDetect().UseHeyMelodyRendering().UseHeyMelodyTypography()
+                AppBuilder.Configure<SmokeApplication>().UsePlatformDetect().UseHeyMelodyRendering(false).UseHeyMelodyTypography()
                     .StartWithClassicDesktopLifetime([], ShutdownMode.OnExplicitShutdown);
             }
             catch (Exception error) { _state.Failure ??= error.ToString(); }

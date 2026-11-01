@@ -27,10 +27,49 @@ env:
   DOTNET_NOLOGO: "true"
   DOTNET_CLI_TELEMETRY_OPTOUT: "true"
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
+  NUGET_PACKAGES: ${{ github.workspace }}/artifacts/nuget-cache
 
 jobs:
+  checks:
+    name: Windows offline checks
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up the locked .NET SDK
+        uses: ./.github/actions/setup-build-sdk
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Restore NuGet cache
+        uses: actions/cache@v4
+        with:
+          path: artifacts/nuget-cache
+          key: nuget-Windows-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Build.targets', 'NuGet.Config') }}
+          restore-keys: nuget-Windows-
+      - name: Check CI policy and workflow contracts
+        shell: pwsh
+        run: ./tools/ci/tests/Test-CiContracts.ps1 -OutputPath artifacts/ci-windows/ci-contracts.json
+      - name: Check native cache trust and retention rules
+        shell: pwsh
+        run: ./tools/filament/tests/Test-FilamentArtifactCache.ps1 -OutputPath artifacts/ci-windows/filament-cache-checks.json
+      - name: Run the Windows offline profile once
+        shell: pwsh
+        run: ./tools/ci/Invoke-OfflineTests.ps1 -Profile Windows -OutputRoot artifacts/ci-windows/offline-tests
+      - name: Upload offline results and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-offline-checks-${{ github.sha }}
+          path: artifacts/ci-windows/
+          if-no-files-found: warn
+          retention-days: 1
+
   package:
     name: Package (${{ matrix.architecture }})
+    needs: checks
     runs-on: windows-latest
     timeout-minutes: 60
     strategy:
@@ -40,27 +79,41 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
-      - name: Set up .NET 10
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
-      # NuGet dependencies and the native Filament runtime use separate caches.
+      - name: Set up the locked .NET SDK
+        uses: ./.github/actions/setup-build-sdk
       - name: Restore NuGet cache
         uses: actions/cache@v4
         with:
           path: artifacts/nuget-cache
-          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.targets', 'NuGet.Config') }}
-          restore-keys: nuget-${{ runner.os }}-
-      - name: Test cache and retention rules
+          key: nuget-Windows-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Build.targets', 'NuGet.Config') }}
+          restore-keys: nuget-Windows-
+      - name: Determine application artifact policy
+        id: policy
         shell: pwsh
-        run: ./tools/filament/tests/Test-FilamentArtifactCache.ps1 -OutputPath 'artifacts/filament-cache-checks/${{ matrix.architecture }}.json'
-      # Reuse a verified runtime when available; otherwise compile it in this job.
+        run: ./tools/ci/Write-ArtifactPolicy.ps1
       - name: Prepare Filament runtime
         id: filament
         uses: ./.github/actions/filament-runtime
         with:
           runtime-identifier: win-${{ matrix.architecture }}
           force-rebuild: ${{ inputs.force_native_rebuild || false }}
+      - name: Verify native input and execute matching-host ABI check
+        shell: pwsh
+        env:
+          FILAMENT_RUNTIME_ROOT: ${{ steps.filament.outputs.runtime-root }}
+        run: |
+          $output = Join-Path $env:GITHUB_WORKSPACE 'artifacts/ci-windows'
+          New-Item -ItemType Directory -Path $output -Force | Out-Null
+          $native = Join-Path $env:FILAMENT_RUNTIME_ROOT 'runtimes/win-${{ matrix.architecture }}/native'
+          ./tools/Verify-FilamentRuntime.ps1 -Directory $native -RuntimeIdentifier win-${{ matrix.architecture }} -RequireCurrent |
+            ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'native-input.json') -Encoding utf8NoBOM
+          if ('${{ matrix.architecture }}' -eq 'x64') {
+            dotnet run --project tests/HeyMelody.Rendering.Filament.Tests -c Release --disable-build-servers -p:UseSharedCompilation=false -- --native-abi $native --output-dir (Join-Path $output 'native-abi')
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          } else {
+            [ordered]@{ runtimeIdentifier = 'win-arm64'; nativeAbiVerified = $false; nativeGpuVerified = $false; scope = 'Static verification only: cross-compiled on Windows x64; no ARM64 hardware execution.' } |
+              ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'native-execution.json') -Encoding utf8NoBOM
+          }
       - name: Resolve package version
         id: version
         shell: pwsh
@@ -69,51 +122,42 @@ jobs:
         run: |
           $version = $env:REQUESTED_VERSION
           if ([string]::IsNullOrWhiteSpace($version)) {
-            $default = Select-String -LiteralPath Build-Client.ps1 -Pattern "\[string\]\`$Version = '(\d+\.\d+\.\d+)'" | Select-Object -First 1
+            $default = Select-String -LiteralPath Build-Client.ps1 -Pattern "\[string\]\`$Version = '(\d+\.\d+\.\d+)'"
             if (-not $default) { throw 'Build-Client.ps1 has no default version.' }
             $version = $default.Matches[0].Groups[1].Value
           }
           if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid version: $version" }
           "value=$version" >> $env:GITHUB_OUTPUT
           "commit=$($env:GITHUB_SHA.Substring(0, 7))" >> $env:GITHUB_OUTPUT
-      # ARM64 is cross-compiled on the x64 runner; native hardware execution is not implied.
       - name: Build application package
         shell: pwsh
         env:
           FILAMENT_RUNTIME_ROOT: ${{ steps.filament.outputs.runtime-root }}
-        run: ./Build-Client.ps1 -Version '${{ steps.version.outputs.value }}' -Architectures '${{ matrix.architecture }}' -FilamentRuntimeRoot $env:FILAMENT_RUNTIME_ROOT -SkipTests
+        run: ./Build-Client.ps1 -Version '${{ steps.version.outputs.value }}' -Architectures '${{ matrix.architecture }}' -FilamentRuntimeRoot $env:FILAMENT_RUNTIME_ROOT -NativeAbiOutputRoot artifacts/ci-windows/build-native-abi -SkipTests
       - name: Verify package contents
         shell: pwsh
-        run: ./tools/Verify-Release.ps1 -Version '${{ steps.version.outputs.value }}' -Architectures '${{ matrix.architecture }}' -OutputPath 'artifacts/filament-cache-checks/release-${{ matrix.architecture }}-static.json'
-      # Push/manual runs publish packages: main keeps 7 days, other refs keep 1 day.
+        run: ./tools/Verify-Release.ps1 -Version '${{ steps.version.outputs.value }}' -Architectures '${{ matrix.architecture }}' -OutputPath artifacts/ci-windows/release-static.json
       - name: Upload application package
-        if: steps.filament.outputs.package-publish-eligible == 'true'
+        if: steps.policy.outputs.package-publish-eligible == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: HeyMelody_Windows_${{ steps.version.outputs.value }}_${{ matrix.architecture }}_${{ steps.version.outputs.commit }}
           path: release/HeyMelody_Windows_${{ steps.version.outputs.value }}/
           if-no-files-found: error
-          retention-days: ${{ steps.filament.outputs.package-retention-days }}
-          overwrite: true
-      # PRs still build and verify; check results from every event are kept for 1 day.
-      - name: Upload verification results
+          retention-days: ${{ steps.policy.outputs.package-retention-days }}
+      - name: Upload package verification results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-checks-${{ matrix.architecture }}-${{ steps.version.outputs.commit }}
-          path: |
-            artifacts/filament-cache-checks/release-${{ matrix.architecture }}-static.json
-            artifacts/filament-cache-checks/${{ matrix.architecture }}.json
-          if-no-files-found: error
-          retention-days: ${{ steps.filament.outputs.receipt-retention-days }}
-          overwrite: true
+          name: windows-checks-${{ matrix.architecture }}-${{ github.sha }}
+          path: artifacts/ci-windows/
+          if-no-files-found: warn
+          retention-days: 1
       - name: Write package summary
         shell: pwsh
         env:
-          HM_PUBLISH_PACKAGE: ${{ steps.filament.outputs.package-publish-eligible }}
-          HM_PACKAGE_RETENTION: ${{ steps.filament.outputs.package-retention-days }}
+          HM_PUBLISH_PACKAGE: ${{ steps.policy.outputs.package-publish-eligible }}
+          HM_PACKAGE_RETENTION: ${{ steps.policy.outputs.package-retention-days }}
         run: |
-          if ($env:HM_PUBLISH_PACKAGE -eq 'true') {
-            "Application artifact retention: $env:HM_PACKAGE_RETENTION day(s)." >> $env:GITHUB_STEP_SUMMARY
-          } else {
-            'Pull request compilation and package verification completed; application packages are not published. Check receipts are retained for 1 day.' >> $env:GITHUB_STEP_SUMMARY
-          }
+          "Application upload allowed: $env:HM_PUBLISH_PACKAGE; retention: $env:HM_PACKAGE_RETENTION day(s)." >> $env:GITHUB_STEP_SUMMARY
+          'Shared offline checks are a separate gate. Native ABI loads execute on x64 only; ARM64 is statically verified and cross-compiled. Neither proves GPU or Bluetooth hardware behavior.' >> $env:GITHUB_STEP_SUMMARY

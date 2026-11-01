@@ -40,7 +40,7 @@ internal static class NativeCalibrationSmoke
             {
                 var builder = AppBuilder.Configure<NativeFixtureApplication>().UsePlatformDetect();
                 if (basicRenderMode is not null)
-                    builder = HeyMelodyWindows.Ui.RenderingSetup.UseHeyMelodyRendering(builder, basicRenderMode);
+                    builder = HeyMelodyWindows.Ui.RenderingSetup.UseHeyMelodyRendering(builder, basicRenderMode.Value);
                 builder.SetupWithoutStarting();
                 Dispatcher.UIThread.MainLoop(_loop.Token);
             }

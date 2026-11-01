@@ -1,0 +1,33 @@
+name: Set up the locked .NET SDK
+description: Install the SDK version recorded in the existing application toolchain lock.
+runs:
+  using: composite
+  steps:
+    - name: Read the locked SDK version
+      id: sdk
+      shell: pwsh
+      run: |
+        $lock = Get-Content -LiteralPath "$env:GITHUB_WORKSPACE/packaging/macos/toolchain.lock.json" -Raw | ConvertFrom-Json
+        $version = [string]$lock.dotnet.version
+        if ($version -notmatch '^10\.\d+\.\d+$') { throw 'The toolchain lock must specify an exact .NET 10 SDK version.' }
+        "version=$version" >> $env:GITHUB_OUTPUT
+    - name: Install the locked .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ steps.sdk.outputs.version }}
+    - name: Select the locked SDK
+      shell: pwsh
+      env:
+        HM_BUILD_SDK_VERSION: ${{ steps.sdk.outputs.version }}
+        DOTNET_NOLOGO: "true"
+        DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
+        DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+      run: |
+        $globalJson = Join-Path $env:GITHUB_WORKSPACE 'global.json'
+        if (Test-Path -LiteralPath $globalJson) { throw 'Refusing to overwrite an existing global.json.' }
+        [ordered]@{ sdk = [ordered]@{ version = $env:HM_BUILD_SDK_VERSION; rollForward = 'disable'; allowPrerelease = $false } } |
+          ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $globalJson -Encoding utf8NoBOM
+        $selected = @(& dotnet --version)
+        if ($LASTEXITCODE) { throw 'The locked .NET SDK could not start.' }
+        $actual = ($selected -join "`n").Trim()
+        if ($actual -cne $env:HM_BUILD_SDK_VERSION) { throw "SDK selection mismatch: expected $env:HM_BUILD_SDK_VERSION, got $actual." }

@@ -1,4 +1,5 @@
 using Avalonia;
+using HeyMelodyWindows.App;
 using HeyMelodyWindows.Ui;
 using HeyMelody.Diagnostics;
 
@@ -27,5 +28,5 @@ internal static class Program
 
     public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<DeviceManagerApp>().UsePlatformDetect()
         .With(new MacOSPlatformOptions { ShowInDock = false })
-        .UseHeyMelodyDiagnostics().UseHeyMelodyRendering().UseHeyMelodyTypography();
+        .UseHeyMelodyDiagnostics().UseHeyMelodyRendering(UiRenderingPreferenceReader.Load()).UseHeyMelodyTypography();
 }

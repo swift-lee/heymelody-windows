@@ -241,6 +241,7 @@ class StagingTests(unittest.TestCase):
                     "includedFrameworks": [{"name": "Microsoft.NETCore.App", "version": "10.0.4"}]}}).encode())
                 for name in ("libhostfxr.dylib", "libhostpolicy.dylib", "libcoreclr.dylib"):
                     write(apphost.parent / name)
+                write(apphost.parent / "HeyMelody.Desktop.dll")
                 if component == "HeyMelody.Host":
                     write(apphost.parent / "HeyMelody.MacOS.dll")
                     write(apphost.parent / "libHeyMelodyMac.dylib", MACHO + b"platform")
@@ -305,6 +306,19 @@ class StagingTests(unittest.TestCase):
             with mock.patch.object(verification.os, "access", side_effect=lambda path, _mode: Path(path).name != "hm_filament_probe"):
                 with self.assertRaisesRegex(ValueError, "probe is not executable"):
                     verification.check_bundle(bundle, VERSION)
+            # Isolate the dependency gate from the earlier manifest checksum gate.
+            with mock.patch.object(verification, "checked_file"), mock.patch.object(verification.os, "access", return_value=True):
+                for component in package.COMPONENTS:
+                    with self.subTest(missing_desktop=component):
+                        application = bundle if component == "HeyMelody" else bundle / "Contents/Helpers" / (component + ".app")
+                        desktop = application / "Contents/MacOS/HeyMelody.Desktop.dll"
+                        original = desktop.read_bytes()
+                        try:
+                            desktop.unlink()
+                            with self.assertRaisesRegex(ValueError, "Missing shared desktop implementation: " + component):
+                                verification.check_bundle(bundle, VERSION)
+                        finally:
+                            desktop.write_bytes(original)
 
 
 if __name__ == "__main__":

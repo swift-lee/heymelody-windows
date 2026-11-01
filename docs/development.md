@@ -2,6 +2,8 @@
 
 本文描述 0.9.2 的源码入口和现行脚本，包含 Windows 与 Apple Silicon macOS 构建。用户操作见根目录 [README](../README.md)，协作规则与文档导航见 [AGENTS.md](../AGENTS.md)，过去版本的结果见[版本记录](history/release-notes.md)。所有命令均从仓库根目录运行。
 
+全项目分层、基线问题、首轮治理和后续安排见[项目结构审计](project-structure-audit.md)。普通产品构建不要求可选驱动实验的相邻仓库。
+
 ## Filament 实验分支
 
 Windows 端支持 x64、ARM64 打包，默认 Vulkan，在“3D模型渲染API”下拉框选择 OpenGL 可切换后端。“3D模型渲染帧率”提供 30帧、60帧、无限制三档吸附滑块，默认无限制。此前 Windows 原生窗口验收使用 x64；ARM64 为交叉构建与静态校验，硬件运行尚未验证。本轮 M1 上的 Metal 与窗口验收范围见 [macOS 说明](macos.md)。三维层的 macOS Metal、Linux Vulkan／EGLHeadless、ABI 2 和探测程序见 [Filament 构建与接口](filament-renderer.md)。托管构建不要求 APK 或固定 research 路径，真实三维需对应 RID 的完整原生产物；Vulkan 失败使用静态外观并提示手动选择 OpenGL。
@@ -19,9 +21,13 @@ Windows 端使用 .NET SDK 10，通过仓库 `NuGet.Config` 中的官方 NuGet �
 | `src/HeyMelody.Calibration`、`src/HeyMelody.Calibration.UI` | 校准流程及界面；输入绑定设备版本，操作受每设备租约约束 |
 | `src/HeyMelody.Protocol`、`src/HeyMelody.Control`、`src/HeyMelody.Daily`、`src/HeyMelody.Probe` | 协议、设置工作流、日常状态与只读探测 |
 | `src/HeyMelody.Contracts`、`src/HeyMelody.Client` | 跨进程契约与客户端通信 |
+| `src/HeyMelody.Desktop` | 入口共用的 Avalonia 主题、字体配置、窗口集成、背景、滚动、渲染初始化与诊断；不依赖 Client 或具体入口 |
 | `src/HeyMelody.Diagnostics` | 一次后台周期的统一 Debug JSONL、会话引导、故障状态与原始协议记录，见[诊断日志](diagnostics.md) |
 | `src/HeyMelody.Resources`、`src/HeyMelody.Devices`、`src/HeyMelody.Artwork` | 资源解析、设备能力与外观资源 |
+| `src/HeyMelody.Platform` | BCL 平台契约、进程/路径与 IPC 基础设施；不依赖具体应用 |
 | `src/HeyMelody.Windows` | Windows 平台接口；`OfflineChecks` 是独立检查入口 |
+| `src/HeyMelody.MacOS` | Apple Silicon 原生蓝牙与音频桥接；原生构建需要 macOS |
+| `src/HeyMelody.Rendering.Filament`、`native/HeyMelody.Filament.Native` | 托管渲染边界、原生引擎与探测工具；不授予蓝牙控制能力 |
 | `src/HeyMelody.Audio`、`src/HeyMelody.Experiments` | 早期驱动与音频实验，另有依赖和历史验证范围 |
 
 架构与连接流程见[后台架构](backend-architecture.md)，保留的研究工具见 [CLI 说明](cli-tools.md)。日常客户端、协议、设备配置和控制模块可从本仓库构建；早期驱动/音频实验使用相邻目录 `../manager/src/LhdcManager.Core`，对应私有伴随仓库为 `https://github.com/CberYellowstone/lhdc-manager`。该依赖属于可选实验，不是普通 GUI 构建的前置步骤。
@@ -61,7 +67,7 @@ App 也能自动启动后台；源码运行时，若输出目录没有 Host 可�
 
 ## 界面渲染与字体
 
-三个 GUI 入口在 AppBuilder 阶段调用 `src/HeyMelody.App/RenderingSetup.cs` 与 `Typography.cs`（以源码链接编入各程序集，不新增 DLL）：`RenderingSetup` 固定 Win32 的 AngleEgl 与 WinUI／DirectComposition 合成（Mica 依赖前者），Skia GPU 资源上限 256 MiB、字形缓存 64 MiB。合成脏矩形使用区域跟踪（`UseRegionDirtyRectClipping`、最多 8 块），左侧英雄动画与右侧设置变化不再合并成整窗重绘；Avalonia 从不回收 GPU 纹理，`GpuJanitor` 在动画让路结束、窗口失活等事件后最多每 10 秒调用一次 `PurgeUnusedResources(30 s)`，不使用空闲定时器。Host 托盘只链接 `Typography.cs`，使用 Win32 软件渲染与 RedirectionSurface，不初始化 GPU 与合成器，也不设置 Skia 缓存上限（见[后台架构](backend-architecture.md#资源占用)）。字体部分（`Typography.cs`）GUI 与托盘相同：界面区域性固定为 zh-CN，默认字体为系统 Microsoft YaHei UI，汉字回退先于按区域打分固定到简体中文字体，550–699 字重使用真实粗体字面。没有雅黑的系统使用随附的 Noto Sans SC（`fonts/`，OFL-1.1）；Linux 无头预览与测试把该目录登记到 fontconfig，以路径方式打开字体，避免 Avalonia 12.1 从流加载字体时随窗口累积原生内存。共享样式与间距令牌在 `src/HeyMelody.App/Styles/HeyMelodyTheme.axaml`，代码构建的界面使用 `UiMetrics.cs` 中的同名数值。
+三个 GUI 入口在 AppBuilder 阶段调用 `src/HeyMelody.Desktop/RenderingSetup.cs` 与 `Typography.cs`，通过共享程序集而非入口间源码链接复用；入口读取原有渲染偏好并显式传入，Desktop 不依赖 Client。`RenderingSetup` 固定 Win32 的 AngleEgl 与 WinUI／DirectComposition 合成（Mica 依赖前者），Skia GPU 资源上限 256 MiB、字形缓存 64 MiB。合成脏矩形使用区域跟踪（`UseRegionDirtyRectClipping`、最多 8 块），左侧英雄动画与右侧设置变化不再合并成整窗重绘；Avalonia 从不回收 GPU 纹理，`GpuJanitor` 在动画让路结束、窗口失活等事件后最多每 10 秒调用一次 `PurgeUnusedResources(30 s)`，不使用空闲定时器。Host 托盘引用 Desktop 的字体配置，但保留原有 Win32 软件渲染与 RedirectionSurface 路径，不调用 GUI 渲染初始化；该 Win32 配置不证明 macOS 托盘强制使用软件渲染（见[后台架构](backend-architecture.md#资源占用)）。字体部分（`Typography.cs`）GUI 与托盘相同：界面区域性固定为 zh-CN，默认字体为系统 Microsoft YaHei UI，汉字回退先于按区域打分固定到简体中文字体，550–699 字重使用真实粗体字面。没有雅黑的系统使用随附的 Noto Sans SC（`fonts/`，OFL-1.1）；Linux 无头预览与测试把该目录登记到 fontconfig，以路径方式打开字体，避免 Avalonia 12.1 从流加载字体时随窗口累积原生内存。共享样式与间距令牌在 `src/HeyMelody.Desktop/Styles/HeyMelodyTheme.axaml`，代码构建的界面使用 `UiMetrics.cs` 中的同名数值。
 
 设 `HEYMELODY_RENDER_DIAGNOSTICS=1` 或在窗口中按 Ctrl+Shift+F12 显示 Avalonia 的帧率、渲染与布局耗时叠加层，三维模型另显示 Filament 帧统计。验收 120 Hz 时在 120 Hz 显示器上展开／折叠设置项、拖动模型，并关注叠加层而不是空闲窗口的数值。
 
@@ -100,13 +106,25 @@ dotnet run --project tests/HeyMelody.App.Tests/HeyMelody.App.Tests.csproj -c Rel
 
 本地 `SmoothScroll.Avalonia.Interaction` 补丁包由精确源提交构建，独立版本只从 `vendor/nuget` 解析；官方 Controls 包继续使用 12.0.0.14。普通构建无需下载研究源件或应用补丁。来源、修改清单及可选手动重建步骤见 [vendor 说明](../vendor/smooth-scroll/README.md)。
 
-完整默认检查入口为：
+统一检查入口为（profile 名称固定，Audio 不进入默认集合）：
+
+```powershell
+pwsh -NoProfile -File tools/ci/Invoke-OfflineTests.ps1 -Profile Windows
+# 在原生 Apple Silicon macOS：
+pwsh -NoProfile -File tools/ci/Invoke-OfflineTests.ps1 -Profile MacOS
+# 仅便携渲染契约与模型运动检查，无 GPU：
+pwsh -NoProfile -File tools/ci/Invoke-OfflineTests.ps1 -Profile Renderer
+```
+
+旧的本地入口继续委托同一集合，保留 `TestsOnly` / `SkipTests`：
 
 ```powershell
 pwsh.exe -NoProfile -File .\Build-Client.ps1 -TestsOnly
 ```
 
-`Build-Client.ps1` 保留原十三个默认 runner，并加入独立 Filament 便携检查，包含资源、校准、GUI 和 `Windows.OfflineChecks`。默认检查通过模拟、资源与静态断言验证实现；应按改动选取验证，完整发布不是每次编辑的默认步骤。`HeyMelody.ModelPreview.Tests` 是独立模型检查；App、DeviceManager 和模型相关的 Windows 原生窗口检查也需单独运行。具体命令和适用条件见[三维模型渲染](model-rendering.md)及[研究文档索引](research/README.md)。
+Windows profile 在原有默认集合中补入 Platform、MacOS 托管检查、ModelPreview、InstallerSupport，保留 Probe 和 `Windows.OfflineChecks`，共 19 个 .NET runner；MacOS 为 16 个，Renderer 为 2 个。三个 profile 均执行 Python 结构检查，Windows 另执行发布校验 fixture，MacOS 另执行打包单测。需要 Python 3，可用 `-PythonExecutable <完整路径>` 显式指定；Build 入口也转发此参数。平台专属跳过须明确记录，Windows 的 MacOS 托管结果不证明原生桥接通过。执行器在独立 `OutputRoot` 保存日志及摘要，失败返回非零；不因某 runner 失败而将剩余项目的未执行写为通过。
+
+默认检查通过模拟、资源与静态断言验证实现，不访问真实耳机；完整发布不是每次编辑的默认步骤。真实 renderer 检查和原生窗口模式仍需单独执行。`Rendering.Filament.Tests --native-abi <绝对native目录> --output-dir <目录>` 只加载指定库并验证导出/ABI，不创建 GPU 引擎。本地与 CI 打包均通过 `Invoke-NativeAbiCheck.ps1` 对输入和 staged 库强制执行，`SkipTests` 不绕过，`FinalizeOnly` 重新验证；是否同架构以所选 .NET 宿主为准，真正异构 Windows 包仅静态校验并明确未执行，macOS 异构失败。具体硬件检查和适用条件见[三维模型渲染](model-rendering.md)及[研究文档索引](research/README.md)。
 
 欢律单源改造的 UI 检查限于资源设置区、变更的电量／标题图标和校准步骤，其他默认 runner 照常执行。测试生成的完整 PNG 保留本地，不向会话载入整套截图；局部原生窗口检查可使用 App.Tests 的 `--native-smoke`，该模式不连接耳机或打开系统设置。
 
@@ -153,7 +171,7 @@ GitHub Actions 的 Windows x64、ARM64 应用包由 push 和手动运行发布�
 
 Windows 原生 Filament 运行时另存为 30 天 artifact 缓存，应用构建和 portability 的 Windows job 共用恢复入口。命中后校验并跳过原生编译，缓存不可用时在当前 job 重建；可信 push／手动运行会重新上传已验证运行时，滚动续存 30 天。手动运行可勾选 `force_native_rebuild` 强制重建。缓存依据、错误回退和离线检查见[Filament 构建说明](filament-renderer.md#github-actions-原生缓存)。
 
-macOS 应用包由同一 Filament workflow 的 `macos-package` job 构建，复用该运行的 Metal 原生产物；使用 Apple Silicon macOS 15，输出 ad-hoc、未公证 DMG 和 JSON 收据。CI 保留五入口及挂载安装复验，单独跳过真实 Metal probe；触发、保留规则和运行边界见 [macOS CI 说明](macos.md#github-actions-构建)。
+macOS 应用包由独立 `macos-build.yml` 构建，仅依赖同一次运行的 osx-arm64 原生产物，不等待 Windows/Linux renderer 矩阵。使用 Apple Silicon macOS 15，完整 macOS 离线 profile 通过后生成 ad-hoc、未公证 DMG 和 JSON 收据；保留五入口及挂载安装复验，单独跳过真实 Metal probe。Windows 则由一次 Windows profile 为 x64/arm64 包提供门禁。Filament workflow 自动运行 Linux 兼容性检查，手动可选三平台；触发、保留规则和运行边界见 [macOS CI 说明](macos.md#github-actions-构建)。
 
 自 0.9.0 起所有 `dotnet publish` 统一启用 ReadyToRun（`-p:PublishReadyToRun=true`），预编译只含 IL 的界面库，避免首次展开设置、拖动模型或打开向导时的 JIT 停顿；发布包因此变大，x64 机器可交叉编译 ARM64。`-Architectures x64` 或 `-Architectures arm64` 可选择单架构；`-SkipTests` 跳过默认 runner。普通构建拒绝已有目标目录或 ZIP；可用 `-OutputRoot release/arm64` 将另一架构构建放在独立目录，校验时传入同一参数。`-FinalizeOnly` 要求对应目录已存在且 ZIP 尚不存在，并跳过默认测试与 `dotnet publish`，封装已有输出。调整参数前先阅读脚本入口与条件，避免把跳过测试的产物称为完整验证。
 

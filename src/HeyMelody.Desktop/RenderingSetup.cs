@@ -6,13 +6,12 @@ using Avalonia.Platform;
 using Avalonia.Rendering;
 using Avalonia.Rendering.Composition;
 using Avalonia.Win32;
-using HeyMelodyWindows.App;
 using SkiaSharp;
 using HeyMelody.Diagnostics;
 
 namespace HeyMelodyWindows.Ui;
 
-/// <summary>Rendering parameters shared by every HeyMelody UI process (compiled into each by source link).</summary>
+/// <summary>Rendering parameters shared by every HeyMelody UI process.</summary>
 internal static class RenderingSetup
 {
     // Skia's default glyph (strike) cache is about 2 MB; Chinese text uses hundreds of glyphs per size and
@@ -102,9 +101,9 @@ internal static class RenderingSetup
                 selected = index >= 0 && index < adapters.Count ? WindowsWarpAdapterResolver.DescribeAdapter(adapters[index].DeviceLuid) : null });
     }
 
-    internal static AppBuilder UseHeyMelodyRendering(this AppBuilder builder, bool? basicRenderMode = null)
+    internal static AppBuilder UseHeyMelodyRendering(this AppBuilder builder, bool basicRenderMode)
     {
-        var requestedBasicRenderMode = basicRenderMode ?? UiRenderingPreferenceReader.Load();
+        var requestedBasicRenderMode = basicRenderMode;
         SKGraphics.SetFontCacheLimit(FontCacheLimitBytes);
         DiagnosticLog.Debug("Avalonia.GPU", "configuration", "Applying the existing GUI render configuration.",
             new { basicRenderMode = requestedBasicRenderMode, FontCacheLimitBytes, GpuResourceLimitBytes,

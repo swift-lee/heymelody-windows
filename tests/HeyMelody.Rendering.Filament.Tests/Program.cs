@@ -3,6 +3,8 @@ using System.Runtime.InteropServices;
 using HeyMelody.Rendering.Filament;
 using HeyMelody.Rendering.Tests;
 
+if (args is ["--native-abi", var nativeDirectory, "--output-dir", var abiOutput])
+    return NativeAbiChecks.Run(nativeDirectory, abiOutput);
 if (args is ["--backend", var fixtureBackend]) return BackendProbeChecks.RunFixture(fixtureBackend);
 if (args is ["--native-driver-failure"])
 {
@@ -73,7 +75,7 @@ if (args is ["--native-recovery", var nativeSource])
     Console.WriteLine(recoveryJson);
     return 0;
 }
-if (args.Length != 0) throw new ArgumentException("Usage: [--native-recovery <native-runtime-folder> | --native-driver-failure]");
+if (args.Length != 0) throw new ArgumentException("Usage: [--native-abi <absolute-native-directory> --output-dir <directory> | --native-recovery <native-runtime-folder> | --native-driver-failure]");
 
 int passed = 0;
 void Check(bool condition, string reason)
@@ -206,6 +208,7 @@ Directory.CreateDirectory(Path.GetDirectoryName(arm64Packaged)!);
 File.WriteAllBytes(arm64Packaged, [0]);
 Check(NativeRuntimeResolver.FindLibraryPath(runtimeFixture, windowsArm64) == arm64Packaged,
     "Windows ARM64 resolves its matching payload when an x64 payload is also present.");
+NativeAbiContractChecks.Run(runtimeFixture, Check);
 await BackendProbeChecks.RunAsync(runtimeFixture, Check);
 await DiagnosticChecks.RunAsync(runtimeFixture, Check);
 var portableReport = new

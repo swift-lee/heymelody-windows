@@ -1,5 +1,5 @@
 <!-- Shared design tokens and styles for the main window, device manager and calibration windows.
-     The file is compiled into each UI assembly by source link (see UiMetrics.cs for the code-side values). -->
+     Owned by HeyMelody.Desktop (see UiMetrics.cs for the code-side values). -->
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:sys="clr-namespace:System;assembly=System.Runtime">

@@ -15,6 +15,10 @@ internal static class Program
                 Check(NativeBluetooth.hm_bt_bridge_version() == 1, "native ABI version");
                 Check(MacBluetoothPlatform.RunWorker(() => Task.FromResult(23)) == 23, "worker native run loop exits");
             }
+            else
+            {
+                Console.WriteLine("SKIP macOS ARM64 native ABI and worker run loop: this process is not macOS ARM64.");
+            }
             RunAsync().GetAwaiter().GetResult();
             TestObservationGenerations();
             Console.WriteLine($"PASS {_checks} macOS offline checks (no Bluetooth manager, pairing, connection or device writes).");

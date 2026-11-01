@@ -29,11 +29,11 @@ pwsh -NoProfile -File Build-MacOS.ps1
 
 ## GitHub Actions 构建
 
-`filament-build.yml` 的 `macos-package` job 在原生构建矩阵成功后打包，原生和应用构建均使用 `macos-15` Apple Silicon runner。应用复用同一次运行、同一提交的 `filament-osx-arm64` artifact；下载后先验证 RID、ABI、清单及文件摘要，缺少产物时直接失败。SDK 使用 .NET 10，版本输入留空时使用 `Build-MacOS.ps1` 的默认版本。
+独立的 `macos-build.yml` 按 `native-osx-arm64 -> package-arm64` 打包，不等待 Windows/Linux renderer 矩阵；原生和应用构建均使用 `macos-15` Apple Silicon runner。应用复用同一次运行、同一提交的 `filament-osx-arm64` artifact；下载后先验证 RID、ABI、清单及文件摘要，缺少产物时直接失败，不自动重建替代来源。Filament commit 与 .NET SDK 从现有锁文件读取，版本输入留空时使用 `Build-MacOS.ps1` 的默认应用版本。职责调整与改动前证据见[项目结构审计](project-structure-audit.md)。
 
 push 和手动运行成功后，在该次 Actions 的 Artifacts 下载 macOS 包，解压后使用其中的 DMG；签名仍为 ad-hoc，未公证。main 分支应用包保留 7 天，其他分支 1 天；PR 完成构建和校验但不发布应用包。限定范围的构建日志、工具链和验证收据始终保留 1 天。DMG 保留完整应用所需的签名与扩展属性，不将裸 `.app` 目录作为 artifact 分发。
 
-发布任务沿用 Windows CI 的 `-SkipTests` 策略，另外执行 Platform、MacOS 离线检查和打包专项测试；Filament job 保留已有的渲染离线验收。它们不代表完整应用测试集或真实耳机通信通过。
+发布 job 先通过统一执行器的 MacOS profile（原有 16 项跨平台验收及 Python 打包单测），再以 `-SkipTests` 避免打包脚本重复测试。原生准备后另强制执行精确库加载、导出和 ABI 检查，不访问 GPU；失败阻断打包。离线测试、原生 ABI 和真实耳机通信分别记录，不能互相替代。
 
 跨会话单例测试让父子进程继承同一运行时用户同步存储根，同时保留不同 Unix session 和工作目录。自 .NET 10.0.13 起，macOS 的用户私有 `TMPDIR` 会影响用户域 mutex 的存储位置，不能在该测试中无意更换；绝对管道测试仍单独覆盖不同 `TMPDIR`，见 [.NET 目录规则说明](https://github.com/dotnet/docs/issues/56396)。
 

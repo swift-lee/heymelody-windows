@@ -4,6 +4,7 @@
              xmlns:vm="clr-namespace:HeyMelodyWindows.App;assembly=HeyMelody.Client"
              xmlns:contracts="clr-namespace:HeyMelodyWindows.App;assembly=HeyMelody.Contracts"
              xmlns:local="clr-namespace:HeyMelodyWindows.App"
+             xmlns:icons="clr-namespace:HeyMelodyWindows.App;assembly=HeyMelody.Desktop"
              xmlns:art="clr-namespace:HeyMelodyWindows.Artwork;assembly=HeyMelody.Artwork"
              x:Class="HeyMelodyWindows.App.MainView" x:DataType="vm:MainViewModel"
              Background="Transparent">
@@ -145,7 +146,7 @@
           <Button x:Name="AppSettingsButton" Grid.Column="2" Grid.RowSpan="2" Classes="icon" Click="AppSettings_Click"
                   VerticalAlignment="Center" IsEnabled="{Binding !Closing}" Margin="12,0,0,0"
                   ToolTip.Tip="应用设置" AutomationProperties.Name="应用设置">
-            <fa:FAIconSourceElement IconSource="{local:AppIcon Settings, Size=16}" Width="16" Height="16" />
+            <fa:FAIconSourceElement IconSource="{icons:AppIcon Settings, Size=16}" Width="16" Height="16" />
           </Button>
           <Grid Grid.Row="1" Grid.Column="1" ColumnDefinitions="Auto,Auto,*" VerticalAlignment="Center" Margin="0,4,0,0">
             <TextBlock x:Name="DeviceSubtitle" Text="{Binding Subtitle}" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
@@ -185,12 +186,12 @@
                     </MultiBinding>
                   </AutomationProperties.Name>
                   <StackPanel Orientation="Horizontal" Spacing="6">
-                    <fa:FAIconSourceElement x:Name="LeftBatteryDeviceIcon" IconSource="{local:AppIcon BatteryLeft, Size=14}" Width="14" Height="14" VerticalAlignment="Center" />
+                    <fa:FAIconSourceElement x:Name="LeftBatteryDeviceIcon" IconSource="{icons:AppIcon BatteryLeft, Size=14}" Width="14" Height="14" VerticalAlignment="Center" />
                     <TextBlock Text="左耳" Classes="caption" VerticalAlignment="Center" />
                   </StackPanel>
                   <StackPanel Orientation="Horizontal" Spacing="4">
                     <TextBlock Text="{Binding LeftBatteryText}" Classes="battery-value" />
-                    <fa:FAIconSourceElement IconSource="{local:AppIcon Charging, Size=18}" Width="18" Height="18" VerticalAlignment="Center"
+                    <fa:FAIconSourceElement IconSource="{icons:AppIcon Charging, Size=18}" Width="18" Height="18" VerticalAlignment="Center"
                                             Foreground="{DynamicResource SystemFillColorSuccessBrush}" IsVisible="{Binding LeftCharging}"
                                             AutomationProperties.Name="左耳正在充电" />
                   </StackPanel>
@@ -203,12 +204,12 @@
                     </MultiBinding>
                   </AutomationProperties.Name>
                   <StackPanel Orientation="Horizontal" Spacing="6">
-                    <fa:FAIconSourceElement x:Name="RightBatteryDeviceIcon" IconSource="{local:AppIcon BatteryRight, Size=14}" Width="14" Height="14" VerticalAlignment="Center" />
+                    <fa:FAIconSourceElement x:Name="RightBatteryDeviceIcon" IconSource="{icons:AppIcon BatteryRight, Size=14}" Width="14" Height="14" VerticalAlignment="Center" />
                     <TextBlock Text="右耳" Classes="caption" VerticalAlignment="Center" />
                   </StackPanel>
                   <StackPanel Orientation="Horizontal" Spacing="4">
                     <TextBlock Text="{Binding RightBatteryText}" Classes="battery-value" />
-                    <fa:FAIconSourceElement IconSource="{local:AppIcon Charging, Size=18}" Width="18" Height="18" VerticalAlignment="Center"
+                    <fa:FAIconSourceElement IconSource="{icons:AppIcon Charging, Size=18}" Width="18" Height="18" VerticalAlignment="Center"
                                             Foreground="{DynamicResource SystemFillColorSuccessBrush}" IsVisible="{Binding RightCharging}"
                                             AutomationProperties.Name="右耳正在充电" />
                   </StackPanel>
@@ -221,12 +222,12 @@
                     </MultiBinding>
                   </AutomationProperties.Name>
                   <StackPanel Orientation="Horizontal" Spacing="6">
-                    <fa:FAIconSourceElement x:Name="CaseBatteryDeviceIcon" IconSource="{local:AppIcon BatteryCase, Size=14}" Width="14" Height="14" VerticalAlignment="Center" />
+                    <fa:FAIconSourceElement x:Name="CaseBatteryDeviceIcon" IconSource="{icons:AppIcon BatteryCase, Size=14}" Width="14" Height="14" VerticalAlignment="Center" />
                     <TextBlock Text="充电盒" Classes="caption" VerticalAlignment="Center" />
                   </StackPanel>
                   <StackPanel Orientation="Horizontal" Spacing="4">
                     <TextBlock Text="{Binding CaseBatteryText}" Classes="battery-value" />
-                    <fa:FAIconSourceElement IconSource="{local:AppIcon Charging, Size=18}" Width="18" Height="18" VerticalAlignment="Center"
+                    <fa:FAIconSourceElement IconSource="{icons:AppIcon Charging, Size=18}" Width="18" Height="18" VerticalAlignment="Center"
                                             Foreground="{DynamicResource SystemFillColorSuccessBrush}" IsVisible="{Binding CaseCharging}"
                                             AutomationProperties.Name="充电盒正在充电" />
                   </StackPanel>
@@ -236,11 +237,11 @@
 
             <TextBlock x:Name="SoundGroupHeader" Classes="group-header" Text="声音" />
             <fa:FASettingsExpander x:Name="AncPanel" Header="降噪" Description="调整你听见的环境声音"
-                                   IconSource="{local:AppIcon NoiseControl}" IsExpanded="True">
+                                   IconSource="{icons:AppIcon NoiseControl}" IsExpanded="True">
               <local:AncModeSelector />
             </fa:FASettingsExpander>
             <fa:FASettingsExpander x:Name="EqualizerPanel" Header="均衡器" Description="预设与自定义均衡器"
-                                   IconSource="{local:AppIcon Equalizer}" IsExpanded="False">
+                                   IconSource="{icons:AppIcon Equalizer}" IsExpanded="False">
               <Border Padding="{StaticResource HmExpanderContentPadding}">
                 <StackPanel Spacing="12">
                   <local:EqualizerChoiceView />
@@ -295,7 +296,7 @@
 
             <TextBlock x:Name="HearingGroupHeader" Classes="group-header" Text="听感与佩戴" />
             <fa:FASettingsExpander x:Name="HearingPanel" Header="黄金听感" Description="个性化听感配置"
-                                   IconSource="{local:AppIcon Hearing}" IsExpanded="False">
+                                   IconSource="{icons:AppIcon Hearing}" IsExpanded="False">
               <fa:FASettingsExpanderItem Content="听感配置">
                 <fa:FASettingsExpanderItem.Footer>
                   <ComboBox x:Name="HearingProfileCombo" ItemsSource="{Binding HearingProfiles}" MinWidth="180" MaxWidth="230"
@@ -313,7 +314,7 @@
             </fa:FASettingsExpander>
             <!-- An item-less settings expander is FluentAvalonia's plain card: no chevron, footer on the right. -->
             <fa:FASettingsExpander x:Name="FitTestPanel" Header="耳塞贴合度测试" Description="检查两耳的佩戴贴合度"
-                                   IconSource="{local:AppIcon FitTest}">
+                                   IconSource="{icons:AppIcon FitTest}">
               <fa:FASettingsExpander.Footer>
                 <Button Content="开始测试" Click="FitTest_Click" IsEnabled="{Binding CanFitTest}" />
               </fa:FASettingsExpander.Footer>
@@ -329,7 +330,7 @@
               </ItemsControl.ItemTemplate>
             </ItemsControl>
             <fa:FASettingsExpander x:Name="DeviceInfoPanel" Header="设备信息" Description="名称、产品编号与固件"
-                                   IconSource="{local:AppIcon Info}" IsExpanded="False">
+                                   IconSource="{icons:AppIcon Info}" IsExpanded="False">
               <Border Padding="{StaticResource HmExpanderContentPadding}">
                 <StackPanel Spacing="16">
                   <Grid x:Name="DeviceInfoFields" ColumnDefinitions="100,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="12">
@@ -343,7 +344,7 @@
                     <Button x:Name="CopyDeviceInfoButton" Click="CopyDeviceInfo_Click" IsEnabled="False"
                             ToolTip.Tip="复制设备名称、产品编号与固件版本" AutomationProperties.Name="复制设备信息">
                       <StackPanel Orientation="Horizontal" Spacing="8">
-                        <fa:FAIconSourceElement IconSource="{local:AppIcon Copy, Size=16}" Width="16" Height="16" />
+                        <fa:FAIconSourceElement IconSource="{icons:AppIcon Copy, Size=16}" Width="16" Height="16" />
                         <TextBlock Text="复制" />
                       </StackPanel>
                     </Button>
@@ -352,7 +353,7 @@
               </Border>
             </fa:FASettingsExpander>
             <fa:FASettingsExpander x:Name="OperationLogPanel" Header="操作记录" Description="本次运行的最近操作"
-                                   IconSource="{local:AppIcon History}" IsExpanded="False">
+                                   IconSource="{icons:AppIcon History}" IsExpanded="False">
               <Border Padding="{StaticResource HmExpanderContentPadding}">
                 <TextBox x:Name="OperationLogText" Text="{Binding LogText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
                          MaxHeight="200" FontSize="12" AutomationProperties.Name="操作记录" />
@@ -382,7 +383,7 @@
                           HorizontalAlignment="Center" VerticalAlignment="Center">
                       <Viewbox x:Name="DeviceIcon" Width="28" Height="28" Stretch="Uniform" IsHitTestVisible="False"
                                HorizontalAlignment="Center" VerticalAlignment="Center">
-                        <fa:FAIconSourceElement IconSource="{local:AppIcon Earbuds, Size=24}" Width="24" Height="24" />
+                        <fa:FAIconSourceElement IconSource="{icons:AppIcon Earbuds, Size=24}" Width="24" Height="24" />
                       </Viewbox>
                       <StackPanel x:Name="DeviceText" Grid.Column="1" Spacing="4" MaxWidth="220">
                         <TextBlock x:Name="DeviceNameText" Text="{Binding Name}" FontWeight="SemiBold"

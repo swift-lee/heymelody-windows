@@ -32,7 +32,7 @@ public sealed class CalibrationApplication : Application
         if (DiagnosticRuntime.IsBoundLaunchExpired) return 1;
         try { return AppBuilder.Configure<CalibrationApplication>().UsePlatformDetect().UseHeyMelodyDiagnostics()
             .With(new MacOSPlatformOptions { ShowInDock = false })
-            .UseHeyMelodyRendering().UseHeyMelodyTypography().StartWithClassicDesktopLifetime(args); }
+            .UseHeyMelodyRendering(UiRenderingPreferenceReader.Load()).UseHeyMelodyTypography().StartWithClassicDesktopLifetime(args); }
         catch (Exception error) { DiagnosticLog.Error("Calibration.UI", "process.failed", "Calibration application failed", error); return 2; }
     }
     public override void Initialize()
@@ -50,11 +50,11 @@ public sealed class CalibrationApplication : Application
     }
 }
 
-/// <summary>The design tokens shared with the main window and device manager, compiled into this assembly.</summary>
+/// <summary>The design tokens owned by the shared desktop library.</summary>
 public static class SharedTheme
 {
-    public static Avalonia.Markup.Xaml.Styling.StyleInclude Create() => new(new Uri("avares://HeyMelody.Calibration.UI/"))
-    { Source = new Uri("avares://HeyMelody.Calibration.UI/Styles/HeyMelodyTheme.axaml") };
+    public static Avalonia.Markup.Xaml.Styling.StyleInclude Create() => new(new Uri("avares://HeyMelody.Desktop/"))
+    { Source = new Uri("avares://HeyMelody.Desktop/Styles/HeyMelodyTheme.axaml") };
 }
 
 public sealed class CalibrationWindow : FAAppWindow

@@ -120,7 +120,7 @@ macOS 背景使用原生 NSVisualEffectView Blur，按窗口实际协商的透�
 
 界面只支持简体中文。0.9.0 之前没有配置字体：默认字体族为 Segoe UI，汉字靠回退匹配，而 Avalonia 的回退按文本区域性（为空时取界面区域性）给字体打分，英文 Windows 上可能选到日文字体，同一汉字显示日本字形。现在各界面进程把界面区域性设为 zh-CN（不改变数字和日期格式），默认字体为系统 Microsoft YaHei UI（西文与数字也由它显示，中英混排行高一致），并用 `FontManagerOptions.FontFallbacks` 把汉字、CJK 标点和全角字符固定回退到同一字体，先于任何按区域的打分。雅黑只有细体、常规、粗体，550–699 字重（如 SemiBold 标题）映射到真实粗体字面，不合成加粗。没有雅黑的系统使用随包 `fonts/` 中的 Noto Sans SC（常规、中等、粗体，OFL-1.1）。
 
-窗口显式设置完整 hinting（经 DirectWrite 使用雅黑的手工微调）与像素对齐基线；抗锯齿方式由 Avalonia 决定：不透明表面使用子像素，图层与 Mica 透明区域改用灰度以免彩边。中文最小字号 12 px。托盘菜单由 Avalonia 绘制，同样使用这些设置；托盘提示文字与任务栏标题由 Windows 绘制，英文系统上仍按系统字体链显示。实现在 `src/HeyMelody.App/Typography.cs`；本轮在 Linux 无头环境验证英文区域下的匹配结果，en-US Windows 的实际观感仍需在 Windows 上目视确认（可检查“直、骨、角、写、画”）。
+窗口显式设置完整 hinting（经 DirectWrite 使用雅黑的手工微调）与像素对齐基线；抗锯齿方式由 Avalonia 决定：不透明表面使用子像素，图层与 Mica 透明区域改用灰度以免彩边。中文最小字号 12 px。托盘菜单由 Avalonia 绘制，同样使用这些设置；托盘提示文字与任务栏标题由 Windows 绘制，英文系统上仍按系统字体链显示。共享实现现位于 `src/HeyMelody.Desktop/Typography.cs`，主题与窗口集成同属 Desktop，不再从主程序链接源码。字体文件仍由 Artwork 输出到 `fonts/`；macOS 的 PingFang SC 行为见 [macOS 说明](macos.md)。此前 Linux 无头环境验证过英文区域下的匹配结果，en-US Windows 的实际观感仍需在 Windows 上目视确认（可检查“直、骨、角、写、画”）。
 
 ## 构建与界面验证
 

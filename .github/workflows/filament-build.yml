@@ -1,16 +1,12 @@
-name: Filament runtime
+name: Filament compatibility
 
 on:
   push:
   pull_request:
   workflow_dispatch:
     inputs:
-      version:
-        description: macOS package version (x.y.z); leave blank to use the project default.
-        required: false
-        type: string
       force_native_rebuild:
-        description: Bypass the cache and rebuild the Windows native runtime.
+        description: Bypass the cache and rebuild the Windows native runtime in the manual matrix.
         required: false
         type: boolean
         default: false
@@ -25,27 +21,24 @@ concurrency:
 
 jobs:
   renderer:
-    name: Native runtime (${{ matrix.os }})
+    name: Native compatibility (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
+      # Normal package workflows own Windows/macOS native builds; manual diagnostics can cover all three.
       matrix:
-        os: [windows-latest, macos-15, ubuntu-24.04]
+        os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '["windows-latest","macos-15","ubuntu-24.04"]' || '["ubuntu-24.04"]') }}
     steps:
       - name: Check out project
         uses: actions/checkout@v4
-      - name: Check out pinned Filament source
-        uses: actions/checkout@v4
-        if: runner.os != 'Windows'
+      - name: Set up the locked .NET SDK
+        uses: ./.github/actions/setup-build-sdk
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          repository: google/filament
-          ref: ea31afeaf66339e7414aa648aa76c7e61adbde28
-          path: artifacts/filament-source
-      - name: Set up .NET 10
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
-      - name: Install Linux build and graphics dependencies
+          python-version: "3.12"
+      - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang ninja-build libegl-dev libgl-dev libgles-dev libvulkan1
       - name: Determine runtime ID
@@ -55,13 +48,9 @@ jobs:
           $prefix = if ($IsWindows) { 'win' } elseif ($IsMacOS) { 'osx' } else { 'linux' }
           $architecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant()
           if ($IsMacOS -and ($architecture -ne 'arm64' -or [Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'Arm64')) {
-            throw 'The macOS runtime and package jobs require an Apple silicon runner.'
+            throw 'The supported macOS runtime requires an Apple silicon runner.'
           }
           "rid=$prefix-$architecture" >> $env:GITHUB_OUTPUT
-      - name: Check cache restore and retention rules
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: ./tools/filament/tests/Test-FilamentArtifactCache.ps1 -OutputPath artifacts/filament-cache-checks/summary.json
       - name: Restore or build Windows runtime
         id: filament
         if: runner.os == 'Windows'
@@ -69,104 +58,42 @@ jobs:
         with:
           runtime-identifier: ${{ steps.runtime.outputs.rid }}
           force-rebuild: ${{ inputs.force_native_rebuild || false }}
-      - name: Build macOS or Linux runtime
+      - name: Build the locked macOS or Linux runtime
         if: runner.os != 'Windows'
         shell: pwsh
         run: |
           if ($IsLinux) { $env:CC = 'clang'; $env:CXX = 'clang++' }
-          ./tools/filament/Build-FilamentNative.ps1 -FilamentSource ./artifacts/filament-source -RuntimeIdentifier '${{ steps.runtime.outputs.rid }}' -OutputRoot ./artifacts/filament-compat -FetchBuildTools -SkipSmoke:$IsMacOS
-      - name: Verify runtime files and ABI
+          ./tools/filament/Build-FilamentNative.ps1 -RuntimeIdentifier '${{ steps.runtime.outputs.rid }}' -OutputRoot artifacts/filament-compat -FetchSource -FetchBuildTools -SkipSmoke:$IsMacOS
+      - name: Verify runtime files and real ABI load
         shell: pwsh
         env:
           WINDOWS_FILAMENT_ROOT: ${{ steps.filament.outputs.runtime-root }}
         run: |
-          $runtimeRoot = if ($IsWindows) { $env:WINDOWS_FILAMENT_ROOT } else { './artifacts/filament-compat' }
-          ./tools/Verify-FilamentRuntime.ps1 -Directory "$runtimeRoot/runtimes/${{ steps.runtime.outputs.rid }}/native" -RuntimeIdentifier '${{ steps.runtime.outputs.rid }}' -RequireCurrent | ConvertTo-Json
-      - name: Check renderer and model motion
+          $runtimeRoot = if ($IsWindows) { $env:WINDOWS_FILAMENT_ROOT } else { Join-Path $env:GITHUB_WORKSPACE 'artifacts/filament-compat' }
+          $native = Join-Path $runtimeRoot 'runtimes/${{ steps.runtime.outputs.rid }}/native'
+          ./tools/Verify-FilamentRuntime.ps1 -Directory $native -RuntimeIdentifier '${{ steps.runtime.outputs.rid }}' -RequireCurrent | ConvertTo-Json
+          dotnet run --project tests/HeyMelody.Rendering.Filament.Tests -c Release --disable-build-servers -p:UseSharedCompilation=false -- --native-abi $native --output-dir artifacts/filament-ci-checks/native-abi
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Check workflow contracts and portable rendering behavior
         shell: pwsh
         run: |
-          dotnet run --project tests/HeyMelody.Rendering.Filament.Tests -c Release
+          ./tools/ci/tests/Test-CiContracts.ps1 -OutputPath artifacts/filament-ci-checks/ci-contracts.json
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          dotnet run --project tests/HeyMelody.ModelPreview.Tests -c Release -- --output-dir artifacts/portable-model-checks
+          ./tools/ci/Invoke-OfflineTests.ps1 -Profile Renderer -OutputRoot artifacts/filament-ci-checks/offline-tests
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - name: Upload native runtime and check results
-        uses: actions/upload-artifact@v4
+      - name: Upload native compatibility payload
         if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
         with:
           name: filament-${{ steps.runtime.outputs.rid }}
-          path: |
-            artifacts/filament-compat/runtimes/${{ steps.runtime.outputs.rid }}/native/
-            artifacts/portable-model-checks/*.json
+          path: artifacts/filament-compat/runtimes/${{ steps.runtime.outputs.rid }}/native/
           if-no-files-found: error
           retention-days: 2
-      - name: Upload Windows check results
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: filament-checks-${{ steps.runtime.outputs.rid }}
-          path: |
-            artifacts/portable-model-checks/*.json
-            artifacts/filament-cache-checks/summary.json
-          if-no-files-found: error
-          retention-days: ${{ steps.filament.outputs.receipt-retention-days }}
-          overwrite: true
-
-  macos-package:
-    name: macOS package (arm64)
-    needs: renderer
-    runs-on: macos-15
-    timeout-minutes: 60
-    env:
-      DOTNET_NOLOGO: "true"
-      DOTNET_CLI_TELEMETRY_OPTOUT: "true"
-      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
-      DOTNET_CLI_UI_LANGUAGE: en
-      NUGET_PACKAGES: ${{ github.workspace }}/artifacts/nuget-cache
-      NUGET_HTTP_CACHE_PATH: ${{ github.workspace }}/artifacts/nuget-http-cache
-      MSBUILDDISABLENODEREUSE: "1"
-      DOTNET_CLI_USE_MSBUILD_SERVER: "0"
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-      - name: Set up .NET 10
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
-      - name: Restore macOS NuGet cache
-        uses: actions/cache@v4
-        with:
-          path: artifacts/nuget-cache
-          key: nuget-macos-arm64-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Build.targets', 'NuGet.Config') }}
-          restore-keys: nuget-macos-arm64-
-      # Native files come from this run and checkout, never a latest artifact in another run.
-      - name: Download this run's Metal runtime
-        uses: actions/download-artifact@v4
-        with:
-          name: filament-osx-arm64
-          path: artifacts
-      - name: Check and build ad-hoc macOS package
-        id: package
-        shell: pwsh
-        env:
-          REQUESTED_VERSION: ${{ inputs.version }}
-        run: ./tools/ci/Invoke-MacOSPackage.ps1
-      - name: Upload macOS DMG and verification receipt
-        if: success() && steps.package.outputs.package-publish-eligible == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: HeyMelody_macOS_${{ steps.package.outputs.version }}_arm64_${{ steps.package.outputs.commit }}
-          path: |
-            release/macos/*.dmg
-            release/macos/*.json
-          if-no-files-found: error
-          retention-days: ${{ steps.package.outputs.package-retention-days }}
-          overwrite: true
-      - name: Upload macOS checks and complete build logs
+      - name: Upload compatibility checks and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: macos-checks-arm64-${{ github.sha }}
-          path: artifacts/macos-ci/
+          name: filament-checks-${{ steps.runtime.outputs.rid }}
+          path: artifacts/filament-ci-checks/
           if-no-files-found: warn
           retention-days: 1
-          overwrite: true

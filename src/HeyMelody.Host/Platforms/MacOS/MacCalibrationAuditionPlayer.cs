@@ -7,14 +7,6 @@ using HeyMelodyWindows.Calibration;
 
 namespace HeyMelodyWindows.Host;
 
-internal interface ISelectableCalibrationAuditionPlayer
-{
-    string? SelectedOutputToken { get; }
-    IReadOnlyList<UiPreviewAudioOutput> GetOutputs();
-    Task SelectOutputAsync(string token, CancellationToken cancellationToken);
-    void ResetSelection();
-}
-
 /// <summary>The macOS audition stream is pinned to a user-selected Bluetooth output, never the system default.</summary>
 #if HEYMELODY_MACOS
 internal sealed class MacCalibrationAuditionPlayer : ICalibrationAuditionPlayer, ISelectableCalibrationAuditionPlayer

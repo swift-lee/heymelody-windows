@@ -23,7 +23,7 @@
     <PackageReference Include="SmoothScroll.Avalonia" Version="12.0.0.14" />
     <PackageReference Include="SmoothScroll.Avalonia.Interaction" Version="12.0.0.15-heymelody.2" />
     <PackageReference Include="SkiaSharp.Skottie" Version="3.119.4" />
-    <Compile Include="../HeyMelody.DeviceManager/MicaAltBackdrop.cs" Link="Windowing/WindowsMicaAltBackdrop.cs" />
+    <ProjectReference Include="../HeyMelody.Desktop/HeyMelody.Desktop.csproj" />
     <ProjectReference Include="../HeyMelody.Client/HeyMelody.Client.csproj" />
     <ProjectReference Include="../HeyMelody.Artwork/HeyMelody.Artwork.csproj" />
     <ProjectReference Include="../HeyMelody.Resources/HeyMelody.Resources.csproj" />

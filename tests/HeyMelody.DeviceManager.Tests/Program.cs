@@ -222,7 +222,7 @@ public static class TestBootstrap
 {
     public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<DeviceManagerApp>().UseSkia()
         .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
-        .UseHeyMelodyRendering().UseHeyMelodyTypography();
+        .UseHeyMelodyRendering(false).UseHeyMelodyTypography();
 }
 
 internal sealed class FakeService : IDeviceManagementService, IAsyncDisposable

@@ -51,7 +51,7 @@ internal static class NativeSmoke
                 if (useRenderingSetup)
                 {
                     System.Diagnostics.Trace.Listeners.Add(new System.Diagnostics.ConsoleTraceListener());
-                    builder = HeyMelodyWindows.Ui.RenderingSetup.UseHeyMelodyRendering(builder, basicRenderMode);
+                    builder = HeyMelodyWindows.Ui.RenderingSetup.UseHeyMelodyRendering(builder, basicRenderMode ?? UiRenderingPreferenceReader.Load());
                     if (renderingFailure is not null)
                         builder = builder.With(HeyMelodyWindows.Ui.RenderingSetup.CreateWindowsOptions(true,
                             () => renderingFailure == "software-fallback" ? null : Enumerable.Repeat((byte)0x7f, 8).ToArray()));

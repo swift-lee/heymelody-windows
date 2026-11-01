@@ -10,7 +10,7 @@ using SkiaSharp;
 
 namespace HeyMelodyWindows.Ui;
 
-/// <summary>Simplified Chinese typography shared by every HeyMelody UI process (compiled into each by source link).</summary>
+/// <summary>Simplified Chinese typography shared by every HeyMelody UI process.</summary>
 /// <remarks>
 /// Without a configured family, Han characters reach Avalonia's fallback, which scores candidate faces by the
 /// text's culture or, when absent, <see cref="CultureInfo.CurrentUICulture"/>. Under an en-US Windows UI that

@@ -57,7 +57,8 @@ internal static class ModelLoadingBenchmark
                 ModelRenderingPreferences.Reload();
                 ModelRenderingPreferences.Apply(options.Backend == FilamentBackend.OpenGL);
                 DeviceModelView.DefaultFactoryOverride = null;
-                AppBuilder.Configure<BenchmarkApplication>().UsePlatformDetect().UseHeyMelodyRendering().UseHeyMelodyTypography().LogToTrace()
+                AppBuilder.Configure<BenchmarkApplication>().UsePlatformDetect()
+                    .UseHeyMelodyRendering(UiRenderingPreferenceReader.Load()).UseHeyMelodyTypography().LogToTrace()
                     .StartWithClassicDesktopLifetime([], ShutdownMode.OnExplicitShutdown);
             }
             catch (Exception error) { _state.Failure = error.ToString(); }

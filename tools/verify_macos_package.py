@@ -87,6 +87,8 @@ def check_bundle(bundle: Path, version: str | None = None) -> dict:
         for required in ("libhostfxr.dylib", "libhostpolicy.dylib", "libcoreclr.dylib"):
             if not (binary.parent / required).is_file():
                 raise ValueError(f"Missing self-contained runtime file: {component}/{required}")
+        if not (binary.parent / "HeyMelody.Desktop.dll").is_file():
+            raise ValueError(f"Missing shared desktop implementation: {component}")
         if (binary.parent / "HeyMelody.Windows.dll").exists():
             raise ValueError(f"Windows platform implementation leaked into the macOS package: {component}")
         if component == "HeyMelody.Host":

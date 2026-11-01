@@ -8,18 +8,7 @@
     <ProjectReference Include="../HeyMelody.Client/HeyMelody.Client.csproj" />
     <ProjectReference Include="../HeyMelody.Artwork/HeyMelody.Artwork.csproj" />
     <ProjectReference Include="../HeyMelody.Resources/HeyMelody.Resources.csproj" />
-    <!-- Shared window backdrop and interface icons are compiled from their owners' sources. -->
-    <Compile Include="../HeyMelody.DeviceManager/MicaAltBackdrop.cs" Link="Windowing/MicaAltBackdrop.cs" />
-    <Compile Include="../HeyMelody.App/AppIcons.cs" Link="Shared/AppIcons.cs" />
-    <Compile Include="../HeyMelody.App/DesktopWindowBackdrop.cs" Link="Shared/DesktopWindowBackdrop.cs" />
-    <Compile Include="../HeyMelody.App/DesktopWindowIntegration.cs" Link="Shared/DesktopWindowIntegration.cs" />
-    <Compile Include="../HeyMelody.App/RenderingSetup.cs" Link="Shared/RenderingSetup.cs" />
-    <Compile Include="../HeyMelody.App/WindowsWarpAdapterResolver.cs" Link="Shared/WindowsWarpAdapterResolver.cs" />
-    <Compile Include="../HeyMelody.App/Typography.cs" Link="Shared/Typography.cs" />
-    <Compile Include="../HeyMelody.App/UiMetrics.cs" Link="Shared/UiMetrics.cs" />
-    <Compile Include="../HeyMelody.App/SmoothScrolling.cs" Link="Shared/SmoothScrolling.cs" />
-    <Compile Include="../HeyMelody.App/UiDiagnosticLogging.cs" Link="Shared/UiDiagnosticLogging.cs" />
-    <AvaloniaXaml Include="../HeyMelody.App/Styles/HeyMelodyTheme.axaml" Link="Styles/HeyMelodyTheme.axaml" />
+    <ProjectReference Include="../HeyMelody.Desktop/HeyMelody.Desktop.csproj" />
     <InternalsVisibleTo Include="HeyMelody.Calibration.UI.Tests" />
     <AvaloniaResource Include="../HeyMelody.App/Assets/HeyMelody.ico" Link="Assets/HeyMelody.ico" />
   </ItemGroup>

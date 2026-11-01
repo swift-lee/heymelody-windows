@@ -342,7 +342,7 @@ public static class CalibrationTestBootstrap
 {
     public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<CalibrationTestApplication>().UseSkia()
         .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
-        .UseHeyMelodyRendering().UseHeyMelodyTypography();
+        .UseHeyMelodyRendering(false).UseHeyMelodyTypography();
 }
 public sealed class CalibrationTestApplication : Application
 {

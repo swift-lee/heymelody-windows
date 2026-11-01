@@ -19,9 +19,7 @@ $outputs = [ordered]@{
     'cache-status' = $result.CacheStatus
     'cache-directory' = $result.CacheDirectory
     'cache-publish-eligible' = $result.CachePublishEligible.ToString().ToLowerInvariant()
-    'package-publish-eligible' = $result.PackagePublishEligible.ToString().ToLowerInvariant()
-    'package-retention-days' = $result.PackageRetentionDays
-    'receipt-retention-days' = $result.ReceiptRetentionDays
+    'cache-retention-days' = $result.CacheRetentionDays
 }
 foreach ($entry in $outputs.GetEnumerator()) {
     if ([string]$entry.Value -match '[\r\n]') { throw 'Invalid newline in Filament preparation output.' }
@@ -36,9 +34,7 @@ if ($env:GITHUB_STEP_SUMMARY) {
         "- Cache: **$($result.CacheStatus)**; fingerprint: ``$($result.Fingerprint)``",
         "- Artifact source: $($result.SourceArtifactId); run: $($result.SourceRunId)",
         "- Restore decision: $($result.RestoreReason.Replace("`r", ' ').Replace("`n", ' '))",
-        "- Native cache retention: 30 days; publication allowed: $($result.CachePublishEligible)",
-        "- Application artifact retention: $($result.PackageRetentionDays) days; publication allowed: $($result.PackagePublishEligible)",
-        "- Check receipt retention: $($result.ReceiptRetentionDays) day", '',
+        "- Native cache retention: $($result.CacheRetentionDays) days; publication allowed: $($result.CachePublishEligible)", '',
         'Toolchain:', '```json', ($result.ToolchainIdentity | ConvertTo-Json -Depth 20), '```', ''
     )
     $summary | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8NoBOM

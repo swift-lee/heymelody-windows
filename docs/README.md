@@ -23,6 +23,7 @@ Apple Silicon macOS 的安装、平台边界、构建和验收见 [macOS 说明]
 ## 开发与验证
 
 - [开发指南](development.md)：环境、构建、测试、界面验证与发布步骤。
+- [项目结构审计与跨平台治理](project-structure-audit.md)：模块分层、平台边界、DMG/Filament CI 耦合证据、首轮治理及后续计划。
 - [仓库维护入口](../REPOSITORY.md)：当前维护状态与进一步阅读入口。
 - [后台架构](backend-architecture.md)：托盘、共享 IPC、多设备监听、BLE 观测与退出生命周期。
 - [日常控制层](daily-notes.md)：GET/SET、通知订阅、字段合并与结果证据。

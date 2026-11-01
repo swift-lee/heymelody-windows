@@ -23,15 +23,9 @@ outputs:
   cache-publish-eligible:
     description: Whether this is a trusted push/manual run allowed to save the native cache.
     value: ${{ steps.prepare.outputs.cache-publish-eligible }}
-  package-publish-eligible:
-    description: Whether this push/manual run may upload application packages; false for PRs.
-    value: ${{ steps.prepare.outputs.package-publish-eligible }}
-  package-retention-days:
-    description: Application package retention in days (main 7, other refs 1).
-    value: ${{ steps.prepare.outputs.package-retention-days }}
-  receipt-retention-days:
-    description: Verification result retention in days (1).
-    value: ${{ steps.prepare.outputs.receipt-retention-days }}
+  cache-retention-days:
+    description: Trusted native cache retention in days (30).
+    value: ${{ steps.prepare.outputs.cache-retention-days }}
 runs:
   using: composite
   steps:
@@ -60,7 +54,7 @@ runs:
         name: ${{ steps.prepare.outputs.cache-key }}
         path: ${{ steps.prepare.outputs.cache-directory }}/
         if-no-files-found: error
-        retention-days: 30
+        retention-days: ${{ steps.prepare.outputs.cache-retention-days }}
         overwrite: true
     # A cache upload failure must not discard a successfully prepared runtime.
     - name: Warn if cache upload failed

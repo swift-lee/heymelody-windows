@@ -8,7 +8,9 @@ param(
     [string]$ValidationPath,
     [string]$FilamentSource,
     [string]$FilamentRuntimeRoot,
-    [string]$OutputRoot
+    [string]$OutputRoot,
+    [string]$PythonExecutable,
+    [string]$NativeAbiOutputRoot
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -36,17 +38,18 @@ if (Test-Path -LiteralPath $existingPackageCache -PathType Container) {
     $restoreProperties += '-p:RestoreFallbackFolders=' + $existingPackageCache
 }
 if (-not $SkipTests -and -not $FinalizeOnly) {
-    & dotnet run --project (Join-Path $root 'src/HeyMelody.Windows/OfflineChecks/HeyMelody.Windows.OfflineChecks.csproj') -c Release '-p:CopyDebugSymbolFilesFromPackages=false' @restoreProperties
-    if ($LASTEXITCODE -ne 0) { throw 'Tests failed: HeyMelody.Windows.OfflineChecks' }
-    foreach ($project in @('HeyMelody.Diagnostics.Tests', 'HeyMelody.Protocol.Tests', 'HeyMelody.Resources.Tests', 'HeyMelody.Calibration.Tests', 'HeyMelody.Calibration.UI.Tests', 'HeyMelody.Devices.Tests', 'HeyMelody.Control.Tests', 'HeyMelody.Daily.Tests', 'HeyMelody.Probe.Tests', 'HeyMelody.Host.Tests', 'HeyMelody.Client.Tests', 'HeyMelody.App.Tests', 'HeyMelody.DeviceManager.Tests', 'HeyMelody.Rendering.Filament.Tests')) {
-        & dotnet run --project (Join-Path $root ('tests/' + $project + '/' + $project + '.csproj')) -c Release '-p:CopyDebugSymbolFilesFromPackages=false' @restoreProperties
-        if ($LASTEXITCODE -ne 0) { throw ('Tests failed: ' + $project) }
-    }
+    & (Join-Path $root 'tools/ci/Invoke-OfflineTests.ps1') -Profile Windows -Version $Version -PythonExecutable $PythonExecutable
+    if ($LASTEXITCODE -ne 0) { throw 'The Windows offline test profile failed.' }
 }
 if ($TestsOnly) {
     Write-Host 'All default test runners passed.'
     return
 }
+if (-not $NativeAbiOutputRoot) {
+    $NativeAbiOutputRoot = Join-Path $root ('artifacts/native-abi/windows-' + [Guid]::NewGuid().ToString('N'))
+}
+$NativeAbiOutputRoot = [IO.Path]::GetFullPath($NativeAbiOutputRoot, $root)
+$nativeAbiChecks = [Collections.Generic.List[object]]::new()
 if (-not $FinalizeOnly) {
     foreach ($architecture in $targetArchitectures) {
         $rid = 'win-' + $architecture
@@ -59,6 +62,9 @@ if (-not $FinalizeOnly) {
             if ($LASTEXITCODE -ne 0) { throw ('Filament native build failed: ' + $rid) }
         }
         $nativeVerification = & (Join-Path $root 'tools/Verify-FilamentRuntime.ps1') -Directory $nativeDirectory -RuntimeIdentifier $rid -RequireCurrent
+        $abi = & (Join-Path $root 'tools/ci/Invoke-NativeAbiCheck.ps1') -NativeDirectory $nativeDirectory `
+            -RuntimeIdentifier $rid -OutputRoot (Join-Path $NativeAbiOutputRoot "$rid-input")
+        $nativeAbiChecks.Add([ordered]@{ phase = 'input'; receiptPath = $abi.receiptPath; validation = $abi.validation })
     }
 }
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
@@ -173,6 +179,10 @@ foreach ($architecture in $targetArchitectures) {
     $hostBundle = Join-Path $hostOutput 'ResourceBundles'
     if (Test-Path -LiteralPath $hostBundle) { Remove-Item -LiteralPath $hostBundle -Recurse -Force }
     $nativeVerification = & (Join-Path $root 'tools/Verify-FilamentRuntime.ps1') -Directory $app -RuntimeIdentifier $rid -RequireCurrent
+    # FinalizeOnly must check the staged payload again, never reuse an unrelated source-runtime receipt.
+    $abi = & (Join-Path $root 'tools/ci/Invoke-NativeAbiCheck.ps1') -NativeDirectory $app `
+        -RuntimeIdentifier $rid -OutputRoot (Join-Path $NativeAbiOutputRoot "$rid-package")
+    $nativeAbiChecks.Add([ordered]@{ phase = 'package'; receiptPath = $abi.receiptPath; validation = $abi.validation })
     $nestedNative = Join-Path $app ('runtimes/' + $rid + '/native')
     if ((Test-Path -LiteralPath (Join-Path $nestedNative 'HeyMelody.Filament.Native.dll')) -or (Test-Path -LiteralPath (Join-Path $nestedNative 'filament-runtime.json')) -or (Test-Path -LiteralPath (Join-Path $nestedNative 'hm_filament_probe.exe'))) {
         $nestedVerification = & (Join-Path $root 'tools/Verify-FilamentRuntime.ps1') -Directory $nestedNative -RuntimeIdentifier $rid -RequireCurrent
@@ -262,9 +272,16 @@ $manifest = [ordered]@{ schemaVersion = 2; version = $Version; builtAtUtc = [Dat
 $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $stage 'manifest.json') -Encoding UTF8
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $archive, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+$archiveSha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+[ordered]@{
+    schemaVersion = 1; success = $true; version = $Version; package = [IO.Path]::GetFileName($archive)
+    packageSha256 = $archiveSha256; checks = $nativeAbiChecks.ToArray()
+    gpuProbeExecuted = $false; nativeBluetoothCalls = 0
+} | ConvertTo-Json -Depth 16 |
+    Set-Content -LiteralPath ([IO.Path]::ChangeExtension($archive, '.native-abi.json')) -Encoding utf8NoBOM
 # This is the exact owned GUID directory created above, verified inside release before recursive cleanup.
 $resolvedScratch = [System.IO.Path]::GetFullPath($scratch)
 $resolvedRelease = [System.IO.Path]::GetFullPath($releaseRoot).TrimEnd('\') + '\'
 if (-not $resolvedScratch.StartsWith($resolvedRelease, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe build scratch path.' }
 Remove-Item -LiteralPath $resolvedScratch -Recurse -Force
-[ordered]@{ package = $archive; sha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant(); version = $Version } | ConvertTo-Json -Compress
+[ordered]@{ package = $archive; sha256 = $archiveSha256; version = $Version } | ConvertTo-Json -Compress

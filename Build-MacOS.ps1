@@ -3,10 +3,12 @@
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.9.2',
     [string]$DotNetExecutable,
+    [string]$PythonExecutable,
     [string]$FilamentRuntimeRoot,
     [string]$OutputRoot,
     [string]$BundlePath,
     [string]$ValidationPath,
+    [string]$NativeAbiOutputRoot,
     [string]$Proxy,
     [ValidateRange(1,64)][int]$Parallel = 2,
     [switch]$SkipTests,
@@ -34,8 +36,13 @@ if (-not $FilamentRuntimeRoot) { $FilamentRuntimeRoot = Join-Path $repo 'artifac
 if (-not $OutputRoot) { $OutputRoot = Join-Path $repo 'release/macos' }
 $OutputRoot = [IO.Path]::GetFullPath($OutputRoot)
 $FilamentRuntimeRoot = [IO.Path]::GetFullPath($FilamentRuntimeRoot)
-$python = (Get-Command python3 -ErrorAction Stop).Source
+$python = (Get-Command $(if ($PythonExecutable) { $PythonExecutable } else { 'python3' }) -ErrorAction Stop).Source
 $packager = Join-Path $repo 'tools/package_macos.py'
+if (-not $NativeAbiOutputRoot) {
+    $NativeAbiOutputRoot = Join-Path $repo ('artifacts/native-abi/macos-' + [Guid]::NewGuid().ToString('N'))
+}
+$NativeAbiOutputRoot = [IO.Path]::GetFullPath($NativeAbiOutputRoot, $repo)
+$nativeAbiChecks = [Collections.Generic.List[object]]::new()
 $savedEnvironment = [Environment]::GetEnvironmentVariables()
 try {
     $env:DOTNET_ROOT = Split-Path -Parent $DotNetExecutable
@@ -54,7 +61,7 @@ try {
     if ($Proxy) { $env:HTTP_PROXY = $Proxy; $env:HTTPS_PROXY = $Proxy }
     $sdk = & $DotNetExecutable --version
     if ($LASTEXITCODE -ne 0 -or $sdk -notmatch '^10\.') { throw '.NET 10 SDK is required.' }
-    $tests = @()
+    $testReceipt = $null
     $common = @(('-p:RestorePackagesPath=' + (Join-Path $repo 'artifacts/nuget-cache')),
         '-p:CopyDebugSymbolFilesFromPackages=false', '-p:HeyMelodyDesktopPlatform=macOS',
         ('-p:FilamentRuntimeRoot=' + $FilamentRuntimeRoot),
@@ -63,60 +70,11 @@ try {
         $work = Join-Path $repo ('artifacts/macos/build-' + [Guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Path $work -Force | Out-Null
         if (-not $SkipTests) {
-            $originalTestTemporaryDirectory = [Environment]::GetEnvironmentVariable('TMPDIR')
-            try {
-                # Legacy isolated pipe fixtures use .NET's relative pipe names, which
-                # inherit macOS's long TMPDIR. Production endpoints use absolute paths.
-                $env:TMPDIR = '/tmp'
-                foreach ($project in @('Platform', 'MacOS', 'Diagnostics', 'Protocol', 'Resources', 'Devices', 'Control', 'Daily', 'Calibration',
-                    'Client', 'Host', 'App', 'DeviceManager', 'Calibration.UI', 'Rendering.Filament', 'ModelPreview')) {
-                    $name = 'HeyMelody.' + $project + '.Tests'
-                    $testLog = Join-Path $work ($name + '.log')
-                    & $DotNetExecutable build (Join-Path $repo "tests/$name/$name.csproj") -c Release -m:1 -nr:false @common *> $testLog
-                    $testExit = $LASTEXITCODE
-                    if ($testExit -eq 0) {
-                        & $DotNetExecutable (Join-Path $repo "tests/$name/bin/Release/net10.0/$name.dll") *>> $testLog
-                        $testExit = $LASTEXITCODE
-                    }
-                    $testLines = @(Get-Content -LiteralPath $testLog)
-                    $skipReasons = @($testLines | Where-Object { $_ -match '^SKIP ' })
-                    $skipped = 0
-                    foreach ($reason in $skipReasons) {
-                        $skipped += if ($reason -match '^SKIP (\d+) ') { [int]$Matches[1] } else { 1 }
-                    }
-                    $passed = $null
-                    foreach ($line in $testLines) {
-                        if ($line -match '^\{.*"passed"\s*:') {
-                            try { $passed = [int](($line | ConvertFrom-Json).passed) } catch { }
-                        } elseif ($line -match '^PASS (\d+) ' -or $line -match '^(\d+)/\d+ .*tests passed' -or
-                            $line -match '^(\d+) .*tests passed\.' -or $line -match '^Daily tests: (\d+) passed' -or
-                            $line -match '^Platform checks: (\d+) passed' -or $line -match '^Diagnostics checks passed: (\d+)') {
-                            $passed = [int]$Matches[1]
-                        }
-                    }
-                    $summaryLines = @($testLines | Where-Object {
-                        $_ -match '^(PASS|SKIP|FAIL|Platform checks:|Daily tests:|\d+[/ ]|\{)' -or
-                        $_ -match 'checks passed:|tests passed\.|error [A-Z]+\d+'
-                    } | Select-Object -Last 3 | ForEach-Object {
-                        $portable = $_.Replace($repo, '.')
-                        if ($portable.Length -gt 400) { $portable.Substring(0,400) } else { $portable }
-                    })
-                    $tests += [ordered]@{ project = $name; exitCode = $testExit; passed = $passed; skipped = $skipped; skipReasons = $skipReasons;
-                        log = [IO.Path]::GetRelativePath($repo, $testLog);
-                        logSha256 = (Get-FileHash -LiteralPath $testLog -Algorithm SHA256).Hash.ToLowerInvariant();
-                        summary = $summaryLines; scope = 'offline or simulated; no Bluetooth hardware' }
-                    Write-Host ($name + ': exit ' + $testExit + '; ' + ($summaryLines -join ' | '))
-                }
-            } finally {
-                [Environment]::SetEnvironmentVariable('TMPDIR', $originalTestTemporaryDirectory, 'Process')
-            }
-            $testReceipt = Join-Path $work 'offline-validation.json'
-            $testsSucceeded = @($tests | Where-Object { $_.exitCode -ne 0 }).Count -eq 0
-            [ordered]@{ schemaVersion = 1; version = $Version; runtimeIdentifier = 'osx-arm64'; success = $testsSucceeded;
-                tests = $tests; testProcessEnvironment = @{ TMPDIR = '/tmp'; reason = 'legacy relative pipe fixtures; production endpoint behavior is tested independently' };
-                bluetoothHardwareVerified = $false; nativeWindowsExecutionVerified = $false } |
-                ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $testReceipt -Encoding utf8NoBOM
-            if (-not $testsSucceeded) { throw "Offline tests failed; see $testReceipt" }
+            $testRoot = Join-Path $work 'offline-tests'
+            & (Join-Path $repo 'tools/ci/Invoke-OfflineTests.ps1') -Profile MacOS -Version $Version `
+                -DotNetExecutable $DotNetExecutable -PythonExecutable $python -OutputRoot $testRoot
+            if ($LASTEXITCODE -ne 0) { throw 'The macOS offline test profile failed.' }
+            $testReceipt = Join-Path $testRoot 'offline-validation.json'
             if ($TestsOnly) {
                 [ordered]@{ validation = $testReceipt; version = $Version; runtimeIdentifier = 'osx-arm64'; success = $true; published = $false } | ConvertTo-Json -Compress
                 return
@@ -129,6 +87,9 @@ try {
         }
         & (Join-Path $repo 'tools/Verify-FilamentRuntime.ps1') -Directory $nativeDirectory -RuntimeIdentifier osx-arm64 -RequireCurrent | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'Filament runtime verification failed.' }
+        $abi = & (Join-Path $repo 'tools/ci/Invoke-NativeAbiCheck.ps1') -NativeDirectory $nativeDirectory `
+            -RuntimeIdentifier osx-arm64 -DotNetExecutable $DotNetExecutable -OutputRoot (Join-Path $NativeAbiOutputRoot 'input')
+        $nativeAbiChecks.Add([ordered]@{ phase = 'input'; receiptPath = $abi.receiptPath; validation = $abi.validation })
         $publishRoot = Join-Path $work 'publish'
         foreach ($component in @('HeyMelody.App', 'HeyMelody.Host', 'HeyMelody.DeviceManager', 'HeyMelody.FitTest', 'HeyMelody.HearingSetup')) {
             & $DotNetExecutable publish (Join-Path $repo "src/$component/$component.csproj") -c Release -r osx-arm64 --self-contained true `
@@ -141,12 +102,17 @@ try {
             '--bundle', $BundlePath, '--version', $Version, '--filament-runtime', $nativeDirectory)
         if ($SkipRuntimeChecks) { $stageArguments += '--skip-runtime-checks' }
         if ($ValidationPath) { $stageArguments += @('--validation', [IO.Path]::GetFullPath($ValidationPath)) }
-        if ($tests.Count) {
+        if ($testReceipt) {
             $stageArguments += @('--validation', $testReceipt)
         }
         & $python @stageArguments
         if ($LASTEXITCODE -ne 0) { throw 'macOS bundle assembly or verification failed.' }
     }
+    # Check the signed bundle itself, including when finalizing an existing StageOnly output.
+    $abi = & (Join-Path $repo 'tools/ci/Invoke-NativeAbiCheck.ps1') `
+        -NativeDirectory (Join-Path ([IO.Path]::GetFullPath($BundlePath)) 'Contents/MacOS') `
+        -RuntimeIdentifier osx-arm64 -DotNetExecutable $DotNetExecutable -OutputRoot (Join-Path $NativeAbiOutputRoot 'package')
+    $nativeAbiChecks.Add([ordered]@{ phase = 'package'; receiptPath = $abi.receiptPath; validation = $abi.validation })
     if ($StageOnly) {
         [ordered]@{ bundle = $BundlePath; version = $Version; runtimeIdentifier = 'osx-arm64'; dmgCreated = $false } | ConvertTo-Json -Compress
         return
@@ -159,6 +125,12 @@ try {
     if ($ValidationPath) { $finalArguments += @('--validation', [IO.Path]::GetFullPath($ValidationPath)) }
     & $python @finalArguments
     if ($LASTEXITCODE -ne 0) { throw 'DMG creation or verification failed.' }
+    [ordered]@{
+        schemaVersion = 1; success = $true; version = $Version; runtimeIdentifier = 'osx-arm64'
+        package = [IO.Path]::GetFileName($dmg); packageSha256 = (Get-FileHash -LiteralPath $dmg -Algorithm SHA256).Hash.ToLowerInvariant()
+        checks = $nativeAbiChecks.ToArray(); gpuProbeExecuted = $false; nativeBluetoothCalls = 0
+    } | ConvertTo-Json -Depth 16 |
+        Set-Content -LiteralPath (Join-Path $OutputRoot "HeyMelody-${Version}-macos-arm64-native-abi.json") -Encoding utf8NoBOM
 } finally {
     foreach ($key in @([Environment]::GetEnvironmentVariables().Keys)) {
         if (-not $savedEnvironment.Contains($key)) { [Environment]::SetEnvironmentVariable([string]$key, $null, 'Process') }

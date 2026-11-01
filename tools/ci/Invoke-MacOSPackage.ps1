@@ -21,6 +21,7 @@ $started = [DateTime]::UtcNow
 $sourceSha = $null
 $success = $false
 $failure = $null
+$nativeAbiVerified = $false
 
 function Invoke-CiProcess {
     param([string]$Name, [string]$Executable, [string[]]$Arguments, [int]$TimeoutSeconds = 300)
@@ -47,7 +48,7 @@ try {
         throw 'The macOS package job requires native Apple silicon macOS and PowerShell.'
     }
     Import-Module (Join-Path $repo 'tools/QuietProcess.psm1') -Force
-    Import-Module (Join-Path $repo 'tools/filament/FilamentArtifactCache.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot 'ArtifactPolicy.psm1') -Force
     if ([string]::IsNullOrWhiteSpace($Version)) {
         $parseErrors = $null
         $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $repo 'Build-MacOS.ps1'), [ref]$null, [ref]$parseErrors)
@@ -57,7 +58,7 @@ try {
         $Version = [string]$parameter.DefaultValue.SafeGetValue()
     }
     if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid package version: $Version" }
-    $policy = Get-FilamentArtifactPolicy -EventName $env:GITHUB_EVENT_NAME -GitRef $env:GITHUB_REF
+    $policy = Get-CiArtifactPolicy -EventName $env:GITHUB_EVENT_NAME -GitRef $env:GITHUB_REF
     $dotnet = (Get-Command dotnet -ErrorAction Stop).Source
     $python = (Get-Command python3 -ErrorAction Stop).Source
     $pwsh = (Get-Command pwsh -ErrorAction Stop).Source
@@ -104,26 +105,47 @@ try {
         throw 'The same-run osx-arm64 Filament artifact is missing.'
     }
     $native = & (Join-Path $repo 'tools/Verify-FilamentRuntime.ps1') -Directory $nativeDirectory -RuntimeIdentifier osx-arm64 -RequireCurrent
+    $nativeSource = Get-Content -LiteralPath (Join-Path $FilamentRuntimeRoot 'ci-source.json') -Raw | ConvertFrom-Json
+    if ($nativeSource.schemaVersion -ne 1 -or $nativeSource.sourceSha -cne $sourceSha -or
+        $nativeSource.runtimeIdentifier -cne 'osx-arm64' -or $nativeSource.manifestSha256 -cne $native.manifestSha256) {
+        throw 'The same-run native artifact source SHA or manifest receipt does not match this checkout.'
+    }
     $native | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $RecordRoot 'native-input.json') -Encoding utf8NoBOM
 
-    foreach ($name in @('Platform', 'MacOS')) {
-        Invoke-CiProcess "test-$($name.ToLowerInvariant())" $dotnet @('run', '--project', (Join-Path $repo "tests/HeyMelody.$name.Tests"),
-            '-c', 'Release', '--disable-build-servers', '-p:UseSharedCompilation=false', '-p:HeyMelodyDesktopPlatform=macOS') -TimeoutSeconds 900 | Out-Null
+    $offlineRoot = Join-Path $RecordRoot 'offline-tests'
+    Invoke-CiProcess offline-tests $pwsh @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'Invoke-OfflineTests.ps1'),
+        '-Profile', 'MacOS', '-Version', $Version, '-DotNetExecutable', $dotnet, '-PythonExecutable', $python,
+        '-OutputRoot', $offlineRoot) -TimeoutSeconds 2400 | Out-Null
+    $abiRoot = Join-Path $RecordRoot 'native-abi'
+    Invoke-CiProcess native-abi $dotnet @('run', '--project', (Join-Path $repo 'tests/HeyMelody.Rendering.Filament.Tests'),
+        '-c', 'Release', '--disable-build-servers', '-p:UseSharedCompilation=false', '-p:HeyMelodyDesktopPlatform=macOS',
+        '--', '--native-abi', $nativeDirectory, '--output-dir', $abiRoot) -TimeoutSeconds 900 | Out-Null
+    $abi = Get-Content -LiteralPath (Join-Path $abiRoot 'native-abi-report.json') -Raw | ConvertFrom-Json
+    if (-not $abi.success -or -not $abi.nativeLibraryLoaded -or $abi.abiVersion -ne 2 -or -not $abi.exportsVerified) {
+        throw 'The package requires a successful real native ABI load check.'
     }
-    Invoke-CiProcess test-package-macos $python @('-m', 'unittest', 'discover', '-s', 'tools/tests', '-p', 'test_package_macos.py') | Out-Null
+    $nativeAbiVerified = $true
+    $validation = Get-Content -LiteralPath (Join-Path $offlineRoot 'offline-validation.json') -Raw | ConvertFrom-Json
+    $validation | Add-Member -NotePropertyName nativeAbiVerification -NotePropertyValue $abi
+    $validation | Add-Member -NotePropertyName sourceSha -NotePropertyValue $sourceSha
+    $validationPath = Join-Path $RecordRoot 'package-input-validation.json'
+    $validation | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $validationPath -Encoding utf8NoBOM
     Invoke-CiProcess build $pwsh @('-NoProfile', '-File', (Join-Path $repo 'Build-MacOS.ps1'), '-Version', $Version,
         '-DotNetExecutable', $dotnet, '-FilamentRuntimeRoot', $FilamentRuntimeRoot, '-OutputRoot', $OutputRoot,
-        '-SkipTests', '-SkipMetalCheck') -TimeoutSeconds 2400 | Out-Null
+        '-NativeAbiOutputRoot', (Join-Path $RecordRoot 'build-native-abi'),
+        '-ValidationPath', $validationPath, '-SkipTests', '-SkipMetalCheck') -TimeoutSeconds 2400 | Out-Null
     $dmg = Join-Path $OutputRoot "HeyMelody-$Version-macos-arm64.dmg"
     $receipt = Join-Path $OutputRoot "HeyMelody-$Version-macos-arm64.json"
     if (-not (Test-Path -LiteralPath $dmg -PathType Leaf) -or -not (Test-Path -LiteralPath $receipt -PathType Leaf)) {
         throw 'The verified DMG or its JSON receipt was not produced.'
     }
     Copy-Item -LiteralPath $receipt -Destination (Join-Path $RecordRoot 'package-verification.json')
+    Copy-Item -LiteralPath $validationPath -Destination (Join-Path $OutputRoot "HeyMelody-$Version-macos-arm64-validation.json")
     $success = $true
     if ($env:GITHUB_STEP_SUMMARY) {
         @('### macOS arm64 package', '', "- Version: $Version; source: $sourceSha",
             '- Ad-hoc signed DMG; bundle and DMG checks completed. Metal GPU execution was skipped on this hosted runner.',
+            '- Shared and macOS offline tests passed; the real arm64 native library loaded with ABI 2 and required exports.',
             "- Package upload allowed: $($policy.PackagePublishEligible); retention: $($policy.PackageRetentionDays) day(s).",
             '- Targeted offline checks and complete logs are retained for 1 day. No Bluetooth hardware validation was performed.') |
             Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8NoBOM
@@ -137,6 +159,7 @@ try {
     [ordered]@{
         schemaVersion = 1; success = $success; version = $Version; sourceSha = $sourceSha
         runtimeIdentifier = 'osx-arm64'; metalGpuVerified = $false; bluetoothHardwareVerified = $false
+        nativeAbiVerified = $nativeAbiVerified
         startedUtc = $started.ToString('o'); completedUtc = [DateTime]::UtcNow.ToString('o')
         steps = @($results); failure = $failure
     } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $RecordRoot 'ci-summary.json') -Encoding utf8NoBOM

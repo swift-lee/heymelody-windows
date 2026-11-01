@@ -1,0 +1,122 @@
+name: macOS packages
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: macOS package version (x.y.z); leave blank to use the project default.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: macos-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
+  DOTNET_CLI_UI_LANGUAGE: en
+  NUGET_PACKAGES: ${{ github.workspace }}/artifacts/nuget-cache
+  NUGET_HTTP_CACHE_PATH: ${{ github.workspace }}/artifacts/nuget-http-cache
+  MSBUILDDISABLENODEREUSE: "1"
+  DOTNET_CLI_USE_MSBUILD_SERVER: "0"
+
+jobs:
+  native-osx-arm64:
+    name: Native runtime (osx-arm64)
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up the locked .NET SDK
+        uses: ./.github/actions/setup-build-sdk
+      - name: Require native Apple silicon
+        shell: pwsh
+        run: |
+          if (-not $IsMacOS -or [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -ne 'Arm64' -or [Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'Arm64') {
+            throw 'The macOS runtime and application require a native Apple silicon runner.'
+          }
+      - name: Build the locked Metal runtime
+        shell: pwsh
+        run: ./tools/filament/Build-FilamentNative.ps1 -RuntimeIdentifier osx-arm64 -OutputRoot artifacts/filament-compat -FetchSource -FetchBuildTools -SkipSmoke
+      - name: Verify native input and bind its source SHA
+        shell: pwsh
+        run: |
+          $native = Join-Path $env:GITHUB_WORKSPACE 'artifacts/filament-compat/runtimes/osx-arm64/native'
+          $verified = ./tools/Verify-FilamentRuntime.ps1 -Directory $native -RuntimeIdentifier osx-arm64 -RequireCurrent
+          $sha = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -or $sha -cne $env:GITHUB_SHA) { throw 'The native checkout does not match this workflow SHA.' }
+          [ordered]@{
+            schemaVersion = 1; sourceSha = $sha; runtimeIdentifier = 'osx-arm64'
+            manifestSha256 = $verified.manifestSha256; nativeGpuVerified = $false
+          } | ConvertTo-Json | Set-Content -LiteralPath artifacts/filament-compat/ci-source.json -Encoding utf8NoBOM
+      - name: Upload only this run's native payload and source receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: filament-osx-arm64
+          path: |
+            artifacts/filament-compat/runtimes/
+            artifacts/filament-compat/ci-source.json
+          if-no-files-found: error
+          retention-days: 2
+
+  package-arm64:
+    name: macOS package (arm64)
+    needs: native-osx-arm64
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up the locked .NET SDK
+        uses: ./.github/actions/setup-build-sdk
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Restore macOS NuGet cache
+        uses: actions/cache@v4
+        with:
+          path: artifacts/nuget-cache
+          key: nuget-macos-arm64-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Build.targets', 'NuGet.Config') }}
+          restore-keys: nuget-macos-arm64-
+      - name: Check CI policy and workflow contracts
+        shell: pwsh
+        run: ./tools/ci/tests/Test-CiContracts.ps1 -OutputPath artifacts/macos-ci/ci-contracts.json
+      - name: Download this run's Metal runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: filament-osx-arm64
+          path: artifacts/filament-compat
+      - name: Check and build ad-hoc macOS package
+        id: package
+        shell: pwsh
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: ./tools/ci/Invoke-MacOSPackage.ps1
+      - name: Upload macOS DMG and verification receipts
+        if: success() && steps.package.outputs.package-publish-eligible == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: HeyMelody_macOS_${{ steps.package.outputs.version }}_arm64_${{ steps.package.outputs.commit }}
+          path: |
+            release/macos/*.dmg
+            release/macos/*.json
+          if-no-files-found: error
+          retention-days: ${{ steps.package.outputs.package-retention-days }}
+      - name: Upload macOS checks and complete build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-checks-arm64-${{ github.sha }}
+          path: artifacts/macos-ci/
+          if-no-files-found: warn
+          retention-days: 1

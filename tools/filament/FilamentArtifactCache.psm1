@@ -1,5 +1,6 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot '../ci/ArtifactPolicy.psm1') -Force
 
 function Get-FilamentCacheValue {
     param($Object, [string]$Name)
@@ -27,18 +28,6 @@ function ConvertTo-FilamentCanonicalJson {
         return $Item
     }
     ConvertTo-OrderedCacheValue $Value | ConvertTo-Json -Depth 40 -Compress
-}
-
-function Get-FilamentArtifactPolicy {
-    [CmdletBinding()]
-    param([string]$EventName, [string]$GitRef)
-    $trusted = $EventName -in @('push', 'workflow_dispatch')
-    [pscustomobject]@{
-        CachePublishEligible = $trusted
-        PackagePublishEligible = $trusted
-        PackageRetentionDays = $(if ($GitRef -ceq 'refs/heads/main') { 7 } else { 1 })
-        ReceiptRetentionDays = 1
-    }
 }
 
 function Get-FilamentCacheFingerprint {
@@ -345,7 +334,7 @@ function Invoke-FilamentRuntimePreparation {
         $Build = { param($buildRoot, $rid, $identityFile) & $builder -RuntimeIdentifier $rid -OutputRoot $buildRoot -FilamentSource '' -FetchSource -FetchBuildTools -SkipSmoke -ExpectedToolchainIdentityFile $identityFile | Out-Host }.GetNewClosure()
     }
     $identity = Get-FilamentCacheFingerprint -RepoRoot $RepoRoot -RuntimeIdentifier $RuntimeIdentifier -ToolchainIdentity $ToolchainIdentity
-    $policy = Get-FilamentArtifactPolicy -EventName $EventName -GitRef $GitRef
+    $policy = Get-CiArtifactPolicy -EventName $EventName -GitRef $GitRef
     $restore = [pscustomobject]@{ Hit = $false; Reason = $(if ($ForceRebuild) { 'Manual native rebuild requested.' } else { 'Repository identity is unavailable.' }); SourceArtifactId = $null; SourceRunId = $null }
     if (-not $ForceRebuild -and $Repository) {
         $restore = Restore-FilamentArtifactCache -Repository $Repository -CacheKey $identity.CacheKey -RuntimeIdentifier $RuntimeIdentifier -ExpectedIdentity $identity -DestinationRoot (Join-Path $OutputRoot 'restore') -Request $Request -Download $Download -Verify $Verify -TimeoutSeconds $TimeoutSeconds -ApiBaseUrl $ApiBaseUrl
@@ -383,11 +372,10 @@ function Invoke-FilamentRuntimePreparation {
     }
     [pscustomobject]@{
         RuntimeRoot = $payload; CacheKey = $identity.CacheKey; CacheStatus = $status; CacheDirectory = $payload
-        CachePublishEligible = $policy.CachePublishEligible; PackagePublishEligible = $policy.PackagePublishEligible
-        PackageRetentionDays = $policy.PackageRetentionDays; ReceiptRetentionDays = $policy.ReceiptRetentionDays
+        CachePublishEligible = $policy.CachePublishEligible; CacheRetentionDays = $policy.CacheRetentionDays
         RestoreReason = $restore.Reason; SourceArtifactId = $restore.SourceArtifactId; SourceRunId = $restore.SourceRunId
         Fingerprint = $identity.Fingerprint; ToolchainIdentity = $ToolchainIdentity
     }
 }
 
-Export-ModuleMember -Function ConvertTo-FilamentCanonicalJson, Get-FilamentArtifactPolicy, Get-FilamentCacheFingerprint, Get-FilamentCacheCandidates, Restore-FilamentArtifactCache, Invoke-FilamentRuntimePreparation
+Export-ModuleMember -Function ConvertTo-FilamentCanonicalJson, Get-FilamentCacheFingerprint, Get-FilamentCacheCandidates, Restore-FilamentArtifactCache, Invoke-FilamentRuntimePreparation

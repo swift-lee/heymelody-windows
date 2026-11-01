@@ -558,12 +558,39 @@ static async Task DamagedMembers()
         ("vfxms slice is not a GLB", "m.vfxms", Vfxms(GlbBytes(total: valid.Length + 4))),
     };
     using var fixture = new Fixture(); using var coordinator = fixture.Coordinator(); await coordinator.InitializeAsync();
+    var refreshExceptions = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+    void CaptureRefreshException(object? sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs args)
+    {
+        refreshExceptions.Enqueue(args.Exception);
+        while (refreshExceptions.Count > 16) refreshExceptions.TryDequeue(out _);
+    }
     foreach (var (name, member, bytes) in bad)
     {
         string key = member[(member.IndexOf('.') + 1)..];
         string config = "{\"detailImageRes\":{\"path\":\"res/image/detail.png\"},\"" + (key == "webp" ? "modelWebp" : "model3D") + "\":{\"path\":\"res/raw/" + member + "\"}}";
         fixture.Handler.Artwork = PackageZip(config, ("res/image/detail.png", png), ("res/raw/" + member, bytes));
-        Check(await coordinator.RefreshArtworkAsync("06EC10", 0, force: true), name + " failed the whole package");
+        refreshExceptions.Clear();
+        bool refreshed;
+        AppDomain.CurrentDomain.FirstChanceException += CaptureRefreshException;
+        try { refreshed = await coordinator.RefreshArtworkAsync("06EC10", 0, force: true); }
+        finally { AppDomain.CurrentDomain.FirstChanceException -= CaptureRefreshException; }
+        if (!refreshed)
+        {
+            // Refresh returns only a bool; preserve bounded evidence of errors caught inside it.
+            var diagnostic = new StringBuilder($"REFRESH DIAGNOSTIC: {name}; LastError={coordinator.LastError ?? "<null>"}; Revision={coordinator.Revision}\n");
+            foreach (var error in refreshExceptions)
+            {
+                string message = $"{error.GetType().FullName} HResult=0x{error.HResult:X8}: {error.Message}";
+                diagnostic.AppendLine(message[..Math.Min(message.Length, 220)]);
+                var frames = (error.StackTrace ?? "").Split('\n');
+                var relevant = frames.Where(frame => frame.Contains("HeyMelody", StringComparison.Ordinal)).Take(3).ToArray();
+                string stack = string.Join(Environment.NewLine, relevant.Length > 0 ? relevant : frames.Take(2));
+                diagnostic.AppendLine(stack[..Math.Min(stack.Length, 320)]);
+            }
+            string output = diagnostic.ToString();
+            Console.WriteLine(output[..Math.Min(output.Length, 5998)]);
+        }
+        Check(refreshed, name + " failed the whole package");
         using var lease = await coordinator.ResolveArtworkAsync("06EC10", 0, "detail");
         var roles = JsonSerializer.Deserialize<ResourceArtwork[]>(File.ReadAllBytes(Path.Combine(lease!.PackageRoot, "artwork.json")), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!.Select(entry => entry.Role).ToArray();
         Check(roles.SequenceEqual(["detail"]), name + " was indexed: " + string.Join(",", roles));

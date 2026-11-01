@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HeyMelodyWindows.App;
 
 // Feature rows and EQ choices stay editable during an in-flight write; later choices queue like ANC.
@@ -132,8 +133,21 @@ internal static class WriteQueueTests
             var click = vm.SelectPresetAsync(vm.PresetOptions.Single(x => x.Key == 2));
             Check(service.Actions.Count == 1 && !click.IsCompleted, "The click chains after the save instead of being lost.");
             gate.SetResult(); await dialogs.AlertEntered.Task.WaitAsync(Deadline);
-            dialogs.AlertRelease.SetResult(); await Task.WhenAll(save, click).WaitAsync(Deadline);
-            Check(service.Actions.Count == 1 && vm.SelectedPreset?.Key == 0, $"The unconfirmed save discards the click. Actions.Count={service.Actions.Count}; SelectedPreset.Key={vm.SelectedPreset?.Key.ToString() ?? "<null>"}.");
+            // The external save's queued click completes before the drain restores its display.
+            // This console fixture has no UI synchronization context, so observe restoration too.
+            var restored = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            void ObserveRestore(object? sender, PropertyChangedEventArgs change)
+            {
+                if (change.PropertyName == nameof(MainViewModel.SelectedPreset) && vm.SelectedPreset?.Key == 0)
+                    restored.TrySetResult();
+            }
+            vm.PropertyChanged += ObserveRestore;
+            try
+            {
+                dialogs.AlertRelease.SetResult(); await Task.WhenAll(save, click, restored.Task).WaitAsync(Deadline);
+                Check(service.Actions.Count == 1 && vm.SelectedPreset?.Key == 0, $"The unconfirmed save discards the click. Actions.Count={service.Actions.Count}; SelectedPreset.Key={vm.SelectedPreset?.Key.ToString() ?? "<null>"}.");
+            }
+            finally { vm.PropertyChanged -= ObserveRestore; }
         });
     }
 

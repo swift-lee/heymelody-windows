@@ -30,7 +30,7 @@ internal static class NativeSmoke
             {
                 var builder = AppBuilder.Configure<SmokeApplication>().UsePlatformDetect();
                 if (basicRenderMode is not null)
-                    builder = HeyMelodyWindows.Ui.RenderingSetup.UseHeyMelodyRendering(builder, basicRenderMode);
+                    builder = HeyMelodyWindows.Ui.RenderingSetup.UseHeyMelodyRendering(builder, basicRenderMode.Value);
                 _state.ExitCode = builder.LogToTrace().StartWithClassicDesktopLifetime([], ShutdownMode.OnExplicitShutdown);
             }
             catch (Exception error) { _state.Failure = error.ToString(); }
