@@ -23,6 +23,10 @@ internal static class MainUiTestLayoutTests
             Pass("layout helper corrects a settled bottom clipping residual without another bring request");
             await BottomClippingAsync(deferredGrowth: true);
             Pass("layout helper positions against deferred extent growth after its single bring request");
+            await CenteredGroupAsync(deferredGrowth: false);
+            Pass("layout helper centers a settled group without changing its controls");
+            await CenteredGroupAsync(deferredGrowth: true);
+            Pass("layout helper centers a group after controlled geometry growth instead of using a stale offset");
             await RejectedTargetAsync("OverlayTarget", overlay: true);
             Pass("layout helper cannot accept an overlay hit instead of its target");
             await RejectedTargetAsync("OversizedTarget", oversized: true);
@@ -75,6 +79,41 @@ internal static class MainUiTestLayoutTests
         double expectedOffset = initialOffset + initialResidual + (deferredGrowth ? 48 : 0);
         Check(Math.Abs(fixture.Scroll.Offset.Y - expectedOffset) <= .6 && Math.Abs(BottomResidual(fixture)) <= .6,
             "The single correction must use the settled target rectangle, not its earlier extent.");
+    }
+
+    private static async Task CenteredGroupAsync(bool deferredGrowth)
+    {
+        using var fixture = new Fixture(deferredGrowth ? "DeferredGroupLast" : "GroupLast");
+        var first = new Border { Name = "GroupFirst", Height = 40 };
+        ((StackPanel)fixture.Target.Parent!).Children.Insert(1, first);
+        fixture.Spacer.Height = fixture.Scroll.Viewport.Height + 50;
+        Pump();
+        double firstTop = first.TranslatePoint(default, fixture.Scroll)!.Value.Y;
+        double lastBottom = fixture.Target.TranslatePoint(default, fixture.Scroll)!.Value.Y + fixture.Target.Bounds.Height;
+        double groupHeight = lastBottom - firstTop;
+        double initialCenter = fixture.Scroll.Offset.Y + firstTop - (fixture.Scroll.Viewport.Height - groupHeight) / 2;
+        Check(!deferredGrowth || lastBottom - (initialCenter - fixture.Scroll.Offset.Y) + 80 > fixture.Scroll.Viewport.Height + .6,
+            "Controlled delayed growth must invalidate the earlier centering snapshot.");
+        bool growthCompleted = false;
+        fixture.ObserveBringRequests(handled: true, requested: () =>
+        {
+            if (!deferredGrowth) return;
+            Dispatcher.UIThread.Post(() =>
+            {
+                fixture.Spacer.Height += 80;
+                fixture.Trailing.Height += 64;
+                growthCompleted = true;
+            }, DispatcherPriority.Background);
+        });
+        await MainUiTestLayout.CenterGroupAsync(fixture.Window, first, fixture.Target);
+        firstTop = first.TranslatePoint(default, fixture.Scroll)!.Value.Y;
+        lastBottom = fixture.Target.TranslatePoint(default, fixture.Scroll)!.Value.Y + fixture.Target.Bounds.Height;
+        Check(fixture.BringRequests == 1 && (!deferredGrowth || growthCompleted),
+            "Group centering must observe deferred layout without restarting its visibility request.");
+        Check(Math.Abs(fixture.Scroll.Offset.Y - initialCenter - (deferredGrowth ? 80 : 0)) <= .6
+            && Math.Abs((firstTop + lastBottom) / 2 - fixture.Scroll.Viewport.Height / 2) <= .6
+            && first.Bounds.Height == 40 && fixture.Target.Bounds.Height == 33,
+            "Both controls must remain unchanged and be centered using the final geometry.");
     }
 
     private static async Task RejectedTargetAsync(string name, bool overlay = false,

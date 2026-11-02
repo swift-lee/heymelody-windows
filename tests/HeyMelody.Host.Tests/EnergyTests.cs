@@ -71,13 +71,53 @@ internal static class EnergyTests
             var applier = new FakeApplier(); using var controller = new EnergyController(policy, applier);
             using var self = Process.GetCurrentProcess();
             using var attached = controller.Attach(self);
-            Check(applier.Calls.ToArray() is [(_, EnergyMode.Eco, _)], "Attach did not apply Eco synchronously");
-            int caller = Environment.CurrentManagedThreadId;
-            policy.SetGuiCount(1);
-            await Until(() => applier.Calls.Count == 2);
-            Check(applier.Calls.ToArray()[1] is (_, EnergyMode.Default, var thread) && thread != caller, "Mode change was not applied on a pool thread");
-            // A count change that keeps the mode raises no event, so nothing is applied again.
-            policy.SetGuiCount(2); await Task.Delay(100); Check(applier.Calls.Count == 2, "An unchanged mode was applied again");
+            Check(applier.Calls.ToArray() is [(_, EnergyMode.Eco, _, _)], "Attach did not apply Eco synchronously");
+            var limit = TimeSpan.FromSeconds(4);
+            var elapsed = Stopwatch.StartNew();
+            using var budget = new CancellationTokenSource(limit);
+            var triggered = new TaskCompletionSource<(int Thread, bool IsPool)>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseCaller = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            // An async test caller can itself be a pool thread reused after an await.
+            // Keep a dedicated caller alive until the queued application is observed.
+            var callerThread = new Thread(() =>
+            {
+                try
+                {
+                    var caller = (Environment.CurrentManagedThreadId, Thread.CurrentThread.IsThreadPoolThread);
+                    policy.SetGuiCount(1);
+                    triggered.TrySetResult(caller);
+                    releaseCaller.Task.GetAwaiter().GetResult();
+                }
+                catch (Exception error) { triggered.TrySetException(error); }
+            }) { IsBackground = true, Name = "HeyMelody energy test mode caller" };
+            bool started = false;
+            Exception? failure = null;
+            try
+            {
+                callerThread.Start(); started = true;
+                var caller = await triggered.Task.WaitAsync(budget.Token);
+                Check(!caller.IsPool, "The controlled caller must not be a pool thread");
+                while (applier.Calls.Count != 2) await Task.Delay(10, budget.Token);
+                var applied = applier.Calls.ToArray()[1];
+                Check(applied is (_, EnergyMode.Default, var thread, true) && thread != caller.Thread,
+                    $"Mode change was not applied on a pool thread distinct from the caller: caller={caller.Thread}, "
+                    + $"mode={applied.Mode}, thread={applied.Thread}, pool={applied.IsPool}");
+                // A count change that keeps the mode raises no event, so nothing is applied again.
+                policy.SetGuiCount(2); await Task.Delay(100, budget.Token);
+                Check(applier.Calls.Count == 2, "An unchanged mode was applied again");
+            }
+            catch (Exception error) { failure = error; throw; }
+            finally
+            {
+                releaseCaller.TrySetResult(true);
+                int remaining = (int)Math.Max(0, Math.Ceiling((limit - elapsed.Elapsed).TotalMilliseconds));
+                if (started && !callerThread.Join(remaining))
+                {
+                    const string cleanup = "Controlled energy caller did not exit within the shared four-second budget";
+                    if (failure is null) throw new InvalidOperationException(cleanup);
+                    Console.Error.WriteLine(cleanup);
+                }
+            }
         });
         await test("energy controller: exited and detached processes are skipped and a launch is prepared synchronously", async () =>
         {
@@ -90,7 +130,7 @@ internal static class EnergyTests
             Check(applier.Calls.Count == 1, "Live attach did not apply");
             controller.PrepareLaunch();
             // Whether the caller or the change notification's pool thread applies it, Default is in place when PrepareLaunch returns.
-            Check(policy.Mode == EnergyMode.Default && applier.Calls.ToArray() is [_, (_, EnergyMode.Default, _)], "PrepareLaunch returned before Default was applied");
+            Check(policy.Mode == EnergyMode.Default && applier.Calls.ToArray() is [_, (_, EnergyMode.Default, _, _)], "PrepareLaunch returned before Default was applied");
             detaching.Dispose(); clock.Advance(TimeSpan.FromMinutes(1)); await Task.Delay(100);
             Check(applier.Calls.Count == 2, "A detached or exited process was applied after the mode went back to Eco");
         });
@@ -205,12 +245,12 @@ internal static class EnergyTests
 
     private sealed class FakeApplier : IEnergyApplier
     {
-        internal readonly System.Collections.Concurrent.ConcurrentQueue<(Process Process, EnergyMode Mode, int Thread)> Calls = new();
+        internal readonly System.Collections.Concurrent.ConcurrentQueue<(Process Process, EnergyMode Mode, int Thread, bool IsPool)> Calls = new();
         internal Action<Action<string, int>, EnergyMode>? Fail;
         internal bool Throw;
         public void Apply(Process process, EnergyMode mode, Action<string, int> failed)
         {
-            Calls.Enqueue((process, mode, Environment.CurrentManagedThreadId));
+            Calls.Enqueue((process, mode, Environment.CurrentManagedThreadId, Thread.CurrentThread.IsThreadPoolThread));
             Fail?.Invoke(failed, mode);
             if (Throw) throw new InvalidOperationException("Synthetic applier failure");
         }

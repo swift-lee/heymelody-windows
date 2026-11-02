@@ -113,7 +113,17 @@ macOS App 的失败目标为“复制设备信息”，不是日志按钮。回�
 
 Windows x64、SDK 10.0.403 的新布局定向回归为 6/6，单独完整 App 为 158 项通过、111 张 headless 图像，两项独立验收均首轮退出 0，`nativeBluetoothCalls=0`。日志与回执位于 `artifacts/actions-fix-ui-helper-fa0de9307cfe47d2859967aa10f4aa3f/`。三个负向场景分别要求覆盖层、超高目标和横向裁切仍然失败，并保留原期限；不能将该夹具通过等同于真窗口、显示器 DPI、GPU 或真实设备验证。
 
-随后唯一一次完整 Windows profile 执行了 19 个 .NET runner 及两个 Python 门禁：17 个 .NET runner 和两个 Python 门禁通过，其中 App 158、Client 198、Rendering 141、ModelPreview 180。本地整体仍非零：Resources 为 40/41，失败于租用副本的重下载，未取得足以确认其与此前拒绝访问相同根因的证据；Host 为 `HostEfficiencyTests.cs:57` 的 `UntilAsync` 取消，和历史 BUG-06 记录一致。未重跑至通过或修改这些产品行为。收据在 `artifacts/actions-fix-windows-a7eaa172c4df49d19e8d24500c14dd09/offline-tests/offline-validation.json`；新修复的跨平台验收仍以同 SHA 远端完整门禁为准，不关闭 BUG-05/06。
+首轮修复工作树随后唯一一次完整 Windows profile 执行了 19 个 .NET runner 及两个 Python 门禁：17 个 .NET runner 和两个 Python 门禁通过，其中 App 158、Client 198、Rendering 141、ModelPreview 180。本地整体仍非零：Resources 为 40/41，失败于租用副本的重下载，未取得足以确认其与此前拒绝访问相同根因的证据；Host 为 `HostEfficiencyTests.cs:57` 的 `UntilAsync` 取消，和历史 BUG-06 记录一致。未重跑至通过或修改这些产品行为。收据在 `artifacts/actions-fix-windows-a7eaa172c4df49d19e8d24500c14dd09/offline-tests/offline-validation.json`；新修复的跨平台验收仍以同 SHA 远端完整门禁为准，不关闭 BUG-05/06。
+
+### 同轮后续门禁
+
+修复提交 `f6e0de5` 的 [Windows 运行](https://github.com/swift-lee/heymelody-windows/actions/runs/41442085864)为 21/21 个执行组通过，App 158、Resources 41、Host 132，两个架构的打包均成功；同批 [Filament Linux](https://github.com/swift-lee/heymelody-windows/actions/runs/41442085955)成功。Windows 检查与架构包回执下载于 `artifacts/actions-fix-delivery-f6e0de5-d17b8cbcf4454f4d825cff2fcd56edd3/`，不把 arm64 交叉发布的静态检查称为原生加载。
+
+该提交的 [macOS 运行](https://github.com/swift-lee/heymelody-windows/actions/runs/41442085906)中两个 Python 门禁及新增六个布局夹具场景通过，但后续 Host 和 App 仍失败，16 个 .NET runner 为 14 个通过，尚未生成 DMG。Host 位于 `EnergyTests.cs:78` 的线程断言，不是前述 HostEfficiency 等待取消；App 位于折叠信息卡组的全显断言，不是先前展开后的复制按钮点击。完整回执保存在 `artifacts/actions-fix-macos-watch-229113d0cc3145f2afd4b9b8c637916c/receipts/`，监控客户端中途的网络断线不计为 CI 构建失败。
+
+后续仍只修测试准备和观测：折叠组先等待两卡及视口几何稳定，再请求一次 `BringIntoView`，再次稳定后按原公式居中一次，最后等待全显与稳定，仍受 3 秒总期限约束。原复合断言完整保留并补全部操作数；新增正常居中与首次请求后延迟几何增长回归。能耗测试则改用保持存活的专用非线程池 caller，记录真正的 `IsThreadPoolThread` 并保留不同于 caller 的断言，避免异步 caller 释放后池线程合法复用 ID 被误判；触发、观察及清理共享原 4 秒预算。生产控制器的线程池排队、滚动、动画、字体及布局均未修改。
+
+第二轮 Windows x64 本地定向布局为 8/8、完整 App 为 160 项通过，日志在 `artifacts/actions-fix-ui-group-2ac6086dd2f24667ae19a0fd10c539c5/`；完整 Host 默认验收为 132/132，日志在 `artifacts/actions-host-energy-fix-64524095f54c4249913dd7d3fbc45204/`。各验收均首轮退出 0、未超时，`nativeBluetoothCalls=0`，不冒充原生 macOS 或真实设备结果。
 
 本次交付要求等待同一修复 SHA 的 Windows/macOS Actions 完整通过，下载短期回执与 DMG 核对源 SHA 和摘要；不以重跑到绿、跳过门禁或更改产品行为替代修复。用户随后因暂时无法签名，授权本轮使用延后签名包装器创建临时无签名提交、登记待补签，保留 hooks 与持久签名配置；这不改写此前 `d8103ad` 的正常签名记录。
 

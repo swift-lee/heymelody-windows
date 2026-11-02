@@ -26,6 +26,93 @@ internal static class MainUiTestLayout
         Dispatcher.UIThread.RunJobs();
     }
 
+    internal static async Task CenterGroupAsync(Window window, Control first, Control last)
+    {
+        var scroll = first.GetVisualAncestors().OfType<ScrollViewer>().FirstOrDefault();
+        if (scroll is null || !ReferenceEquals(scroll, last.GetVisualAncestors().OfType<ScrollViewer>().FirstOrDefault())
+            || !ReferenceEquals(TopLevel.GetTopLevel(first), window) || !ReferenceEquals(TopLevel.GetTopLevel(last), window))
+            throw new InvalidOperationException("A settings group requires one attached window and a shared nearest viewport.");
+
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        bool bringRequested = false, centerRequested = false;
+        int stableSamples = 0;
+        Rect? firstRectangle = null, lastRectangle = null, previousFirst = null, previousLast = null;
+        Rect previousFirstBounds = default, previousLastBounds = default;
+        Vector previousOffset = default, centerBefore = default, centerTarget = default;
+        Size previousViewport = default, previousExtent = default;
+        static bool Near(double firstValue, double secondValue) => Math.Abs(firstValue - secondValue) <= .1;
+        static bool Same(Rect current, Rect previous) => Near(current.X, previous.X) && Near(current.Y, previous.Y)
+            && current.Size == previous.Size;
+        static bool FullyVisible(Rect rectangle, Size viewport) => rectangle.Left >= -.6 && rectangle.Top >= -.6
+            && rectangle.Right <= viewport.Width + .6 && rectangle.Bottom <= viewport.Height + .6;
+        while (timer.Elapsed < TimeSpan.FromSeconds(3))
+        {
+            Dispatcher.UIThread.RunJobs();
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+            Dispatcher.UIThread.RunJobs();
+            var firstOrigin = first.TranslatePoint(default, scroll);
+            var lastOrigin = last.TranslatePoint(default, scroll);
+            if (firstOrigin is { } firstPosition && lastOrigin is { } lastPosition
+                && first.Bounds.Width > 0 && first.Bounds.Height > 0 && last.Bounds.Width > 0 && last.Bounds.Height > 0)
+            {
+                var firstRect = new Rect(firstPosition, first.Bounds.Size);
+                var lastRect = new Rect(lastPosition, last.Bounds.Size);
+                firstRectangle = firstRect;
+                lastRectangle = lastRect;
+                var offset = scroll.Offset;
+                var viewport = scroll.Viewport;
+                var extent = scroll.Extent;
+                bool unchanged = previousFirst is { } oldFirst && previousLast is { } oldLast
+                    && Same(firstRect, oldFirst) && Same(lastRect, oldLast)
+                    && first.Bounds == previousFirstBounds && last.Bounds == previousLastBounds
+                    && Near(offset.X, previousOffset.X) && Near(offset.Y, previousOffset.Y)
+                    && viewport == previousViewport && extent == previousExtent;
+                stableSamples = unchanged ? stableSamples + 1 : 1;
+                if (stableSamples >= 3)
+                {
+                    if (!bringRequested)
+                    {
+                        last.BringIntoView();
+                        bringRequested = true;
+                        stableSamples = 0;
+                    }
+                    else if (!centerRequested)
+                    {
+                        double groupHeight = lastRect.Bottom - firstRect.Top;
+                        if (groupHeight > 0 && groupHeight <= viewport.Height + .6
+                            && firstRect.Left >= -.6 && firstRect.Right <= viewport.Width + .6
+                            && lastRect.Left >= -.6 && lastRect.Right <= viewport.Width + .6)
+                        {
+                            // Preserve the layout fixture's centering formula, but only after the old bring has settled.
+                            double desiredOffset = offset.Y + firstRect.Top - Math.Max(0, (viewport.Height - groupHeight) / 2);
+                            centerBefore = offset;
+                            centerTarget = new Vector(offset.X,
+                                Math.Clamp(desiredOffset, 0, Math.Max(0, extent.Height - viewport.Height)));
+                            scroll.Offset = centerTarget;
+                            centerRequested = true;
+                            stableSamples = 0;
+                        }
+                    }
+                    else if (FullyVisible(firstRect, viewport) && FullyVisible(lastRect, viewport)) return;
+                }
+                previousFirst = firstRect;
+                previousLast = lastRect;
+                previousFirstBounds = first.Bounds;
+                previousLastBounds = last.Bounds;
+                previousOffset = offset;
+                previousViewport = viewport;
+                previousExtent = extent;
+            }
+            else stableSamples = 0;
+            await Task.Delay(20);
+        }
+        throw new InvalidOperationException($"Settings group did not settle fully inside its viewport: "
+            + $"first={first.Name}, firstRectangle={firstRectangle}, firstBounds={first.Bounds}, "
+            + $"last={last.Name}, lastRectangle={lastRectangle}, lastBounds={last.Bounds}, "
+            + $"viewport={previousViewport}, extent={previousExtent}, offset={previousOffset}, stableSamples={stableSamples}, "
+            + $"bringRequested={bringRequested}, centerRequested={centerRequested}, centerBefore={centerBefore}, centerTarget={centerTarget}");
+    }
+
     internal static async Task<Point> ClickPointAsync(Window window, Control control, double? x = null, bool requireFullVisibility = false)
     {
         var timer = System.Diagnostics.Stopwatch.StartNew();

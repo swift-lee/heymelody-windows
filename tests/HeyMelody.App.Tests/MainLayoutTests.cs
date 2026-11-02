@@ -156,17 +156,7 @@ internal static class MainLayoutTests
                         // Inspect the controls below the initial viewport without opening
                         // any panel. Center the adjacent fit-test and information cards
                         // and verify that copying is unavailable until information is expanded.
-                        information.BringIntoView(); Dispatcher.UIThread.RunJobs();
-                        AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
-                        fitTop = fit.TranslatePoint(default, scroll)!.Value.Y;
-                        informationTop = information.TranslatePoint(default, scroll)!.Value.Y;
-                        var groupHeight = informationTop + information.Bounds.Height - fitTop;
-                        var desiredOffset = scroll.Offset.Y + fitTop - Math.Max(0, (scroll.Viewport.Height - groupHeight) / 2);
-                        scroll.Offset = new Vector(scroll.Offset.X,
-                            Math.Clamp(desiredOffset, 0, Math.Max(0, scroll.Extent.Height - scroll.Viewport.Height)));
-                        AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
-                        await Task.Delay(20);
-                        AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
+                        await MainUiTestLayout.CenterGroupAsync(window, fit, information);
                         fitTop = fit.TranslatePoint(default, scroll)!.Value.Y;
                         informationTop = information.TranslatePoint(default, scroll)!.Value.Y;
                         Check(fitTop >= -.6 && informationTop + information.Bounds.Height <= scroll.Viewport.Height + .6
@@ -174,7 +164,11 @@ internal static class MainLayoutTests
                             && !CanHit(window, copy)
                             && view.GetVisualDescendants().OfType<FASettingsExpander>()
                                 .Where(expander => !ReferenceEquals(expander, anc)).All(expander => !expander.IsExpanded),
-                            "The collapsed information card remains beside fit-test with no clickable Copy action.");
+                            "The collapsed information card remains beside fit-test with no clickable Copy action: "
+                            + $"fitTop={fitTop}, fitBounds={fit.Bounds}, informationTop={informationTop}, informationBounds={information.Bounds}, "
+                            + $"viewport={scroll.Viewport}, extent={scroll.Extent}, offset={scroll.Offset}, "
+                            + $"informationExpanded={information.IsExpanded}, copyHit={CanHit(window, copy)}, "
+                            + $"expandedPanels={string.Join(",", view.GetVisualDescendants().OfType<FASettingsExpander>().Where(panel => panel.IsExpanded).Select(panel => panel.Name))}.");
                         await ExpandInformationAsync(information);
                         information.BringIntoView(); Dispatcher.UIThread.RunJobs();
                         await MainUiTestLayout.ClickPointAsync(window, copy, requireFullVisibility: true);
