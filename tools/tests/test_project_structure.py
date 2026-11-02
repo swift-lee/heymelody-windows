@@ -36,6 +36,7 @@ def includes(project: ET.Element, kind: str):
 
 
 def executable_compile_links(repo: Path) -> list[str]:
+    repo = repo.resolve()
     projects = projects_under(repo / "src")
     executable_directories = {
         path.parent for path, project in projects.items() if output_type(project) in EXECUTABLE_TYPES
@@ -51,6 +52,7 @@ def executable_compile_links(repo: Path) -> list[str]:
 
 
 def desktop_dependencies(repo: Path) -> list[str]:
+    repo = repo.resolve()
     projects = projects_under(repo / "src")
     desktop = (repo / "src/HeyMelody.Desktop/HeyMelody.Desktop.csproj").resolve()
     if desktop not in projects:
@@ -200,6 +202,51 @@ class ContractFixtureTests(unittest.TestCase):
             write(root, "src/App/App.csproj", '<PropertyGroup><OutputType>WinExe</OutputType></PropertyGroup>')
             self.assertEqual(len(desktop_dependencies(root)), 2)
 
+    def test_executable_link_reports_are_stable_for_repository_path_aliases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write(root, "src/App/App.csproj", '<PropertyGroup><OutputType>WinExe</OutputType></PropertyGroup>')
+            write(root, "src/Helper/Helper.csproj", '<PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>'
+                  '<ItemGroup><Compile Include="../App/Typography.cs" /><Compile Include="Own.cs" />'
+                  '<AvaloniaResource Include="../App/Assets/App.ico" /></ItemGroup>')
+            write(root, "tests/Fixture/Fixture.csproj", '<ItemGroup>'
+                  '<Compile Include="../../src/App/Typography.cs" /></ItemGroup>')
+            expected = [f"{Path('src/Helper/Helper.csproj')} Compile links executable source: ../App/Typography.cs"]
+            aliases = repository_path_aliases(root)
+            for alias in aliases:
+                with self.subTest(root=alias):
+                    self.assertEqual(executable_compile_links(alias), expected)
+            write(root, "src/Helper/Helper.csproj", '<PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>'
+                  '<ItemGroup><Compile Include="Own.cs" />'
+                  '<AvaloniaResource Include="../App/Assets/App.ico" /></ItemGroup>')
+            for alias in aliases:
+                with self.subTest(legal_root=alias):
+                    self.assertEqual(executable_compile_links(alias), [])
+
+    def test_desktop_dependency_reports_are_stable_for_repository_path_aliases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write(root, "src/HeyMelody.Desktop/HeyMelody.Desktop.csproj", '<ItemGroup>'
+                  '<ProjectReference Include="../Shared/Shared.csproj" /></ItemGroup>')
+            write(root, "src/Shared/Shared.csproj", '<ItemGroup>'
+                  '<ProjectReference Include="../HeyMelody.Client/HeyMelody.Client.csproj" />'
+                  '<ProjectReference Include="../App/App.csproj" /></ItemGroup>')
+            write(root, "src/App/App.csproj", '<PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>')
+            expected = [
+                f"{Path('src/Shared/Shared.csproj')} reverses the desktop boundary: {reference}"
+                for reference in ("../HeyMelody.Client/HeyMelody.Client.csproj", "../App/App.csproj")
+            ]
+            aliases = repository_path_aliases(root)
+            for alias in aliases:
+                with self.subTest(root=alias):
+                    self.assertEqual(desktop_dependencies(alias), expected)
+            write(root, "src/Shared/Shared.csproj", '<ItemGroup>'
+                  '<ProjectReference Include="../Contracts/Contracts.csproj" /></ItemGroup>')
+            write(root, "src/Contracts/Contracts.csproj", "")
+            for alias in aliases:
+                with self.subTest(legal_root=alias):
+                    self.assertEqual(desktop_dependencies(alias), [])
+
     def test_literal_needs_scalar_inline_and_block_lists(self):
         for needs in ("    needs: native-osx-arm64", "    needs: [native-osx-arm64]",
                       "    needs:\n      - native-osx-arm64"):
@@ -223,6 +270,13 @@ def write(root: Path, relative: str, content: str):
     path = root / relative
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("<Project>" + content + "</Project>", encoding="utf-8")
+
+
+def repository_path_aliases(root: Path) -> tuple[Path, Path]:
+    canonical = root.resolve()
+    nested = canonical / "nested"
+    nested.mkdir()
+    return canonical, nested / ".."
 
 
 if __name__ == "__main__":

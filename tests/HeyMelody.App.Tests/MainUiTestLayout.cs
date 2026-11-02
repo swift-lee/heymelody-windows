@@ -32,30 +32,28 @@ internal static class MainUiTestLayout
         Point? point = null;
         object? hit = null;
         bool bringRequested = false;
+        bool correctionAttempted = false;
+        Vector correctionBefore = default, correctionTarget = default;
+        Rect? targetInViewport = null;
         Point? previousPoint = null;
         Rect previousBounds = default;
         ScrollViewer? previousScroll = null;
         Vector previousOffset = default;
         Size previousViewport = default, previousExtent = default;
-        int stableSamples = 0;
+        int geometryStableSamples = 0, stableSamples = 0;
         static bool Near(double first, double second) => Math.Abs(first - second) <= .1;
         while (timer.Elapsed < TimeSpan.FromSeconds(3))
         {
             Dispatcher.UIThread.RunJobs();
-            if (!bringRequested && control.Bounds.Width > 0 && control.Bounds.Height > 0)
-            {
-                // Request visibility once, then observe the smooth scroll instead of restarting it.
-                control.BringIntoView();
-                bringRequested = true;
-            }
             AvaloniaHeadlessPlatform.ForceRenderTimerTick();
             Dispatcher.UIThread.RunJobs();
             point = control.TranslatePoint(new Point(x ?? control.Bounds.Width / 2, control.Bounds.Height / 2), window);
-            if (bringRequested && point is { } current && control.Bounds.Width > 0 && control.Bounds.Height > 0)
+            if (point is { } current && control.Bounds.Width > 0 && control.Bounds.Height > 0)
             {
                 hit = window.InputHitTest(current);
                 var scroll = control.GetVisualAncestors().OfType<ScrollViewer>().FirstOrDefault();
-                var origin = requireFullVisibility && scroll is not null ? control.TranslatePoint(default, scroll) : null;
+                var origin = scroll is not null ? control.TranslatePoint(default, scroll) : null;
+                targetInViewport = origin is { } position ? new Rect(position, control.Bounds.Size) : null;
                 bool visible = !requireFullVisibility || scroll is null || origin is { } offset && offset.X >= -.6 && offset.Y >= -.6
                     && offset.X + control.Bounds.Width <= scroll.Viewport.Width + .6
                     && offset.Y + control.Bounds.Height <= scroll.Viewport.Height + .6;
@@ -66,7 +64,31 @@ internal static class MainUiTestLayout
                     && previousBounds == control.Bounds && ReferenceEquals(previousScroll, scroll)
                     && Near(scrollOffset.X, previousOffset.X) && Near(scrollOffset.Y, previousOffset.Y)
                     && previousViewport == viewport && previousExtent == extent;
-                if (visible && hit is Visual visual && (ReferenceEquals(visual, control) || visual.GetVisualAncestors().Contains(control)))
+                geometryStableSamples = unchanged ? geometryStableSamples + 1 : 1;
+                if (!bringRequested && geometryStableSamples >= 3)
+                {
+                    // A request made while an expander is still changing geometry can keep an obsolete target.
+                    control.BringIntoView();
+                    bringRequested = true;
+                    geometryStableSamples = stableSamples = 0;
+                }
+                else if (bringRequested && geometryStableSamples >= 3 && requireFullVisibility
+                    && !correctionAttempted && scroll is not null && origin is { } target
+                    && control.Bounds.Width <= viewport.Width + .6 && control.Bounds.Height <= viewport.Height + .6
+                    && target.X >= -.6 && target.X + control.Bounds.Width <= viewport.Width + .6
+                    && (target.Y < -.6 || target.Y + control.Bounds.Height > viewport.Height + .6))
+                {
+                    // Fixture positioning only: one bounded correction after scrolling and layout have settled.
+                    correctionAttempted = true;
+                    double residual = target.Y < 0 ? target.Y : target.Y + control.Bounds.Height - viewport.Height;
+                    correctionBefore = scrollOffset;
+                    correctionTarget = new Vector(scrollOffset.X,
+                        Math.Clamp(scrollOffset.Y + residual, 0, Math.Max(0, extent.Height - viewport.Height)));
+                    scroll.Offset = correctionTarget;
+                    geometryStableSamples = stableSamples = 0;
+                }
+                else if (bringRequested && visible && hit is Visual visual
+                    && (ReferenceEquals(visual, control) || visual.GetVisualAncestors().Contains(control)))
                 {
                     stableSamples = unchanged ? stableSamples + 1 : 1;
                     if (stableSamples >= 3) return current;
@@ -79,13 +101,21 @@ internal static class MainUiTestLayout
                 previousViewport = viewport;
                 previousExtent = extent;
             }
-            else stableSamples = 0;
+            else geometryStableSamples = stableSamples = 0;
             await Task.Delay(20);
         }
+        static string Describe(Visual visual) => visual.GetType().Name
+            + (visual is Control { Name: { Length: > 0 } name } ? ":" + name : "");
         var clips = control.GetVisualAncestors().OfType<Control>().Where(ancestor => ancestor.ClipToBounds)
-            .Select(ancestor => ancestor.GetType().Name + ":" + ancestor.Name + " " + ancestor.Bounds);
-        throw new InvalidOperationException($"Target cannot receive mouse input after expansion/scrolling: {control.GetType().Name}, "
-            + $"bounds={control.Bounds}, point={point}, hit={hit}, stableSamples={stableSamples}, scrollOffset={previousOffset}, "
+            .Take(10).Select(ancestor => Describe(ancestor) + " " + ancestor.Bounds);
+        var hitPath = hit is Visual hitVisual
+            ? string.Join(" > ", new[] { Describe(hitVisual) }.Concat(hitVisual.GetVisualAncestors().Take(8).Select(Describe)))
+            : hit?.ToString();
+        throw new InvalidOperationException($"Target cannot receive mouse input after expansion/scrolling: {Describe(control)}, "
+            + $"bounds={control.Bounds}, point={point}, targetInViewport={targetInViewport}, hit={hitPath}, "
+            + $"stableSamples={stableSamples}, geometryStableSamples={geometryStableSamples}, bringRequested={bringRequested}, "
+            + $"scrollOffset={previousOffset}, viewport={previousViewport}, extent={previousExtent}, "
+            + $"correctionAttempted={correctionAttempted}, correctionBefore={correctionBefore}, correctionTarget={correctionTarget}, "
             + $"clipping ancestors={string.Join("; ", clips)}");
     }
 }

@@ -62,6 +62,7 @@ string output = args.Length == 2 && args[0] == "--output-dir" ? Path.GetFullPath
     : args is ["--anc-feature-tests", "--output-dir", var ancOutput] ? Path.GetFullPath(ancOutput)
     : args is ["--rendering-settings-tests", "--output-dir", var renderSettingsOutput] ? Path.GetFullPath(renderSettingsOutput)
     : args is ["--device-bar-tests", "--output-dir", var deviceBarOutput] ? Path.GetFullPath(deviceBarOutput)
+    : args is ["--ui-layout-helper-tests", "--output-dir", var layoutHelperOutput] ? Path.GetFullPath(layoutHelperOutput)
     : Path.Combine(Directory.GetCurrentDirectory(), "artifacts", "avalonia-ui-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8]);
 Directory.CreateDirectory(output);
 var receipts = new List<object>();
@@ -72,6 +73,12 @@ DeviceModelView.DefaultFactoryOverride = new RecordingFilamentRendererFactory();
 using var session = HeadlessUnitTestSession.StartNew(typeof(PreviewBootstrap));
 try
 {
+    if (args is ["--ui-layout-helper-tests"] or ["--ui-layout-helper-tests", "--output-dir", _])
+    {
+        int count = MainUiTestLayoutTests.Run(session);
+        Console.WriteLine(JsonSerializer.Serialize(new { passed = count, success = true, nativeBluetoothCalls = 0, screenshots = 0, output }));
+        return 0;
+    }
     if (args is ["--device-bar-tests"] or ["--device-bar-tests", "--output-dir", _])
     {
         var count = DeviceBarTests.Run(session);
@@ -229,6 +236,8 @@ try
     passed += animationChecks;
     var demoChecks = DemoDeviceTests.Run(session, output, receipts);
     passed += demoChecks;
+    var layoutHelperChecks = MainUiTestLayoutTests.Run(session);
+    passed += layoutHelperChecks;
     var layoutChecks = MainLayoutTests.Run(session, output, receipts);
     passed += layoutChecks;
     var startupChecks = StartupTests.Run(session);
@@ -246,7 +255,7 @@ try
         + (HeyMelody.Platform.DesktopCapabilities.SupportsHeadsetControl ? 9 : 7)
         + startupChecks + settingsManagementChecks
         + demoChecks + renderingChecks + animationChecks + layoutChecks + selectionChecks
-        + gameAudioChecks + typographyChecks + frameLoopChecks + gestureChecks + ancFeatureChecks;
+        + gameAudioChecks + typographyChecks + frameLoopChecks + gestureChecks + ancFeatureChecks + layoutHelperChecks;
     Check(passed == expected, $"Every UI scenario and interaction case must finish: passed={passed}, expected={expected}, "
         + $"startupChecks={startupChecks}, settingsManagementChecks={settingsManagementChecks}");
     var report = new { schemaVersion = 1, version = AppVersion.Display, passed, success = true, nativeBluetoothCalls = 0,

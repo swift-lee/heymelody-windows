@@ -97,6 +97,26 @@ Host 的历史 BUG-06 曾在本轮首个默认 runner 超时；同业务断言�
 
 完整日志、图像和产物留在忽略的 `artifacts/`、`release/`，公开文档不收录设备地址、用户快照或完整命令输出。CI 回执和 DMG 绑定构建 SHA，最终交付报告实际运行链接、文件位置及 SHA256。
 
+## 2026-11-02 Actions 失败复核
+
+结构治理提交 `d8103ad` 的首批远端结果补充如下，不改写上述本地及历史失败记录：
+
+- [Windows 运行](https://github.com/swift-lee/heymelody-windows/actions/runs/41326973212)的 19 个 .NET runner 全部通过，Resources 为 41/41；Python 结构检查的两个 fixture 报错，故两个架构的打包 job 均未开始。
+- [macOS 运行](https://github.com/swift-lee/heymelody-windows/actions/runs/41326973115)的原生 runtime job 成功，离线检查为 15/16 个 .NET runner 通过，Resources 同为 41/41。App 的设备信息复制按钮全显检查及同一 Python 结构检查失败；后续精确 ABI 加载、应用构建、DMG 签名和安装校验尚未执行。模拟 ABI 合同通过不能替代实际加载。
+- 同批 [Filament Linux 运行](https://github.com/swift-lee/heymelody-windows/actions/runs/41326973064)成功。上述两处失败不属于 BUG-05，也不能据此关闭该历史项。
+
+结构检查的问题是项目路径先 `resolve()`、传入的根目录却保留别名：Windows 临时目录的 `RUNNER~1` 与长路径、macOS 的 `/tmp` 与 `/private/tmp` 在 `relative_to()` 中不匹配。修复位于两个扫描入口，而非只改变 fixture；canonical 与 `nested/..` 回归要求违规列表、相对路径及合法引用判定完全一致。不修改 `TMPDIR`、Python 版本或结构规则规避失败。
+
+macOS App 的失败目标为“复制设备信息”，不是日志按钮。回执显示按钮底边约比视口低 13 DIP；现有夹具在尺寸出现后只请求一次 `BringIntoView`。该证据不足以定位生产滚动库内部缺陷，也没有证据证明字体、主题或 Desktop 源码迁移引入了该行为。本轮只调整 headless 准备：几何稳定后发起一次可视化请求；再次稳定且仍有纵向裁切时，最多一次按残差夹限 Offset，随后重新等待稳定。原 3 秒总期限、全显、真实命中、连续三个成功样本和复制断言均保留；独立 SmoothScrolling 测试继续检验未经夹具校正的产品滚动行为。
+
+本轮 Python 回归为结构 9、Windows 发布校验 8、macOS 打包 fixture 10，合计 27/27 通过；日志在 `artifacts/actions-structure-fix-tests-d8485fc1b278480aa158a8f3b62bcd30/`。CI 合同 216、原生缓存合同 54 通过，回执在 `artifacts/ci-fix-contracts-522c08a6854c42c1958a9be1a1620444/`。App 和完整 profile 的新证据如下，不将这些便携检查称为原生 macOS 或 DMG 验收。
+
+Windows x64、SDK 10.0.403 的新布局定向回归为 6/6，单独完整 App 为 158 项通过、111 张 headless 图像，两项独立验收均首轮退出 0，`nativeBluetoothCalls=0`。日志与回执位于 `artifacts/actions-fix-ui-helper-fa0de9307cfe47d2859967aa10f4aa3f/`。三个负向场景分别要求覆盖层、超高目标和横向裁切仍然失败，并保留原期限；不能将该夹具通过等同于真窗口、显示器 DPI、GPU 或真实设备验证。
+
+随后唯一一次完整 Windows profile 执行了 19 个 .NET runner 及两个 Python 门禁：17 个 .NET runner 和两个 Python 门禁通过，其中 App 158、Client 198、Rendering 141、ModelPreview 180。本地整体仍非零：Resources 为 40/41，失败于租用副本的重下载，未取得足以确认其与此前拒绝访问相同根因的证据；Host 为 `HostEfficiencyTests.cs:57` 的 `UntilAsync` 取消，和历史 BUG-06 记录一致。未重跑至通过或修改这些产品行为。收据在 `artifacts/actions-fix-windows-a7eaa172c4df49d19e8d24500c14dd09/offline-tests/offline-validation.json`；新修复的跨平台验收仍以同 SHA 远端完整门禁为准，不关闭 BUG-05/06。
+
+本次交付要求等待同一修复 SHA 的 Windows/macOS Actions 完整通过，下载短期回执与 DMG 核对源 SHA 和摘要；不以重跑到绿、跳过门禁或更改产品行为替代修复。用户随后因暂时无法签名，授权本轮使用延后签名包装器创建临时无签名提交、登记待补签，保留 hooks 与持久签名配置；这不改写此前 `d8103ad` 的正常签名记录。
+
 ## 后续分轮
 
 1. **平台内部治理**：拆分 DesktopRuntime/InstallationCheck 的内部 OS 实现，统一编译标志，覆盖平台、TFM、RID 一致性；不重写现有路径权限与会话隔离语义。

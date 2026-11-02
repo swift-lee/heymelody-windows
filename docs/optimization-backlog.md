@@ -134,11 +134,12 @@ UI-00 为 2026-10-22 界面性能轮（起点 `a13e236`）已完成项的汇总�
 
 | 编号 | 位置 | 现象与依据 | 预估收益 | 风险与依赖 | 状态 | 登记来源 |
 | --- | --- | --- | --- | --- | --- | --- |
-| ARCH-01 | App、DeviceManager、Calibration.UI、Host 的 csproj；Desktop 共享库 | 入口互相链接共享 `.cs`，App 被当作源码库；归位共享主题、窗口、字体配置等，保持 namespace 和资源目录 | 明确源码所有权与单向依赖；不声称性能收益 | XAML 程序集 URI、友元可见性、五入口发布均需验证 | 代码及本地构建通过；单次 Resources 补验通过，但完整 profile 非全绿，DMG 尚未验收 | 2026-11-01 全项目结构审计 |
-| ARCH-02 | Windows/macOS/Filament workflows、统一离线检查及中立 CI 策略 | 原 DMG 等待整个 renderer 矩阵，包策略混入缓存，打包缺核心测试门禁 | 缩小失败域、统一回归集合 | 保留原生来源/摘要、PR 不发布、缓存来源白名单和保留期；不把 ABI 加载当 GPU 验证 | 代码与合同测试通过；用户授权正常签名提交推送、不等待 Actions；原生 CI 尚未验收 | 2026-11-01 全项目结构审计 |
+| ARCH-01 | App、DeviceManager、Calibration.UI、Host 的 csproj；Desktop 共享库 | 入口互相链接共享 `.cs`，App 被当作源码库；归位共享主题、窗口、字体配置等，保持 namespace 和资源目录 | 明确源码所有权与单向依赖；不声称性能收益 | XAML 程序集 URI、友元可见性、五入口发布均需验证 | 代码及本地构建通过；首批原生 CI 暴露的夹具问题见 ARCH-06，不以交叉构建替代 DMG 验收 | 2026-11-01 全项目结构审计 |
+| ARCH-02 | Windows/macOS/Filament workflows、统一离线检查及中立 CI 策略 | 原 DMG 等待整个 renderer 矩阵，包策略混入缓存，打包缺核心测试门禁 | 缩小失败域、统一回归集合 | 保留原生来源/摘要、PR 不发布、缓存来源白名单和保留期；不把 ABI 加载当 GPU 验证 | 代码与合同测试通过；首批 CI 门禁夹具缺陷并入 ARCH-06，本轮改为完整远端验收 | 2026-11-01 全项目结构审计 |
 | ARCH-03 | Platform 的 DesktopRuntime/InstallationCheck、编译标志 | facade 内混有多平台实现，SDK `WINDOWS` 与自定义平台标志并存；尚未证明当前组合有 bug | 降低后续平台维护成本 | 涉及 Unix 权限、单例及管道安全；须保持 API/语义并增加 TFM/RID 一致性验收 | 待处理，首轮不扩实施 | 2026-11-01 全项目结构审计 |
 | ARCH-04 | Audio、Experiments 与常规产品构建入口 | 可选 Audio 无条件依赖相邻 manager；本机缺失但不在正常 GUI 链 | 明确可选工具与全仓构建的边界 | 自包含化需保留来源、许可及能力，不能删项目掩盖缺失 | 待处理，默认测试排除 Audio | 2026-11-01 全项目结构审计 |
 | ARCH-05 | macOS 原生准备、平台工具锁和原生缓存 | 首轮分离工作流但不扩展 Windows 专用缓存到 macOS | 后续评估统一工具链及减少原生重复编译；收益未测 | 不允许跨运行 latest 捷径，需保留 ABI/锁定来源和逐文件摘要 | 待评估 | 2026-11-01 全项目结构审计 |
+| ARCH-06 | Python 结构扫描入口、App headless 布局夹具 | `d8103ad` 首批 CI 暴露根路径别名不一致，以及 macOS 复制按钮未完整滚入视口 | 使结构与布局门禁跨平台可执行，不降低规则 | 规范化扫描根；滚动准备保留原期限、全显和命中断言；原生 ABI/DMG 仍须完整验收 | 本轮修复；实现、回归及验收范围见[结构审计](project-structure-audit.md) | 2026-11-02 Actions 失败复核 |
 
 2026-11-01 改动前 Windows x64/SDK 10.0.403 复核：App.Tests 152 项通过，BUG-03 的历史 ANC 窄窗失败未复现；Platform.Tests 2 项通过、6 项 Unix 专属跳过。此新证据不删除历史失败，也不据此关闭其他平台、字体及原生硬件验证。
 
@@ -147,3 +148,7 @@ UI-00 为 2026-10-22 界面性能轮（起点 `a13e236`）已完成项的汇总�
 2026-11-01 用户临时授权 full access、关闭工具沙箱，以非管理员身份仅运行一次 Resources，结果 41/41 通过、无 skip，包含 `DamagedMembers`；回执位于 `artifacts/bug05-full-access-repro-20261101-205349-a3f311412b3d4126ab2f23f7f14934a1/`。该单次通过不改写完整 Windows profile 的 18/19 结果，不构成根因定位，不能将先前失败归因于沙箱；BUG-05 仍未闭合。
 
 2026-11-02 用户指示按正常签名流程提交并推送本轮改动，不等待 GitHub Actions。本页仅更新交付授权，未预填提交 SHA 或推送成功状态；本轮无新 DMG 或远端验收结果。
+
+2026-11-02 后续 Actions 复核：`d8103ad` 的 Windows 19 个 .NET runner 全部通过，macOS 为 15/16 通过，Resources 均为 41/41；共同失败为 Python 路径别名处理，macOS 另有设备信息复制按钮全显夹具失败，不属于 BUG-05。该问题进入 ARCH-06；Python 新增别名回归后便携测试 27/27 通过，CI 合同 216、原生缓存合同 54 通过，不提前声称实际 ABI 加载或 DMG 验收成功。用户本次要求修复后等待 Windows/macOS CI 完整通过，并因暂时无法签名，改为延后签名包装器提交、登记待补签；不再尝试签名，不修改持久配置。
+
+2026-11-02 修复工作树的布局定向回归 6/6、单独 App 158 项通过；唯一一次完整 Windows profile 为 17/19 个 .NET runner 和两个 Python 门禁通过，App 同为 158。Resources 40/41 的租用副本重下载失败及 HostEfficiencyTests:57 的历史等待取消分别保留，不重跑至全绿、不修改产品行为，也不确认二者共享根因。完整证据及范围见[结构审计](project-structure-audit.md)，本轮最终验收以修复 SHA 的原生 CI 为准。
