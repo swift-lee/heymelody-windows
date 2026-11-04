@@ -74,7 +74,7 @@ public sealed class CalibrationWindow : FAAppWindow
     public CalibrationWindow(ICalibrationService service, string handle, string kind)
     {
         // Register the backdrop's window-style callback before any window property is assigned, as DeviceManager does.
-        _backdrop = new DesktopWindowBackdrop(this);
+        _backdrop = new DesktopWindowBackdrop(this, macTint: MacBackdropTint.Dense);
         Typography.ApplyTextOptions(this);
         RenderDiagnostics.Attach(this);
         _service = service; _events = service as IHeadsetEventService;

@@ -1,9 +1,11 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Media;
 using HeyMelody.Rendering.Filament;
 using HeyMelody.TestSupport;
 using HeyMelodyWindows.App;
+using HeyMelodyWindows.Ui;
 using static HeyMelody.TestSupport.NativeWindowLifetimeHarness;
 
 internal static class WindowExitLifecycleTests
@@ -24,9 +26,16 @@ internal static class WindowExitLifecycleTests
     {
         if (OperatingSystem.IsMacOS())
         {
+            VerifyActivationPolicy(MacActivationPolicy.Regular, "The main application starts with a Dock tile");
             var quitService = new ExitService();
             var quitWindow = await OpenAsync(quitService);
-            await VerifyBackdropAsync(quitWindow);
+            var pageSurface = quitWindow.FindControl<MainView>("Page")?.FindControl<Border>("PageSurface")
+                ?? throw new InvalidOperationException("The main page surface is missing.");
+            Check(pageSurface.Background is ISolidColorBrush { Color.A: 255 }, "The main page surface must stay opaque.");
+            await VerifyBackdropAsync(quitWindow, pageSurface);
+            Check((quitWindow.Background as ISolidColorBrush)?.Color.A <= 100,
+                "The main window must keep the standard material tint rather than the dense component tint.");
+            await MacBackdropCapture.CaptureAsync(quitWindow, "main");
             var desktop = (IClassicDesktopStyleApplicationLifetime)Application.Current!.ApplicationLifetime!;
             Check(!desktop.TryShutdown(), "Native Quit bypassed the coordinated exit request.");
             await UntilAsync(() => quitService.ExitRequests == 1, "Native Quit did not request product exit.");
@@ -34,10 +43,14 @@ internal static class WindowExitLifecycleTests
             await UntilAsync(() => quitService.Votes.Count == 1, "Native Quit was not prepared.");
             quitService.Push("exitCancelled", "native-quit-veto");
             Check(quitWindow.IsVisible, "A cancelled native Quit closed the window.");
+            VerifyActivationPolicy(MacActivationPolicy.Regular, "A vetoed close keeps the Dock tile");
             Check(!desktop.TryShutdown(), "A second native Quit bypassed coordination.");
             await UntilAsync(() => quitService.ExitRequests == 2, "A retry of native Quit was not delivered.");
             await StopAsync(quitWindow, quitService);
+            VerifyActivationPolicy(MacActivationPolicy.Accessory, "An approved close removes the Dock tile");
             Pass("macOS native Quit requests global exit, a veto keeps the window, and commit closes it");
+            // The remaining scenarios are headless; restore the process policy so they see a normal main window.
+            MacApplicationPolicy.Set(MacActivationPolicy.Regular);
         }
         var service = new ExitService();
         var window = await OpenAsync(service);

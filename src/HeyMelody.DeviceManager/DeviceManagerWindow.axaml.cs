@@ -22,7 +22,7 @@ public partial class DeviceManagerWindow : FAAppWindow
     public DeviceManagerWindow() : this(new ClientBridge(), false) { }
     internal DeviceManagerWindow(IDeviceManagementService service, bool preview)
     {
-        _backdrop = new Ui.DesktopWindowBackdrop(this);
+        _backdrop = new Ui.DesktopWindowBackdrop(this, macTint: Ui.MacBackdropTint.Dense);
         InitializeComponent();
         Ui.Typography.ApplyTextOptions(this);
         Ui.RenderDiagnostics.Attach(this);

@@ -133,6 +133,7 @@ UI-00 为 2026-10-22 界面性能轮（起点 `a13e236`）已完成项的汇总�
 | MAC-01 | `src/HeyMelody.MacOS/MacBluetoothPlatform.cs`：`_events` / `Publish`（本轮新增） | 原生事件先进入无界托管队列，广播尚无按设备合并策略（静态分析）；本轮没有蓝牙实测，未测量真实积压或能耗 | 后续可按广播流量限制瞬时内存并减少重复处理；收益未测量 | 授权、断连、扫描代次和休眠事件必须可靠有序，不能简单丢弃最旧事件；需真机广播负载与取消验证 | 待处理 | 2026-10-25 macOS 移植（资源方向顺带发现） |
 | MAC-02 | `src/HeyMelody.Host/NativeHeadsetService.cs:459`、`BackendSupervisor.EligibleLocked`、`src/HeyMelody.MacOS/native/bluetooth.mm` | 已配对但系统层未连接的耳机不会被应用主动连接；macOS 耳机待机或被手机占用时需先在系统设置连接，应用无“连接”动作 | 可增加显式连接手势与冷启动唤醒；收益未测量 | 会改变共享 Host“已连接才控制”语义，可能抢占手机连接；需定义用户手势、超时与竞争处理 | 待处理 | 2026-11-05 macOS RFCOMM 修复（范围外发现） |
 | MAC-03 | `src/HeyMelody.MacOS/native/bluetooth.mm`：`queryLifetime`、`HMResolveEndpoints` | `getServiceRecordForUUID:` 为同步调用，无法在进程内绝对限时；SDP 回调缺失时 `queryLifetime` 保留 HMChannel 直到 worker 退出 | 可评估 worker 生命周期内的泄漏上限或独立监督；收益未测量 | 不能在 OS 仍可能回调时释放 delegate 目标，必须保留进程级兜底 | 待处理 | 2026-11-05 macOS RFCOMM 修复 |
+| MAC-04 | `src/HeyMelody.Desktop/DesktopWindowBackdrop.cs`；Avalonia.Native `AutoFitContentView.mm` | Avalonia.Native 固定为整窗 `NSVisualEffectMaterialHUDWindow` + `behindWindow`，原生标题栏仍由系统材质绘制；应用只能通过不透明页面和色调控制材质可见区域 | 可评估按窗口选择 `underWindowBackground`/`contentBackground` 或标题栏着色；观感收益未测量 | 需要访问 Avalonia 私有视图或维护上游补丁，跨版本易碎；不能把 HUD 材质直接铺在任意文字内容后 | 待处理 | 2026-11-05 macOS 窗口材质与 Dock 修复 |
 
 ## 跨平台结构与构建（ARCH）
 

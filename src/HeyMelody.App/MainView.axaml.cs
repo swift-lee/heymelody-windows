@@ -186,7 +186,9 @@ public partial class MainView : UserControl
     public void SetPlatformNotice(bool visible) => PlatformNotice.IsOpen = PlatformNotice.IsVisible = visible;
     internal void SetNativeWindowBackdrop(bool applied)
     {
-        if (!OperatingSystem.IsMacOS() && !OperatingSystem.IsLinux()) return;
+        // Windows and macOS keep the page opaque; only the bottom device bar exposes the material.
+        // Linux still negotiates a window-wide effect, so it retains the existing full-surface behavior.
+        if (!OperatingSystem.IsLinux()) return;
         PageSurface.IsVisible = !applied;
     }
     internal void SetModelDemo()

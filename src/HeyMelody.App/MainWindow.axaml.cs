@@ -35,7 +35,9 @@ public partial class MainWindow : FAAppWindow
         IConfirmationService? confirmations = null)
     {
         InitializeComponent();
-        _backdrop = new Ui.DesktopWindowBackdrop(this, useWindowsMicaAlt: false);
+        _backdrop = new Ui.DesktopWindowBackdrop(this, useWindowsMicaAlt: false, macTint: Ui.MacBackdropTint.Standard);
+        // Linux may cover the whole page with a negotiated window-wide effect. macOS keeps PageSurface visible
+        // and exposes the native material only through the transparent bottom device bar.
         _backdrop.Changed += () => Page.SetNativeWindowBackdrop(_backdrop.Applied);
         Page.SetNativeWindowBackdrop(_backdrop.Applied);
         Ui.Typography.ApplyTextOptions(this);
@@ -405,7 +407,16 @@ public partial class MainWindow : FAAppWindow
         finally
         {
             _closed = true;
-            Dispatcher.UIThread.Post(Close);
+            Dispatcher.UIThread.Post(() =>
+            {
+                // The window stays visible through asynchronous cleanup, so drop the Dock tile only when the
+                // actual close is committed. The process exits immediately afterwards.
+                Ui.MacApplicationPolicy.Set(Ui.MacActivationPolicy.Accessory);
+                Close();
+                // A platform-level cancellation should not happen after approval, but never leave a visible
+                // window without its Dock icon if one does.
+                if (IsVisible) Ui.MacApplicationPolicy.Set(Ui.MacActivationPolicy.Regular);
+            });
         }
     }
 

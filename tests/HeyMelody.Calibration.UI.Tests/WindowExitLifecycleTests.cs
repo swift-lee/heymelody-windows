@@ -12,7 +12,7 @@ using static HeyMelody.TestSupport.NativeWindowLifetimeHarness;
 internal static class WindowExitLifecycleTests
 {
     private static void Check(bool condition, string message) => NativeWindowLifetimeHarness.Check(condition, message);
-    internal static int Run() => NativeWindowLifetimeHarness.Run<ExitApplication>(VerifyAsync, "calibration");
+    internal static int Run() => NativeWindowLifetimeHarness.Run<ExitApplication>(VerifyAsync, "calibration", showInDock: false);
     public sealed class ExitApplication : Application
     {
         public override void Initialize()
@@ -27,9 +27,11 @@ internal static class WindowExitLifecycleTests
     {
         if (OperatingSystem.IsMacOS())
         {
+            VerifyActivationPolicy(MacActivationPolicy.Accessory, "The calibration helper runs without a Dock tile");
             var quitService = new ExitService();
             var quitWindow = await OpenAsync(quitService, "hearing");
-            await VerifyBackdropAsync(quitWindow);
+            await VerifyBackdropAsync(quitWindow, minimumTintAlpha: 236);
+            await MacBackdropCapture.CaptureAsync(quitWindow, "hearing-setup");
             var desktop = (IClassicDesktopStyleApplicationLifetime)Application.Current!.ApplicationLifetime!;
             Check(!desktop.TryShutdown(), "Calibration native Quit bypassed the coordinated exit.");
             await UntilAsync(() => quitService.ExitRequests == 1, "Calibration native Quit did not request product exit.");
@@ -38,6 +40,7 @@ internal static class WindowExitLifecycleTests
             quitService.Push("exitCancelled", "native-quit");
             Check(quitWindow.IsVisible && quitService.Cancels == 1, "A veto resumed or closed the safely stopped calibration.");
             await StopAsync(quitWindow, quitService);
+            VerifyActivationPolicy(MacActivationPolicy.Accessory, "The calibration helper stays an accessory after closing");
             Pass("macOS calibration Quit stops its test and waits for global commit");
 
             var outputService = new OutputService();
