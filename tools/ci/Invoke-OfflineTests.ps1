@@ -29,7 +29,7 @@ $projects = @($names | ForEach-Object {
 })
 if ($ListProjects) {
     [ordered]@{
-        profile = $Profile; projects = $projects; pythonStructureTests = $true
+        profile = $Profile; projects = $projects; pythonStructureTests = $true; pythonUiAssetTests = $true
         pythonPackageTests = ($Profile -eq 'MacOS'); pythonReleaseVerifierTests = ($Profile -eq 'Windows')
     } |
         ConvertTo-Json -Depth 4 -Compress
@@ -134,6 +134,9 @@ try {
     if (-not (Invoke-OfflineCheck 'python-project-structure' $PythonExecutable @('-m', 'unittest', 'discover', '-s', 'tools/tests', '-p', 'test_project_structure.py') 300)) {
         $checksSucceeded = $false
     }
+    if (-not (Invoke-OfflineCheck 'python-ui-assets' $PythonExecutable @('-m', 'unittest', 'discover', '-s', 'tools/tests', '-p', 'test_ui_assets.py') 300)) {
+        $checksSucceeded = $false
+    }
     if ($Profile -eq 'MacOS') {
         if (-not (Invoke-OfflineCheck 'python-package-macos' $PythonExecutable @('-m', 'unittest', 'discover', '-s', 'tools/tests', '-p', 'test_package_macos.py') 300)) {
             $checksSucceeded = $false
@@ -155,7 +158,7 @@ try {
         schemaVersion = 1; success = $success; profile = $Profile; version = $Version; runtimeIdentifier = $runtimeIdentifier
         startedUtc = $started.ToString('o'); completedUtc = [DateTime]::UtcNow.ToString('o')
         plannedProjects = @($projects | ForEach-Object name)
-        plannedPythonChecks = @('python-project-structure') +
+        plannedPythonChecks = @('python-project-structure', 'python-ui-assets') +
             $(if ($Profile -eq 'MacOS') { @('python-package-macos') } else { @() }) +
             $(if ($Profile -eq 'Windows') { @('python-release-verifier') } else { @() })
         tests = $results.ToArray(); failure = $failure; bluetoothHardwareVerified = $false; nativeGpuVerified = $false

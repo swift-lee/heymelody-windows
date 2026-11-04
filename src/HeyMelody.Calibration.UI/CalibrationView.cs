@@ -65,7 +65,7 @@ public sealed class CalibrationView : UserControl
     private bool _updatingLevel, _rippleFollowsTone;
     private bool? _connectorDone;
     private Button? _next, _retryLevel, _save, _resume;
-    private readonly List<(ToggleButton Button, FASymbolIcon Icon, string Mode)> _previewButtons = [];
+    private readonly List<(ToggleButton Button, FAIconSourceElement Icon, string Mode)> _previewButtons = [];
     private HearingRadarChart? _radar;
     private RadarTeachingTip? _radarHelpTip;
     private TextBlock? _levelLabel, _previewLabel, _caption;
@@ -235,7 +235,7 @@ public sealed class CalibrationView : UserControl
         {
             bool playing = state.Stage == "Previewing" && state.PreviewAudioPlaying && mode == state.PreviewMode;
             button.IsEnabled = _model.CanPreview; button.IsChecked = playing;
-            icon.Symbol = playing ? FASymbol.Pause : FASymbol.Play;
+            icon.IconSource = AppIcons.Source(playing ? AppIcon.Pause : AppIcon.Play, 20);
             AutomationProperties.SetHelpText(button, playing ? "暂停试听" : "播放内置试听音乐");
         }
         _radar?.SetResult(state.HearingRadar); UpdateSpectrum();
@@ -358,7 +358,7 @@ public sealed class CalibrationView : UserControl
         slider.AddHandler(KeyUpEvent, async (_, e) =>
         { if (ReferenceEquals(_level, slider) && e.Key is Avalonia.Input.Key.Left or Avalonia.Input.Key.Right or Avalonia.Input.Key.Home or Avalonia.Input.Key.End or Avalonia.Input.Key.Up or Avalonia.Input.Key.Down)
             await _model.AdjustLevelAsync((int)Math.Round(slider.Value), true); }, Avalonia.Interactivity.RoutingStrategies.Bubble, true);
-        var quiet = Symbol(FASymbol.Speaker0, 16, Secondary); var loud = Symbol(FASymbol.Speaker2, 16, Secondary);
+        var quiet = Symbol(AppIcon.Speaker0, 16, Secondary); var loud = Symbol(AppIcon.Speaker2, 16, Secondary);
         quiet.Margin = loud.Margin = new Thickness(0, 0, 0, 6);
         var volume = new Grid { ColumnDefinitions = new("Auto,*,Auto"), ColumnSpacing = 12, Children = { quiet, slider, loud } };
         Grid.SetColumn(slider, 1); Grid.SetColumn(loud, 2);
@@ -423,7 +423,7 @@ public sealed class CalibrationView : UserControl
                 Grid.SetColumn(text, 1);
                 legend.Children.Add(item);
             }
-            var info = new Button { Name = "HearingRadarHelp", Content = Symbol(FASymbol.Help, 16, Secondary), Padding = new Thickness(4),
+            var info = new Button { Name = "HearingRadarHelp", Content = Symbol(AppIcon.Help, 16, Secondary), Padding = new Thickness(4),
                 VerticalAlignment = VerticalAlignment.Center };
             AutomationProperties.SetName(info, "关于听感雷达图"); legend.Children.Add(info);
             var chartContent = new Grid { Children = { new StackPanel { Spacing = 4, Children = { _radar, legend } } } };
@@ -462,7 +462,7 @@ public sealed class CalibrationView : UserControl
             }
             foreach (var (text, action, mode, controlName) in new[] { ("增强前", "preview-original", "Original", "PreviewOriginal"), ("增强后", "preview-enhanced", "Enhanced", "PreviewEnhanced") })
             {
-                var icon = Symbol(FASymbol.Play, 20, Primary);
+                var icon = Symbol(AppIcon.Play, 20, Primary);
                 var title = Text(text, 16, FontWeight.SemiBold);
                 var row = new Grid { ColumnDefinitions = new("*,Auto"), ColumnSpacing = 16, Children = { title, icon } };
                 Grid.SetColumn(icon, 1);
@@ -477,12 +477,12 @@ public sealed class CalibrationView : UserControl
                 };
                 choices.Children.Add(button); _previewButtons.Add((button, icon, mode));
             }
-            _body.Children.Add(Card(Symbol(FASymbol.Audio, 20, Primary), "试听对比", _previewLabel, choices));
+            _body.Children.Add(Card(Symbol(AppIcon.Audio, 20, Primary), "试听对比", _previewLabel, choices));
         }
         var name = new TextBox { Text = _model.Name, PlaceholderText = "例如：我的听感", MaxLength = 40 };
         AutomationProperties.SetName(name, "黄金听感配置名称");
         name.TextChanged += (_, _) => { _model.Name = name.Text ?? ""; _nameError.IsVisible = false; };
-        _body.Children.Add(Card(Symbol(FASymbol.Rename, 20, Primary), "配置名称", SecondaryText("保存后可在主界面的“听感配置”中选择。"),
+        _body.Children.Add(Card(Symbol(AppIcon.Rename, 20, Primary), "配置名称", SecondaryText("保存后可在主界面的“听感配置”中选择。"),
             new StackPanel { Spacing = 6, Children = { name, Detach(_nameError) } }));
         var save = new Button { Content = "保存并启用", MinWidth = 80, IsDefault = true };
         save.Classes.Add("accent");
@@ -652,7 +652,7 @@ public sealed class CalibrationView : UserControl
     private void AddPreparation()
     {
         _body.Children.Add(Card(Icon(AppIcon.FitTest, 20, Primary), "佩戴好两只耳机", SecondaryText("两只耳机均已连接，并稳定佩戴在耳道中。")));
-        _body.Children.Add(Card(Symbol(FASymbol.SpeakerMute, 20, Primary), "保持环境安静", SecondaryText("测试期间请暂停音乐，避免接听电话。")));
+        _body.Children.Add(Card(Symbol(AppIcon.SpeakerMute, 20, Primary), "保持环境安静", SecondaryText("测试期间请暂停音乐，避免接听电话。")));
     }
     private Button AddAction(string text, string action, bool primary)
     {
@@ -723,16 +723,15 @@ public sealed class CalibrationView : UserControl
         path.Bind(Shape.StrokeProperty, new DynamicResourceExtension(brush));
         return path;
     }
-    private static FASymbolIcon Symbol(FASymbol symbol, double size, string brush)
+    private static FAIconSourceElement Symbol(AppIcon symbol, double size, string brush)
     {
-        var icon = new FASymbolIcon { Symbol = symbol, FontSize = size, Width = size, Height = size };
+        var icon = AppIcons.Element(symbol, size);
         icon.Bind(FAIconElement.ForegroundProperty, new DynamicResourceExtension(brush));
         return icon;
     }
-    private static Control Check() => Symbol(FASymbol.Checkmark, 30, OnAccent);
+    private static Control Check() => Symbol(AppIcon.Checkmark, 30, OnAccent);
     private static Control Ring() => new FAProgressRing { IsActive = true, IsIndeterminate = true, Width = 48, Height = 48 };
-    private static Control EarbudPair() => new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2,
-        Children = { Icon(AppIcon.FitTest, 28, OnAccent), Icon(AppIcon.FitTest, 28, OnAccent, mirrored: true) } };
+    private static Control EarbudPair() => Icon(AppIcon.FitTest, 40, OnAccent);
     private static Style SegmentStyle(string part, double? height = null)
     {
         var style = new Style(x => x.OfType<ProgressBar>().Class("segment").Template().OfType<Border>().Name(part))
@@ -777,7 +776,7 @@ public sealed class CalibrationView : UserControl
         {
             if (_state == state) return;
             _state = state;
-            var child = state == StepState.Done ? Symbol(FASymbol.Checkmark, 18, OnAccent) : _glyph(state == StepState.Pending ? Secondary : OnAccent);
+            var child = state == StepState.Done ? Symbol(AppIcon.Checkmark, 18, OnAccent) : _glyph(state == StepState.Pending ? Secondary : OnAccent);
             child.HorizontalAlignment = HorizontalAlignment.Center; child.VerticalAlignment = VerticalAlignment.Center;
             _disc.Child = child;
             _disc.Bind(Border.BackgroundProperty, new DynamicResourceExtension(state == StepState.Pending ? "SubtleFillColorTransparentBrush" : Accent));

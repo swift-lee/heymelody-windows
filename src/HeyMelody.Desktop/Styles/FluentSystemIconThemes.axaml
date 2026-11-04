@@ -1,0 +1,222 @@
+<!-- Minimal icon-only templates adapted from FluentAvaloniaUI 3.1.0, MIT license.
+     amwx/FluentAvalonia commit 215ee0481e8b0e6d396cbe2a0f33dc791c5646ab:
+     ComboBoxStyles.axaml, CheckBoxStyles.axaml and SettingsExpanderStyles.axaml.
+     Original part names, bindings, state brushes and animations remain unchanged. -->
+<Styles xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:ui="clr-namespace:FluentAvalonia.UI.Controls;assembly=FluentAvalonia" xmlns:icons="clr-namespace:HeyMelodyWindows.App">
+  <Styles.Resources>
+    <ResourceDictionary>
+      <ControlTheme x:Key="HmComboBoxIconTheme" TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+        <Setter Property="Template">
+          <ControlTemplate>
+            <DataValidationErrors>
+              <Grid ColumnDefinitions="*,32">
+                <Border Name="Background" Grid.Column="0" Grid.ColumnSpan="2" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" MinWidth="{DynamicResource ComboBoxThemeMinWidth}" CornerRadius="{TemplateBinding CornerRadius}" />
+                <Border Name="HighlightBackground" Grid.Column="0" Grid.ColumnSpan="2" BorderThickness="{DynamicResource ComboBoxBackgroundBorderThicknessFocused}" Opacity="0" Background="{DynamicResource ComboBoxBackgroundFocused}" BorderBrush="{DynamicResource ComboBoxBackgroundBorderBrushFocused}" />
+                <Border Name="Pill" Classes="ComboBoxItemPill" Margin="1 0 0 0" Opacity="0" />
+                <TextBlock x:Name="PlaceholderTextBlock" Grid.Column="0" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" Margin="{TemplateBinding Padding}" Text="{TemplateBinding PlaceholderText}" Foreground="{TemplateBinding PlaceholderForeground}">
+                  <TextBlock.IsVisible>
+                    <MultiBinding Converter="{x:Static BoolConverters.And}">
+                      <Binding Path="SelectionBoxItem" RelativeSource="{RelativeSource TemplatedParent}" Converter="{x:Static ObjectConverters.IsNull}" />
+                      <Binding Path="!IsEditable" RelativeSource="{RelativeSource TemplatedParent}" />
+                    </MultiBinding>
+                  </TextBlock.IsVisible>
+                </TextBlock>
+                <ContentPresenter Name="ContentPresenter" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" Grid.Column="0" Margin="{TemplateBinding Padding}" HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+                <TextBox Name="PART_EditableTextBox" Grid.Column="0" Padding="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" Foreground="{TemplateBinding Foreground}" Background="Transparent" Text="{TemplateBinding Text, Mode=TwoWay}" PlaceholderText="{TemplateBinding PlaceholderText}" BorderThickness="0" IsVisible="{TemplateBinding IsEditable}">
+                  <TextBox.Resources>
+                    <SolidColorBrush x:Key="TextControlBackgroundFocused">Transparent</SolidColorBrush>
+                    <SolidColorBrush x:Key="TextControlBackgroundPointerOver">Transparent</SolidColorBrush>
+                    <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+                  </TextBox.Resources>
+                </TextBox>
+                <Border Name="DropDownOverlay" Grid.Column="1" Background="Transparent" Margin="-4,4,4,4" Width="30" IsVisible="False" HorizontalAlignment="Right" />
+                <ui:FAIconSourceElement Name="DropDownGlyph" Foreground="{DynamicResource ComboBoxDropDownGlyphForeground}" MinHeight="{DynamicResource ComboBoxMinHeight}" Grid.Row="1" Grid.Column="1" IsHitTestVisible="False" Margin="0 0 14 0" HorizontalAlignment="Right" VerticalAlignment="Center" IconSource="{icons:AppIcon ChevronDown, Size=12}" Width="12" Height="12" />
+                <Popup Name="PART_Popup" WindowManagerAddShadowHint="False" IsOpen="{TemplateBinding IsDropDownOpen, Mode=TwoWay}" MinWidth="{Binding Bounds.Width, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="{TemplateBinding MaxDropDownHeight}" PlacementTarget="Background" IsLightDismissEnabled="True" InheritsTransform="True">
+                  <Border Name="PopupBorder" Background="{DynamicResource ComboBoxDropDownBackground}" BorderBrush="{DynamicResource ComboBoxDropDownBorderBrush}" BorderThickness="{DynamicResource ComboBoxDropdownBorderThickness}" Padding="{DynamicResource ComboBoxDropdownBorderPadding}" HorizontalAlignment="Stretch" CornerRadius="{DynamicResource OverlayCornerRadius}" BackgroundSizing="InnerBorderEdge">
+                    <ScrollViewer HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}" VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}" IsDeferredScrollingEnabled="{TemplateBinding (ScrollViewer.IsDeferredScrollingEnabled)}">
+                      <ItemsPresenter Name="PART_ItemsPresenter" Margin="{DynamicResource ComboBoxDropdownContentMargin}" ItemsPanel="{TemplateBinding ItemsPanel}" />
+                    </ScrollViewer>
+                  </Border>
+                </Popup>
+              </Grid>
+            </DataValidationErrors>
+          </ControlTemplate>
+        </Setter>
+        <Style Selector="^:disabled">
+          <Style Selector="^ /template/ ui|FAIconSourceElement#DropDownGlyph">
+            <Setter Property="Foreground" Value="{DynamicResource ComboBoxDropDownGlyphForegroundDisabled}" />
+          </Style>
+        </Style>
+        <Style Selector="^:focus-visible">
+          <Style Selector="^ /template/ ui|FAIconSourceElement#DropDownGlyph">
+            <Setter Property="Foreground" Value="{DynamicResource ComboBoxDropDownGlyphForegroundFocused}" />
+          </Style>
+        </Style>
+      </ControlTheme>
+      <ControlTheme x:Key="HmCheckBoxIconTheme" TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+        <Setter Property="Template">
+          <ControlTemplate>
+            <Border Name="Root" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}">
+              <Grid ColumnDefinitions="Auto,*">
+                <Grid Grid.Column="0" VerticalAlignment="Top" Height="{StaticResource CheckBoxHeight}">
+                  <Border Name="NormalRectangle" UseLayoutRounding="False" Height="{StaticResource CheckBoxSize}" Width="{StaticResource CheckBoxSize}" CornerRadius="{TemplateBinding CornerRadius}" Background="{DynamicResource CheckBoxCheckBackgroundFillUnchecked}" BorderBrush="{DynamicResource CheckBoxCheckBackgroundStrokeUnchecked}" BorderThickness="{DynamicResource CheckBoxBorderThickness}" />
+                  <ui:FAIconSourceElement Name="CheckGlyph" Foreground="{DynamicResource CheckBoxCheckGlpyhForegroundUnchecked}" Opacity="0" FlowDirection="LeftToRight" IconSource="{icons:AppIcon Checkmark, Size=12}" Width="12" Height="12" />
+                </Grid>
+                <ContentPresenter Name="ContentPresenter" Grid.Column="1" ContentTemplate="{TemplateBinding ContentTemplate}" Content="{TemplateBinding Content}" Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" Foreground="{DynamicResource CheckBoxForegroundUnchecked}" />
+              </Grid>
+            </Border>
+          </ControlTemplate>
+        </Setter>
+        <Style Selector="^:pointerover">
+          <Style Selector="^ /template/ ui|FAIconSourceElement#CheckGlyph">
+            <Setter Property="Foreground" Value="{DynamicResource CheckBoxCheckGlyphForegroundUncheckedPointerOver}" />
+          </Style>
+        </Style>
+        <Style Selector="^:pressed">
+          <Style Selector="^ /template/ ui|FAIconSourceElement#CheckGlyph">
+            <Setter Property="Foreground" Value="{DynamicResource CheckBoxCheckGlyphForegroundUncheckedPressed}" />
+          </Style>
+        </Style>
+        <Style Selector="^:disabled">
+          <Style Selector="^ /template/ ui|FAIconSourceElement#CheckGlyph">
+            <Setter Property="Foreground" Value="{DynamicResource CheckBoxCheckGlyphForegroundUncheckedDisabled}" />
+          </Style>
+        </Style>
+        <Style Selector="^:checked">
+          <Style Selector="^ /template/ ui|FAIconSourceElement#CheckGlyph">
+            <Setter Property="Foreground" Value="{DynamicResource CheckBoxCheckGlyphForegroundChecked}" />
+            <Setter Property="Opacity" Value="1" />
+            <Setter Property="IconSource" Value="{icons:AppIcon Checkmark, Size=12}" />
+          </Style>
+          <Style Selector="^:pointerover /template/ ui|FAIconSourceElement#CheckGlyph">
+            <Setter Property="Foreground" Value="{DynamicResource CheckBoxCheckGlyphForegroundCheckedPointerOver}" />
+            <Setter Property="Opacity" Value="1" />
+          </Style>
+          <Style Selector="^:pressed /template/ ui|FAIconSourceElement#CheckGlyph">
+            <Setter Property="Foreground" Value="{DynamicResource CheckBoxCheckGlyphForegroundCheckedPressed}" />
+            <Setter Property="Opacity" Value="1" />
+          </Style>
+          <Style Selector="^:disabled /template/ ui|FAIconSourceElement#CheckGlyph">
+            <Setter Property="Foreground" Value="{DynamicResource CheckBoxCheckGlyphForegroundCheckedDisabled}" />
+            <Setter Property="Opacity" Value="1" />
+          </Style>
+        </Style>
+        <Style Selector="^:indeterminate">
+          <Style Selector="^ /template/ ui|FAIconSourceElement#CheckGlyph">
+            <Setter Property="Foreground" Value="{DynamicResource CheckBoxCheckGlyphForegroundIndeterminate}" />
+            <Setter Property="Opacity" Value="1" />
+            <Setter Property="IconSource" Value="{icons:AppIcon Subtract, Size=12}" />
+          </Style>
+          <Style Selector="^:pointerover /template/ ui|FAIconSourceElement#CheckGlyph">
+            <Setter Property="Foreground" Value="{DynamicResource CheckBoxCheckGlyphForegroundIndeterminatePointerOver}" />
+            <Setter Property="Opacity" Value="1" />
+            <Setter Property="IconSource" Value="{icons:AppIcon Subtract, Size=12}" />
+          </Style>
+          <Style Selector="^:pressed /template/ ui|FAIconSourceElement#CheckGlyph">
+            <Setter Property="Foreground" Value="{DynamicResource CheckBoxCheckGlyphForegroundIndeterminatePressed}" />
+            <Setter Property="Opacity" Value="1" />
+            <Setter Property="IconSource" Value="{icons:AppIcon Subtract, Size=12}" />
+          </Style>
+          <Style Selector="^:disabled /template/ ui|FAIconSourceElement#CheckGlyph">
+            <Setter Property="Foreground" Value="{DynamicResource CheckBoxCheckGlyphForegroundIndeterminateDisabled}" />
+            <Setter Property="Opacity" Value="1" />
+            <Setter Property="IconSource" Value="{icons:AppIcon Subtract, Size=12}" />
+          </Style>
+        </Style>
+      </ControlTheme>
+      <ControlTheme x:Key="HmSettingsExpanderToggleIconTheme" TargetType="ToggleButton" BasedOn="{StaticResource SettingsExpanderToggleButtonStyle}">
+        <Setter Property="Template">
+          <ControlTemplate>
+            <Border Name="Root" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}" Padding="{TemplateBinding Padding}" BackgroundSizing="{TemplateBinding BackgroundSizing}">
+              <Border.Transitions>
+                <Transitions>
+                  <BrushTransition Duration="00:00:00.083" Property="Background" />
+                  <BrushTransition Duration="00:00:00.083" Property="BorderBrush" />
+                </Transitions>
+              </Border.Transitions>
+              <Grid ColumnDefinitions="*,Auto">
+                <ContentPresenter Content="{TemplateBinding Content}" />
+                <ui:FAIconSourceElement Name="ExpandCollapseChevron" Foreground="{DynamicResource ExpanderChevronForeground}" RenderTransform="none" Margin="{DynamicResource SettingsExpanderExpandCollapseChevronMargin}" Grid.Column="1" IsVisible="False" IconSource="{icons:AppIcon ChevronDown, Size=18}" Width="18" Height="18" />
+              </Grid>
+            </Border>
+          </ControlTemplate>
+        </Setter>
+        <Style Selector="^:checked">
+          <Style Selector="^ /template/ ui|FAIconSourceElement#ExpandCollapseChevron">
+            <Setter Property="RenderTransform" Value="rotate(180deg)" />
+          </Style>
+        </Style>
+        <Style Selector="^:not(:empty) /template/ ui|FAIconSourceElement#ExpandCollapseChevron">
+          <Setter Property="IsVisible" Value="True" />
+        </Style>
+      </ControlTheme>
+      <ControlTheme x:Key="HmSettingsExpanderBodyIconTheme" TargetType="Expander" BasedOn="{StaticResource SettingsExpanderExpanderStyle}">
+        <Setter Property="Template">
+          <ControlTemplate>
+            <StackPanel>
+              <ToggleButton Name="ToggleButton" MinHeight="{TemplateBinding MinHeight}" IsEnabled="{TemplateBinding IsEnabled}" IsChecked="{TemplateBinding IsExpanded, Mode=TwoWay}" Content="{TemplateBinding Header}" Theme="{StaticResource HmSettingsExpanderToggleIconTheme}" />
+              <Border Name="ExpanderContentClip" ClipToBounds="True">
+                <Border Name="ExpanderContent" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius, Converter={StaticResource BottomCornerRadiusFilterConverter}}" IsVisible="False" BackgroundSizing="InnerBorderEdge">
+                  <ContentPresenter Name="PART_ContentPresenter" Margin="{TemplateBinding Padding}" IsVisible="{TemplateBinding IsExpanded}" ContentTemplate="{TemplateBinding ContentTemplate}" Content="{TemplateBinding Content}" HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
+                </Border>
+              </Border>
+            </StackPanel>
+          </ControlTemplate>
+        </Setter>
+      </ControlTheme>
+      <ControlTheme x:Key="HmSettingsExpanderIconTheme" TargetType="ui:FASettingsExpander" BasedOn="{StaticResource {x:Type ui:FASettingsExpander}}">
+        <Setter Property="Template">
+          <ControlTemplate TargetType="ui:FASettingsExpander">
+            <Expander Name="Expander" Theme="{StaticResource HmSettingsExpanderBodyIconTheme}" IsExpanded="{TemplateBinding IsExpanded, Mode=TwoWay}">
+              <Expander.Header>
+                <ui:FASettingsExpanderItem Content="{TemplateBinding Header}" ContentTemplate="{TemplateBinding HeaderTemplate}" Description="{TemplateBinding Description}" IsClickEnabled="{TemplateBinding IsClickEnabled}" IconSource="{TemplateBinding IconSource}" ActionIconSource="{TemplateBinding ActionIconSource}" Footer="{TemplateBinding Footer}" FooterTemplate="{TemplateBinding FooterTemplate}" Padding="{DynamicResource SettingsExpanderPadding}" Background="Transparent" Name="ContentHost" />
+              </Expander.Header>
+              <ItemsPresenter ItemsPanel="{TemplateBinding ItemsPanel}" />
+            </Expander>
+          </ControlTemplate>
+        </Setter>
+      </ControlTheme>
+      <icons:InfoBarFluentIconConverter x:Key="HmInfoBarIconConverter" />
+      <icons:FluentTextCommandBarFlyout x:Key="HmTextBoxContextFlyout" />
+      <ControlTheme x:Key="HmInfoBarCloseIconTheme" TargetType="Button" BasedOn="{StaticResource InfoBarCloseButtonStyle}">
+        <Setter Property="Template">
+          <ControlTemplate>
+            <ContentPresenter Name="PART_ContentPresenter" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}" Padding="{TemplateBinding Padding}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" TemplatedControl.IsTemplateFocusTarget="True">
+              <ContentPresenter.Content>
+                <ui:FAIconSourceElement IconSource="{icons:AppIcon Dismiss, Size=16}" Width="16" Height="16" Foreground="{TemplateBinding Foreground}" IsHitTestVisible="False" />
+              </ContentPresenter.Content>
+            </ContentPresenter>
+          </ControlTemplate>
+        </Setter>
+      </ControlTheme>
+    </ResourceDictionary>
+  </Styles.Resources>
+  <Style Selector="ComboBox">
+    <Setter Property="Theme" Value="{StaticResource HmComboBoxIconTheme}" />
+  </Style>
+  <Style Selector="CheckBox">
+    <Setter Property="Theme" Value="{StaticResource HmCheckBoxIconTheme}" />
+  </Style>
+  <Style Selector="ui|FASettingsExpander">
+    <Setter Property="Theme" Value="{StaticResource HmSettingsExpanderIconTheme}" />
+  </Style>
+  <Style Selector="ui|FAInfoBar">
+    <Setter Property="IconSource" Value="{Binding Severity, RelativeSource={RelativeSource Self}, Converter={StaticResource HmInfoBarIconConverter}}" />
+    <Setter Property="CloseButtonTheme" Value="{StaticResource HmInfoBarCloseIconTheme}" />
+  </Style>
+  <Style Selector="ui|FAInfoBar:informational /template/ Viewbox#UserIconBox ui|FAIconSourceElement">
+    <Setter Property="Foreground" Value="{DynamicResource InfoBarInformationalSeverityIconBackground}" />
+  </Style>
+  <Style Selector="ui|FAInfoBar:error /template/ Viewbox#UserIconBox ui|FAIconSourceElement">
+    <Setter Property="Foreground" Value="{DynamicResource InfoBarErrorSeverityIconBackground}" />
+  </Style>
+  <Style Selector="ui|FAInfoBar:warning /template/ Viewbox#UserIconBox ui|FAIconSourceElement">
+    <Setter Property="Foreground" Value="{DynamicResource InfoBarWarningSeverityIconBackground}" />
+  </Style>
+  <Style Selector="ui|FAInfoBar:success /template/ Viewbox#UserIconBox ui|FAIconSourceElement">
+    <Setter Property="Foreground" Value="{DynamicResource InfoBarSuccessSeverityIconBackground}" />
+  </Style>
+  <Style Selector="TextBox">
+    <Setter Property="ContextFlyout" Value="{StaticResource HmTextBoxContextFlyout}" />
+  </Style>
+</Styles>

@@ -14,6 +14,7 @@ using Avalonia.Styling;
 using Avalonia.VisualTree;
 using FluentAvalonia.UI.Controls;
 using HeyMelodyWindows.App;
+using HeyMelodyWindows.Ui;
 
 /// <summary>Runs the dedicated demo startup in a real Win32 window without a Bluetooth backend.</summary>
 internal static class NativeDemoSmoke
@@ -37,7 +38,7 @@ internal static class NativeDemoSmoke
             {
                 ModelRenderingPreferences.Reload();
                 ModelRenderingPreferences.Apply(backend == FilamentBackend.OpenGL);
-                AppBuilder.Configure<SmokeApplication>().UsePlatformDetect().LogToTrace()
+                AppBuilder.Configure<SmokeApplication>().UsePlatformDetect().UseHeyMelodyTypography().LogToTrace()
                     .StartWithClassicDesktopLifetime([], ShutdownMode.OnExplicitShutdown);
                 Check(!File.Exists(_state.PreferencesPath), "Native demo verification never writes user preferences.");
             }

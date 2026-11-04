@@ -296,6 +296,7 @@ class StagingTests(unittest.TestCase):
             self.assertEqual(source_probe.stat().st_mode, source_mode)
             self.assertEqual({path.relative_to(native): path.read_bytes() for path in native.rglob("*") if path.is_file()}, source_bytes)
             manifest = json.loads((bundle / "Contents/Resources/manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["uiAssets"], "misans-4.009-fluent-system-icons-v1")
             self.assertEqual(manifest["filamentSourceManifestSha256"], source_hash)
             staged_native = bundle / "Contents/MacOS"
             for entry in json.loads((staged_native / "filament-runtime.json").read_text(encoding="utf-8"))["files"]:
@@ -303,11 +304,13 @@ class StagingTests(unittest.TestCase):
             self.assertNotEqual(package.sha256(staged_native / "hm_filament_probe"), package.sha256(source_probe))
             if os.name == "posix":
                 self.assertEqual(stat.S_IMODE((staged_native / "hm_filament_probe").stat().st_mode) & 0o111, 0o111)
-            with mock.patch.object(verification.os, "access", side_effect=lambda path, _mode: Path(path).name != "hm_filament_probe"):
+            with mock.patch.object(verification, "verify_packaged_ui_assets"), \
+                    mock.patch.object(verification.os, "access", side_effect=lambda path, _mode: Path(path).name != "hm_filament_probe"):
                 with self.assertRaisesRegex(ValueError, "probe is not executable"):
                     verification.check_bundle(bundle, VERSION)
             # Isolate the dependency gate from the earlier manifest checksum gate.
-            with mock.patch.object(verification, "checked_file"), mock.patch.object(verification.os, "access", return_value=True):
+            with mock.patch.object(verification, "checked_file"), mock.patch.object(verification, "verify_packaged_ui_assets"), \
+                    mock.patch.object(verification.os, "access", return_value=True):
                 for component in package.COMPONENTS:
                     with self.subTest(missing_desktop=component):
                         application = bundle if component == "HeyMelody" else bundle / "Contents/Helpers" / (component + ".app")

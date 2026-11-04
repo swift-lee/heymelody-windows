@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
 using HeyMelodyWindows.App;
+using HeyMelodyWindows.Ui;
 
 /// <summary>
 /// Explicit --native-startup-smoke verification of five main-window recovery and
@@ -27,7 +28,7 @@ internal static class NativeStartupSmoke
         {
             try
             {
-                AppBuilder.Configure<SmokeApplication>().UsePlatformDetect().LogToTrace()
+                AppBuilder.Configure<SmokeApplication>().UsePlatformDetect().UseHeyMelodyTypography().LogToTrace()
                     .StartWithClassicDesktopLifetime([], ShutdownMode.OnExplicitShutdown);
             }
             catch (Exception error) { _state.Failure = error.ToString(); }

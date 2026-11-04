@@ -187,7 +187,9 @@ internal static class ModelRendererLifecycleTests
                     await UntilAsync(() => factory.Instances.All(instance => instance.Disposed), "Failed native resources are disposed.");
                     Check(!model.ModelReady && !model.AnimationActive && model.CaptureLatestFrame(out _) is null,
                         "Failed rendering stops the frame loop and clears the image rather than keeping stale pixels.");
-                    Check(model.GetVisualDescendants().OfType<FASymbolIcon>().Any(), "Renderer failure reaches static artwork without recursing into GLB.");
+                    Check(model.GetVisualDescendants().OfType<FAIconSourceElement>()
+                        .Any(icon => IconTests.Matches(icon.IconSource, AppIcon.Audio, 96)),
+                        "Renderer failure reaches the bundled Fluent artwork fallback without recursing into GLB.");
                     Check(model.GetVisualDescendants().OfType<TextBlock>().Any(text => text.Text?.Contains("“3D模型渲染API”中选择 OpenGL") == true)
                         == (failure == "backend-frame" && !OperatingSystem.IsMacOS()),
                         "Vulkan rendering failures suggest compatibility, while component, model and unclassified errors do not.");

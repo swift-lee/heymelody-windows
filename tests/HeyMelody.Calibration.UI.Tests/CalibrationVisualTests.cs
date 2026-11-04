@@ -10,6 +10,7 @@ using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using FluentAvalonia.Styling;
+using FluentAvalonia.UI.Controls;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Artwork;
 using HeyMelodyWindows.Calibration.UI;
@@ -216,6 +217,9 @@ internal static class CalibrationVisualTests
                 window.Show(); Dispatcher.UIThread.RunJobs();
                 CheckActionBar(view, "开始");
                 Check(!Visible(view, "耳道扫描"), "The fit test has no hearing stepper.");
+                Check(view.GetVisualDescendants().OfType<Border>().Single(control => control.Name == "HeroCore").Child
+                    is FAIconSourceElement { Width: 40, Height: 40, IconSource: FAPathIconSource },
+                    "The decorative fit hero uses one provided earbud-pair icon, not two mirrored pairs.");
                 Capture(window, "fit-ready");
                 service.FailNextStart = true;
                 view.GetVisualDescendants().OfType<Button>().Single(x => Equals(x.Content, "开始")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

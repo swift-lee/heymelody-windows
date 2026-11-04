@@ -17,6 +17,9 @@ internal static class NativeWindowLifetimeHarness
     private static readonly List<(Window Window, Action Stop)> Windows = [];
     private static readonly List<string> Checks = [];
     private static readonly List<string> Errors = [];
+    private static readonly List<object> FontMemory = [];
+    private static int _fontWindowsOpened;
+    private static int _fontWindowsCollected;
     private static Func<Task>? _tests;
     private static string _output = "";
     private static bool _done;
@@ -77,15 +80,16 @@ internal static class NativeWindowLifetimeHarness
 
     internal static async Task VerifyBackdropAsync(Window window)
     {
-        if (!OperatingSystem.IsMacOS()) return;
-        Check(Typography.Source == TypographySource.MacOSSystem, "The native window did not select macOS PingFang SC.");
+        Check(Typography.CollectionInitializationCount == 1, "Native windows share one MiSans collection per process.");
         foreach (var weight in new[] { FontWeight.Normal, FontWeight.SemiBold, FontWeight.Bold })
         {
             var glyphs = new Typeface(Typography.ThemeFontFamily, FontStyle.Normal, weight).GlyphTypeface;
-            Check(glyphs.FamilyName == Typography.MacOSFamily && glyphs.FontSimulations == FontSimulations.None,
-                $"The native window did not use a real PingFang SC face for {weight}: {glyphs.FamilyName}/{glyphs.FontSimulations}.");
+            Check((glyphs.TypographicFamilyName == Typography.Family || glyphs.FamilyName == Typography.Family)
+                && glyphs.Weight == MiSansFontCollection.Map(weight) && glyphs.FontSimulations == FontSimulations.None,
+                $"The native window did not use the real MiSans face for {weight}: {glyphs.FamilyName}/{glyphs.Weight}/{glyphs.FontSimulations}.");
         }
-        Pass("macOS native windows use real PingFang SC regular and semibold faces without synthetic bold");
+        Pass("native windows use the bundled MiSans regular, semibold and bold faces without synthesis");
+        if (!OperatingSystem.IsMacOS()) return;
         Console.WriteLine(JsonSerializer.Serialize(new { backdropWindow = window.Title, actual = window.ActualTransparencyLevel.ToString(),
             hints = window.TransparencyLevelHint.Select(x => x.ToString()).ToArray(), background = window.Background?.ToString() }));
         var initialTheme = window.RequestedThemeVariant;
@@ -120,7 +124,11 @@ internal static class NativeWindowLifetimeHarness
 
     private static async Task ExecuteAsync(IClassicDesktopStyleApplicationLifetime desktop)
     {
-        try { await _tests!(); }
+        try
+        {
+            await VerifyFontWindowLifetimeAsync();
+            await _tests!();
+        }
         catch (Exception error) { Errors.Add(error.ToString()); }
         finally
         {
@@ -133,6 +141,74 @@ internal static class NativeWindowLifetimeHarness
             WriteReceipt();
             desktop.Shutdown(Errors.Count == 0 ? 0 : 1);
         }
+    }
+
+    private static async Task VerifyFontWindowLifetimeAsync()
+    {
+        var faces = new[] { FontWeight.Normal, FontWeight.SemiBold, FontWeight.Bold }
+            .Select(weight => new Typeface(Typography.ThemeFontFamily, FontStyle.Normal, weight).GlyphTypeface).ToArray();
+        var windows = new List<WeakReference>();
+        for (var i = 0; i < 4; i++) windows.Add(await DrawFontWindowAsync());
+        var baseline = SampleFontMemory("after-four-warmup-windows");
+        for (var batch = 0; batch < 2; batch++)
+        {
+            for (var i = 0; i < 10; i++) windows.Add(await DrawFontWindowAsync());
+            var sample = SampleFontMemory("after-" + (14 + batch * 10) + "-windows");
+            // Windows software rendering gives comparable private bytes. macOS working set is recorded only:
+            // compositor/cache residency is not a private-allocation measurement.
+            if (OperatingSystem.IsWindows())
+                Check(sample - baseline < 64L * 1024 * 1024,
+                    "Repeated fixed-text windows retained more than 64 MiB after MiSans warmup.");
+        }
+        for (var i = 0; i < faces.Length; i++)
+        {
+            var weight = new[] { FontWeight.Normal, FontWeight.SemiBold, FontWeight.Bold }[i];
+            Check(ReferenceEquals(faces[i], new Typeface(Typography.ThemeFontFamily, FontStyle.Normal, weight).GlyphTypeface),
+                "Window churn must reuse the process-cached MiSans face for " + weight + ".");
+        }
+        Check(Typography.CollectionInitializationCount == 1, "Window churn must not reload the MiSans collection.");
+        _fontWindowsCollected = windows.Count(reference => !reference.IsAlive);
+        Check(_fontWindowsCollected == windows.Count, "Closed font fixture windows must be collectible.");
+        Pass("24 fixed-text windows close and collect while sharing one MiSans collection and its three faces");
+    }
+
+    private static async Task<WeakReference> DrawFontWindowAsync()
+    {
+        Window? window = new()
+        {
+            Width = 320, Height = 160, ShowInTaskbar = false, Title = "MiSans lifetime fixture",
+            Content = new StackPanel
+            {
+                Margin = new Thickness(12), Spacing = 4,
+                Children =
+                {
+                    new TextBlock { Text = "MiSans 012345 \u76f4\u9aa8\u89d2\u5199\u753b", FontWeight = FontWeight.Normal },
+                    new TextBlock { Text = "MiSans 012345 \u76f4\u9aa8\u89d2\u5199\u753b", FontWeight = FontWeight.SemiBold },
+                    new TextBlock { Text = "MiSans 012345 \u76f4\u9aa8\u89d2\u5199\u753b", FontWeight = FontWeight.Bold }
+                }
+            }
+        };
+        Typography.ApplyTextOptions(window);
+        var reference = new WeakReference(window);
+        window.Show();
+        await Task.Delay(30);
+        window.Close();
+        window = null;
+        _fontWindowsOpened++;
+        await Task.Delay(10);
+        return reference;
+    }
+
+    private static long SampleFontMemory(string phase)
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        using var process = Process.GetCurrentProcess();
+        process.Refresh();
+        var bytes = OperatingSystem.IsWindows() ? process.PrivateMemorySize64 : process.WorkingSet64;
+        FontMemory.Add(new { phase, bytes, metric = OperatingSystem.IsWindows() ? "privateBytes" : "workingSetBytes" });
+        return bytes;
     }
 
     private static async Task WatchdogAsync(IClassicDesktopStyleApplicationLifetime desktop)
@@ -154,6 +230,8 @@ internal static class NativeWindowLifetimeHarness
             success = Errors.Count == 0, passed = Checks.Count, checks = Checks, errors = Errors,
             nativeBluetoothCalls = 0, hostProcessesLaunched = 0, screenshots = MacBackdropCapture.WindowCaptures, output = _output,
             operatingSystem = OperatingSystem.IsMacOS() ? "macOS" : "Windows",
+            fontWindowChurn = new { opened = _fontWindowsOpened, collected = _fontWindowsCollected,
+                collectionInitializations = Typography.CollectionInitializationCount, memory = FontMemory },
             scope = "Isolated native desktop windows with fake services; exit votes, veto recovery, terminal close and cleanup faults; no real Host or headset."
         };
         var json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });

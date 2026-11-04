@@ -7,6 +7,7 @@ using Avalonia.Interactivity;
 using Avalonia.VisualTree;
 using FluentAvalonia.UI.Controls;
 using HeyMelodyWindows.App;
+using HeyMelodyWindows.Ui;
 
 /// <summary>Exercises the real main-window event dispatcher and tray exit dialogs using only an in-memory backend.</summary>
 internal static class NativeBackendSmoke
@@ -18,7 +19,8 @@ internal static class NativeBackendSmoke
         _state = new();
         var thread = new Thread(() =>
         {
-            try { AppBuilder.Configure<SmokeApplication>().UsePlatformDetect().StartWithClassicDesktopLifetime([], ShutdownMode.OnExplicitShutdown); }
+            try { AppBuilder.Configure<SmokeApplication>().UsePlatformDetect().UseHeyMelodyTypography()
+                    .StartWithClassicDesktopLifetime([], ShutdownMode.OnExplicitShutdown); }
             catch (Exception error) { _state.Failure = error.ToString(); }
         }) { IsBackground = true, Name = "HeyMelody event window smoke" };
         thread.SetApartmentState(ApartmentState.STA); thread.Start();

@@ -8,6 +8,11 @@ import re
 from pathlib import Path
 import struct
 
+if __package__:
+    from .verify_ui_assets import verify_packaged_ui_assets
+else:
+    from verify_ui_assets import verify_packaged_ui_assets
+
 
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -308,6 +313,8 @@ def verify(root, package, evidence=None, architectures=("x64", "x86", "arm64")):
                     if item["type"] == "package":
                         assert library in gui_dependencies["libraries"] and item["sha512"] == gui_dependencies["libraries"][library]["sha512"]
         verify_shared_desktop(desktop_entrypoints)
+        for directory in {directory for _, directory, _ in desktop_entrypoints}:
+            verify_packaged_ui_assets(manifest, directory, directory / "licenses/upstream")
         assert len(runtime_versions) == 1, "Entrypoints do not share the exact runtime"
         renderer_packages = [key.split("/", 1) for key in gui_dependencies["libraries"]
                              if key.split("/", 1)[0].casefold() == "ava3dcontrol"]

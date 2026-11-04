@@ -2,6 +2,18 @@
   "retrievedAtUtc": "2026-10-06T11:56:40.9202536Z",
   "files": [
     {
+      "url": "https://hyperos.mi.com/font-download/MiSans%E5%AD%97%E4%BD%93%E7%9F%A5%E8%AF%86%E4%BA%A7%E6%9D%83%E8%AE%B8%E5%8F%AF%E5%8D%8F%E8%AE%AE.pdf",
+      "name": "MiSans-Font-License.pdf",
+      "retrievedAtUtc": "2026-11-03T17:59:44Z",
+      "covers": "Unmodified standard MiSans 4.009 static Regular, Semibold and Bold OTF; exact source member and byte hashes are in UI-Assets-SOURCE.json."
+    },
+    {
+      "url": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/9bfae3d782fda4c8764f2128cec4d0dda160b283/LICENSE",
+      "name": "Fluent-System-Icons-MIT.txt",
+      "retrievedAtUtc": "2026-11-03T17:59:44Z",
+      "covers": "Regular SVG subset embedded by HeyMelody.Desktop; each upstream path, natural size and hash is in Assets/Icons/fluent-icons.json."
+    },
+    {
       "url": "https://raw.githubusercontent.com/AvaloniaUI/Avalonia/8eeda4f6f546165b3f72e63c9f42247abb306905/licence.md",
       "name": "Avalonia-MIT.txt"
     },

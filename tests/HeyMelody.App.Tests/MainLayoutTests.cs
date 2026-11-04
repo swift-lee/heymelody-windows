@@ -69,9 +69,9 @@ internal static class MainLayoutTests
                             Check(charging.IsVisible && view.FindControl<FAIconSourceElement>("LeftBatteryDeviceIcon")!.IsVisible,
                                 $"The device shape and charging bolt remain visible together (charging={charging.IsVisible}, value={vm.LeftCharging}).");
                             Console.WriteLine($"Battery charging {view.ActualThemeVariant}: source={charging.IconSource?.GetType().Name}, "
-                                + $"glyph={(charging.IconSource is FAFontIconSource font ? $"U+{char.ConvertToUtf32(font.Glyph!, 0):X4}" : "none")}, foreground={charging.Foreground}");
-                            Check(charging.IconSource is FAFontIconSource { Glyph: "\uE945" },
-                                "The charging marker retains the existing lightning glyph.");
+                                + $"bounds={(charging.IconSource as FAPathIconSource)?.Data?.Bounds}, foreground={charging.Foreground}");
+                            Check(IconTests.Matches(charging.IconSource, AppIcon.Charging, 18),
+                                "The charging marker uses the bundled Fluent battery-charge vector.");
                             var expected = view.FindResource(view.ActualThemeVariant, "SystemFillColorSuccessBrush");
                             Check(charging.Foreground is ISolidColorBrush actual && expected is ISolidColorBrush success
                                 && actual.Color == success.Color,
@@ -96,7 +96,7 @@ internal static class MainLayoutTests
                         var copy = view.FindControl<Button>("CopyDeviceInfoButton")!;
                         var copyContent = (StackPanel)copy.Content!;
                         Check(copy.IsEnabled && information.Footer is null && !information.IsExpanded
-                            && copyContent.Children[0] is FAIconSourceElement { IconSource: FAFontIconSource { Glyph: "\uE8C8" } }
+                            && copyContent.Children[0] is FAIconSourceElement copyIcon && IconTests.Matches(copyIcon.IconSource, AppIcon.Copy, 16)
                             && copyContent.Children[1] is TextBlock { Text: "复制" },
                             "Copy keeps its icon and text in the expanded information content, not in the header.");
                         var picker = view.FindControl<ListBox>("DevicePicker")!;
@@ -332,7 +332,7 @@ internal static class MainLayoutTests
         var expanders = view.GetVisualDescendants().OfType<FASettingsExpander>().ToArray();
         var sections = view.GetVisualDescendants().OfType<FeatureSectionView>().Select(section => (FASettingsExpander)section.Content!).ToArray();
         Check(expanders.All(expander => expander.IconSource is not null && !string.IsNullOrEmpty(expander.Description))
-            && view.FindControl<FASettingsExpander>("EqualizerPanel")!.IconSource is FAFontIconSource { Glyph: "\uE9E9" }
+            && IconTests.Matches(view.FindControl<FASettingsExpander>("EqualizerPanel")!.IconSource, AppIcon.Equalizer)
             && view.FindControl<FASettingsExpander>("FitTestPanel")!.IconSource is not null
             && sections.Length == ((MainViewModel)view.DataContext!).FeatureSections.Count
             && view.FindControl<Border>("BatteryPanel")!.GetVisualDescendants().OfType<TextBlock>()

@@ -1,0 +1,552 @@
+{
+  "repository": "https://github.com/microsoft/fluentui-system-icons",
+  "revision": "9bfae3d782fda4c8764f2128cec4d0dda160b283",
+  "style": "regular",
+  "roles": {
+    "Settings": "settings",
+    "Refresh": "arrow_clockwise",
+    "Copy": "copy",
+    "Charging": "battery_charge",
+    "NoiseControl": "sound_wave_circle",
+    "Equalizer": "options",
+    "Sound": "options_speaker",
+    "Earbuds": "surface_earbuds",
+    "Gestures": "gesture",
+    "Hearing": "headphones_sound_wave",
+    "FitTest": "surface_earbuds",
+    "Info": "info",
+    "History": "history",
+    "Battery": "battery_6",
+    "Add": "add",
+    "DarkTheme": "weather_moon",
+    "Sync": "arrow_sync",
+    "Rotate": "arrow_rotate_clockwise",
+    "Globe": "globe",
+    "Permissions": "shield_checkmark",
+    "CloudDownload": "cloud_arrow_down",
+    "SpeakerBluetooth": "speaker_bluetooth",
+    "Repair": "wrench",
+    "OpenFolder": "folder_open",
+    "Help": "question_circle",
+    "Play": "play",
+    "Pause": "pause",
+    "Speaker0": "speaker_0",
+    "Speaker2": "speaker_2",
+    "SpeakerMute": "speaker_mute",
+    "Rename": "rename",
+    "Checkmark": "checkmark",
+    "Audio": "headphones",
+    "Cancel": "dismiss_circle",
+    "ChevronDown": "chevron_down",
+    "Subtract": "subtract",
+    "Warning": "warning",
+    "Error": "error_circle",
+    "Success": "checkmark_circle",
+    "Dismiss": "dismiss",
+    "Cut": "cut",
+    "Paste": "clipboard_paste",
+    "Undo": "arrow_undo",
+    "Redo": "arrow_redo",
+    "SelectAll": "select_all_on"
+  },
+  "assets": [
+    {
+      "file": "settings_16_regular.svg",
+      "upstreamPath": "assets/Settings/SVG/ic_fluent_settings_16_regular.svg",
+      "size": 16,
+      "sha256": "40ff3be0796d839fcfa2876c9ee4c585260e884bc864aa523c9159a0134c06ba"
+    },
+    {
+      "file": "settings_20_regular.svg",
+      "upstreamPath": "assets/Settings/SVG/ic_fluent_settings_20_regular.svg",
+      "size": 20,
+      "sha256": "ac5bdb808bed91dc8c0b6f346e7a0a1ee1901fc4b50f5641987498a65e200685"
+    },
+    {
+      "file": "arrow_clockwise_16_regular.svg",
+      "upstreamPath": "assets/Arrow Clockwise/SVG/ic_fluent_arrow_clockwise_16_regular.svg",
+      "size": 16,
+      "sha256": "67adf8f5e2ac0081bd82e1117645a14de86105b9f07010c071c6ab4c090876f5"
+    },
+    {
+      "file": "arrow_clockwise_20_regular.svg",
+      "upstreamPath": "assets/Arrow Clockwise/SVG/ic_fluent_arrow_clockwise_20_regular.svg",
+      "size": 20,
+      "sha256": "ab803364462aa202e1d26eb8fec8ff988c108f742e62b1442a0db4e0d3304800"
+    },
+    {
+      "file": "copy_16_regular.svg",
+      "upstreamPath": "assets/Copy/SVG/ic_fluent_copy_16_regular.svg",
+      "size": 16,
+      "sha256": "6e5400f0a2f3a590844b1461c61256ed033fda7994a6f0cf6dba12fbf11bb652"
+    },
+    {
+      "file": "copy_20_regular.svg",
+      "upstreamPath": "assets/Copy/SVG/ic_fluent_copy_20_regular.svg",
+      "size": 20,
+      "sha256": "b05642b32388ba4c7701c381023c02d20bf48231229bf371f0ca5f10196b7d5b"
+    },
+    {
+      "file": "battery_charge_20_regular.svg",
+      "upstreamPath": "assets/Battery Charge/SVG/ic_fluent_battery_charge_20_regular.svg",
+      "size": 20,
+      "sha256": "a8e6c09ff261d404c639d295803c4ecd807c19b55de3904c5c176726579674a8"
+    },
+    {
+      "file": "sound_wave_circle_16_regular.svg",
+      "upstreamPath": "assets/Sound Wave Circle/SVG/ic_fluent_sound_wave_circle_16_regular.svg",
+      "size": 16,
+      "sha256": "6ec44cd1424771e094d1323f166d52cb0e5a8cffe6e95fa5f7eebad4a91faa3f"
+    },
+    {
+      "file": "sound_wave_circle_20_regular.svg",
+      "upstreamPath": "assets/Sound Wave Circle/SVG/ic_fluent_sound_wave_circle_20_regular.svg",
+      "size": 20,
+      "sha256": "c9e2bb3cc7d9e12244417cac4f287d5041b1f503b8acc7a7e80d8796d460adfa"
+    },
+    {
+      "file": "options_16_regular.svg",
+      "upstreamPath": "assets/Options/SVG/ic_fluent_options_16_regular.svg",
+      "size": 16,
+      "sha256": "3911c8e20cd26cc620c6eb08070b749a008eadd9e48c221b7d5029bc831d0da2"
+    },
+    {
+      "file": "options_20_regular.svg",
+      "upstreamPath": "assets/Options/SVG/ic_fluent_options_20_regular.svg",
+      "size": 20,
+      "sha256": "eeda1235eeb61dab0e9e23386c052fd0f0715a5112b90091ba37e2764557067c"
+    },
+    {
+      "file": "options_speaker_16_regular.svg",
+      "upstreamPath": "assets/Options Speaker/SVG/ic_fluent_options_speaker_16_regular.svg",
+      "size": 16,
+      "sha256": "f6cccfd4bba98a6822cb06889cbfac389aaad5b1b35d157d1cc59e623d7cbee4"
+    },
+    {
+      "file": "options_speaker_20_regular.svg",
+      "upstreamPath": "assets/Options Speaker/SVG/ic_fluent_options_speaker_20_regular.svg",
+      "size": 20,
+      "sha256": "5e1c1e137467d5deb5b002610f220b0a538fb431b3b2473519164ba803045c81"
+    },
+    {
+      "file": "surface_earbuds_20_regular.svg",
+      "upstreamPath": "assets/Surface Earbuds/SVG/ic_fluent_surface_earbuds_20_regular.svg",
+      "size": 20,
+      "sha256": "c87f7b8895bcf4755fced67d7a539f5943b01026b3f50e25450dd53808bb66de"
+    },
+    {
+      "file": "gesture_20_regular.svg",
+      "upstreamPath": "assets/Gesture/SVG/ic_fluent_gesture_20_regular.svg",
+      "size": 20,
+      "sha256": "1ecac880174e73267579b189a117e59d7fb6ca379561ad5a4cf767d22189c87f"
+    },
+    {
+      "file": "headphones_sound_wave_16_regular.svg",
+      "upstreamPath": "assets/Headphones Sound Wave/SVG/ic_fluent_headphones_sound_wave_16_regular.svg",
+      "size": 16,
+      "sha256": "ebc63e703bd1a678c0fccca2cbcbe64e06925d02ee339617f24f545630cc35a5"
+    },
+    {
+      "file": "headphones_sound_wave_20_regular.svg",
+      "upstreamPath": "assets/Headphones Sound Wave/SVG/ic_fluent_headphones_sound_wave_20_regular.svg",
+      "size": 20,
+      "sha256": "4031d08054ca4564441e1038b13c48569bf18ed7144f4a62b62ce8e5e64fcee4"
+    },
+    {
+      "file": "info_16_regular.svg",
+      "upstreamPath": "assets/Info/SVG/ic_fluent_info_16_regular.svg",
+      "size": 16,
+      "sha256": "6eebab59437401c1a57f6232b0d8597d378d64e3ff7107e727054a94f99ada3d"
+    },
+    {
+      "file": "info_20_regular.svg",
+      "upstreamPath": "assets/Info/SVG/ic_fluent_info_20_regular.svg",
+      "size": 20,
+      "sha256": "498bc2a24fb99480e7565b502467a4cc8e967b41b0c374c1283a68fc0da73b7a"
+    },
+    {
+      "file": "history_16_regular.svg",
+      "upstreamPath": "assets/History/SVG/ic_fluent_history_16_regular.svg",
+      "size": 16,
+      "sha256": "02f3c81c36fe70efcff7079167fbc34087bf0b5b218fe0205766905fa6cc5c2e"
+    },
+    {
+      "file": "history_20_regular.svg",
+      "upstreamPath": "assets/History/SVG/ic_fluent_history_20_regular.svg",
+      "size": 20,
+      "sha256": "37c96212d4efc8c37b0b7d7181d00011153ec2375d387442d0f8c73e2541ed6a"
+    },
+    {
+      "file": "battery_6_20_regular.svg",
+      "upstreamPath": "assets/Battery 6/SVG/ic_fluent_battery_6_20_regular.svg",
+      "size": 20,
+      "sha256": "bcf2a2f4fc7a5f3015b6a66ee293289a9aefb0c7406b159aa5e0ad3a29687ba1"
+    },
+    {
+      "file": "add_16_regular.svg",
+      "upstreamPath": "assets/Add/SVG/ic_fluent_add_16_regular.svg",
+      "size": 16,
+      "sha256": "838584fda66d156ccd0421641c52a6c98ac106b6027d50916d7e489792055ce1"
+    },
+    {
+      "file": "add_20_regular.svg",
+      "upstreamPath": "assets/Add/SVG/ic_fluent_add_20_regular.svg",
+      "size": 20,
+      "sha256": "fdf9fefaf083ff2349ac94afd47aab8ecb554650781c5797176b9d6ad3caee05"
+    },
+    {
+      "file": "weather_moon_16_regular.svg",
+      "upstreamPath": "assets/Weather Moon/SVG/ic_fluent_weather_moon_16_regular.svg",
+      "size": 16,
+      "sha256": "4cb48217d150b762835860a35324984bd9c3cb74291030dd6e2ccdc27303c4d8"
+    },
+    {
+      "file": "weather_moon_20_regular.svg",
+      "upstreamPath": "assets/Weather Moon/SVG/ic_fluent_weather_moon_20_regular.svg",
+      "size": 20,
+      "sha256": "9ffadd57a15c85524fdb979f42773e2a58199b07ccc39b188d7a6a1392a41cbe"
+    },
+    {
+      "file": "arrow_sync_16_regular.svg",
+      "upstreamPath": "assets/Arrow Sync/SVG/ic_fluent_arrow_sync_16_regular.svg",
+      "size": 16,
+      "sha256": "e526206630f77c37ff85cb472bd7f0e157e3d53edba9f97966fa27503e94bdf2"
+    },
+    {
+      "file": "arrow_sync_20_regular.svg",
+      "upstreamPath": "assets/Arrow Sync/SVG/ic_fluent_arrow_sync_20_regular.svg",
+      "size": 20,
+      "sha256": "1713352c66b798bd1bbf86467ab33e45ac615d8a18d3f79c50b195034a51ab9e"
+    },
+    {
+      "file": "arrow_rotate_clockwise_16_regular.svg",
+      "upstreamPath": "assets/Arrow Rotate Clockwise/SVG/ic_fluent_arrow_rotate_clockwise_16_regular.svg",
+      "size": 16,
+      "sha256": "68441d69dcedbdf6d556f5dd92dbe99ec4cef3d3f1de6bd96936c51c13bdb64d"
+    },
+    {
+      "file": "arrow_rotate_clockwise_20_regular.svg",
+      "upstreamPath": "assets/Arrow Rotate Clockwise/SVG/ic_fluent_arrow_rotate_clockwise_20_regular.svg",
+      "size": 20,
+      "sha256": "907dd65f5834aa3184060f10d9382c2eb17dc05bbdbeb84e11ce16c8257e52f7"
+    },
+    {
+      "file": "globe_16_regular.svg",
+      "upstreamPath": "assets/Globe/SVG/ic_fluent_globe_16_regular.svg",
+      "size": 16,
+      "sha256": "b1a1d2c0581a0254f4cdfd24dad0a59b46911dc3fe67cb34b88f4abb1487c3a9"
+    },
+    {
+      "file": "globe_20_regular.svg",
+      "upstreamPath": "assets/Globe/SVG/ic_fluent_globe_20_regular.svg",
+      "size": 20,
+      "sha256": "54c4387778893c6b6f4c8c8715f89b4eb05b7395329de96856f932c15f4b4281"
+    },
+    {
+      "file": "shield_checkmark_16_regular.svg",
+      "upstreamPath": "assets/Shield Checkmark/SVG/ic_fluent_shield_checkmark_16_regular.svg",
+      "size": 16,
+      "sha256": "f7f747aa203f4af09a646ba0c045accac5fb197555dbd060477b6fc833895f0d"
+    },
+    {
+      "file": "shield_checkmark_20_regular.svg",
+      "upstreamPath": "assets/Shield Checkmark/SVG/ic_fluent_shield_checkmark_20_regular.svg",
+      "size": 20,
+      "sha256": "33765f648a8ab4a6595e22658eb7456dc0511980cf32b7e1d7e4e736c92b0c71"
+    },
+    {
+      "file": "cloud_arrow_down_16_regular.svg",
+      "upstreamPath": "assets/Cloud Arrow Down/SVG/ic_fluent_cloud_arrow_down_16_regular.svg",
+      "size": 16,
+      "sha256": "110c39065340016e2b839e112fbbc053cf5e9a609fd54a0bff369ea2904a8fcb"
+    },
+    {
+      "file": "cloud_arrow_down_20_regular.svg",
+      "upstreamPath": "assets/Cloud Arrow Down/SVG/ic_fluent_cloud_arrow_down_20_regular.svg",
+      "size": 20,
+      "sha256": "867c9c2a59db4affe0a3e04cea8339081cdec2c9d66baf8bdd6c99b0b10d4c99"
+    },
+    {
+      "file": "speaker_bluetooth_20_regular.svg",
+      "upstreamPath": "assets/Speaker Bluetooth/SVG/ic_fluent_speaker_bluetooth_20_regular.svg",
+      "size": 20,
+      "sha256": "0c2bf8748744cf0ff70b926b5b1fda4de81e8c399d3382da4fdbca153e12d49d"
+    },
+    {
+      "file": "wrench_16_regular.svg",
+      "upstreamPath": "assets/Wrench/SVG/ic_fluent_wrench_16_regular.svg",
+      "size": 16,
+      "sha256": "a2a870d6820b9315a7c1ead49d02a48ca30f80251229a67564e6336b5d6af5cc"
+    },
+    {
+      "file": "wrench_20_regular.svg",
+      "upstreamPath": "assets/Wrench/SVG/ic_fluent_wrench_20_regular.svg",
+      "size": 20,
+      "sha256": "5e1be232d710ee44cd8dc441261331f8d0d724513cc81da6c4779b60bb76f6a9"
+    },
+    {
+      "file": "folder_open_16_regular.svg",
+      "upstreamPath": "assets/Folder Open/SVG/ic_fluent_folder_open_16_regular.svg",
+      "size": 16,
+      "sha256": "484d0a09af2d1beac370a342a7df91629f96c38ab547ee9e7b66675d3376b74f"
+    },
+    {
+      "file": "folder_open_20_regular.svg",
+      "upstreamPath": "assets/Folder Open/SVG/ic_fluent_folder_open_20_regular.svg",
+      "size": 20,
+      "sha256": "c5f8b2db9af20a454c1f05ce6eda4b21c99f1b8677b14b6d7d07d5817140a487"
+    },
+    {
+      "file": "question_circle_16_regular.svg",
+      "upstreamPath": "assets/Question Circle/SVG/ic_fluent_question_circle_16_regular.svg",
+      "size": 16,
+      "sha256": "a0d44ac8f8c012c5850ab0c7b8e23d816008760cd13ccfdee0cdc76cbc7cd9e9"
+    },
+    {
+      "file": "question_circle_20_regular.svg",
+      "upstreamPath": "assets/Question Circle/SVG/ic_fluent_question_circle_20_regular.svg",
+      "size": 20,
+      "sha256": "2a74ef3c4c4fe762581ba7339c01be2129b7e646a8f399703f1426558275a639"
+    },
+    {
+      "file": "play_16_regular.svg",
+      "upstreamPath": "assets/Play/SVG/ic_fluent_play_16_regular.svg",
+      "size": 16,
+      "sha256": "77837b4a7b4c8b8600261acd396198d905c19a8b0e524dcd67b488791a1a9f47"
+    },
+    {
+      "file": "play_20_regular.svg",
+      "upstreamPath": "assets/Play/SVG/ic_fluent_play_20_regular.svg",
+      "size": 20,
+      "sha256": "0666c1378f63d4d5c32f91b4107086bc14799dff306027976be591da8843ae45"
+    },
+    {
+      "file": "pause_16_regular.svg",
+      "upstreamPath": "assets/Pause/SVG/ic_fluent_pause_16_regular.svg",
+      "size": 16,
+      "sha256": "fa6688b53fd3001bf562adaa216a3c6783005d049c1191a9f06e3d338431937b"
+    },
+    {
+      "file": "pause_20_regular.svg",
+      "upstreamPath": "assets/Pause/SVG/ic_fluent_pause_20_regular.svg",
+      "size": 20,
+      "sha256": "cad333d70ced0f6f63d0c17689df6d269b6e0698bfca2fcae994aa30c677dd61"
+    },
+    {
+      "file": "speaker_0_16_regular.svg",
+      "upstreamPath": "assets/Speaker 0/SVG/ic_fluent_speaker_0_16_regular.svg",
+      "size": 16,
+      "sha256": "dc68b142ca5e00739d2086a8bf6f1dbb29b3dd8f99bdc15575d385d4b22ffce5"
+    },
+    {
+      "file": "speaker_0_20_regular.svg",
+      "upstreamPath": "assets/Speaker 0/SVG/ic_fluent_speaker_0_20_regular.svg",
+      "size": 20,
+      "sha256": "c7ec714c4c70419168fc028c7896bf3fbc34e37683f4c7530ee5463bdf67b591"
+    },
+    {
+      "file": "speaker_2_16_regular.svg",
+      "upstreamPath": "assets/Speaker 2/SVG/ic_fluent_speaker_2_16_regular.svg",
+      "size": 16,
+      "sha256": "faa9b818ef3e58b75e22be248ff155c170a6162f7881f3cee159880dbe9d77f4"
+    },
+    {
+      "file": "speaker_2_20_regular.svg",
+      "upstreamPath": "assets/Speaker 2/SVG/ic_fluent_speaker_2_20_regular.svg",
+      "size": 20,
+      "sha256": "42e7c3f32201be44f3252e263fedc2abf8c43da81c8b95ab7878795e3f3d53da"
+    },
+    {
+      "file": "speaker_mute_16_regular.svg",
+      "upstreamPath": "assets/Speaker Mute/SVG/ic_fluent_speaker_mute_16_regular.svg",
+      "size": 16,
+      "sha256": "db80152b8265b0fa8647cd986a1cbcf14e8a85b83908f9646f799c9972d31698"
+    },
+    {
+      "file": "speaker_mute_20_regular.svg",
+      "upstreamPath": "assets/Speaker Mute/SVG/ic_fluent_speaker_mute_20_regular.svg",
+      "size": 20,
+      "sha256": "c2734788021ec460bf579cbc6acdd87ea25f71e6aaecf15184a09a5025df082c"
+    },
+    {
+      "file": "rename_16_regular.svg",
+      "upstreamPath": "assets/Rename/SVG/ic_fluent_rename_16_regular.svg",
+      "size": 16,
+      "sha256": "1a810a474a92a5698f71b47776cb5a4828601b4a4cf81043f268d7c3d787ba98"
+    },
+    {
+      "file": "rename_20_regular.svg",
+      "upstreamPath": "assets/Rename/SVG/ic_fluent_rename_20_regular.svg",
+      "size": 20,
+      "sha256": "df0cff51d2aa82fdacb2a764d47a8b77cf2fd5ef5efa1e87ffc223832bd0dd8b"
+    },
+    {
+      "file": "checkmark_16_regular.svg",
+      "upstreamPath": "assets/Checkmark/SVG/ic_fluent_checkmark_16_regular.svg",
+      "size": 16,
+      "sha256": "50a932f604e19c291c7ea3e0be927a39c053c389ec006ade5001b87416c1a119"
+    },
+    {
+      "file": "checkmark_20_regular.svg",
+      "upstreamPath": "assets/Checkmark/SVG/ic_fluent_checkmark_20_regular.svg",
+      "size": 20,
+      "sha256": "d4eb7c05fcfe45d7799925431902dc0079fa0a8cf4c647cfd4cb3db22c3fd2b7"
+    },
+    {
+      "file": "headphones_16_regular.svg",
+      "upstreamPath": "assets/Headphones/SVG/ic_fluent_headphones_16_regular.svg",
+      "size": 16,
+      "sha256": "2cf8c2e79d7fe70339ae9891d7988be0193ce656bd5af8d69cef883c3c961dbc"
+    },
+    {
+      "file": "headphones_20_regular.svg",
+      "upstreamPath": "assets/Headphones/SVG/ic_fluent_headphones_20_regular.svg",
+      "size": 20,
+      "sha256": "0e6d585f2b5ca7a8a8257a7297409949a6c97f58c943321c168cc22e1a27f5ac"
+    },
+    {
+      "file": "dismiss_circle_16_regular.svg",
+      "upstreamPath": "assets/Dismiss Circle/SVG/ic_fluent_dismiss_circle_16_regular.svg",
+      "size": 16,
+      "sha256": "2a757af86156515ef4ab1ef8efe6a84665a4f00e98ab878b441a3c2d5c8815d9"
+    },
+    {
+      "file": "dismiss_circle_20_regular.svg",
+      "upstreamPath": "assets/Dismiss Circle/SVG/ic_fluent_dismiss_circle_20_regular.svg",
+      "size": 20,
+      "sha256": "bc6a315d91fd5adffe81d5c66f9febf575df09cff39e47bd787ebf6df0c77da7"
+    },
+    {
+      "file": "chevron_down_16_regular.svg",
+      "upstreamPath": "assets/Chevron Down/SVG/ic_fluent_chevron_down_16_regular.svg",
+      "size": 16,
+      "sha256": "557155085ea09abe06bfe5f62a0f1c483b3bb5908f313cb480325b5a4a06487d"
+    },
+    {
+      "file": "chevron_down_20_regular.svg",
+      "upstreamPath": "assets/Chevron Down/SVG/ic_fluent_chevron_down_20_regular.svg",
+      "size": 20,
+      "sha256": "56cb3f544124a67c79a5fa021ee35bb5488403a840bac1ae3291c5f6d71abccd"
+    },
+    {
+      "file": "subtract_16_regular.svg",
+      "upstreamPath": "assets/Subtract/SVG/ic_fluent_subtract_16_regular.svg",
+      "size": 16,
+      "sha256": "663f8030c439784943e978023348c52c5e24f629b4d85e85da70b61ffb3e5f6f"
+    },
+    {
+      "file": "subtract_20_regular.svg",
+      "upstreamPath": "assets/Subtract/SVG/ic_fluent_subtract_20_regular.svg",
+      "size": 20,
+      "sha256": "cdba492b0fe35494b23b8b0934a9b38af3b52058852777d4820ee8ced991c24f"
+    },
+    {
+      "file": "warning_16_regular.svg",
+      "upstreamPath": "assets/Warning/SVG/ic_fluent_warning_16_regular.svg",
+      "size": 16,
+      "sha256": "8d14a9ce47d37e01b64e4487d65c4a7a96c620e1f7c73693ae0cdace3d9f1085"
+    },
+    {
+      "file": "warning_20_regular.svg",
+      "upstreamPath": "assets/Warning/SVG/ic_fluent_warning_20_regular.svg",
+      "size": 20,
+      "sha256": "c3bdfef09229240562268d03a5036cdd8185b7d25c2f21f572add0f3aeb62eb2"
+    },
+    {
+      "file": "error_circle_16_regular.svg",
+      "upstreamPath": "assets/Error Circle/SVG/ic_fluent_error_circle_16_regular.svg",
+      "size": 16,
+      "sha256": "9bef918a67fda8895b79b0d3448f0bc0cf9d2fab12871d380d15e9690a9253f7"
+    },
+    {
+      "file": "error_circle_20_regular.svg",
+      "upstreamPath": "assets/Error Circle/SVG/ic_fluent_error_circle_20_regular.svg",
+      "size": 20,
+      "sha256": "fcc37b8366fc8d0c31457cd1299807dff0f00fe7ef2c944ea2744c200ab0c7c9"
+    },
+    {
+      "file": "checkmark_circle_16_regular.svg",
+      "upstreamPath": "assets/Checkmark Circle/SVG/ic_fluent_checkmark_circle_16_regular.svg",
+      "size": 16,
+      "sha256": "6f47d9474b161cde686a78d36a771873c276960bc443e11e957b6671122b8248"
+    },
+    {
+      "file": "checkmark_circle_20_regular.svg",
+      "upstreamPath": "assets/Checkmark Circle/SVG/ic_fluent_checkmark_circle_20_regular.svg",
+      "size": 20,
+      "sha256": "ee144bd831dd8a7b46976e38825f4c808e7f2468e2b34b587e79036265e801f7"
+    },
+    {
+      "file": "dismiss_16_regular.svg",
+      "upstreamPath": "assets/Dismiss/SVG/ic_fluent_dismiss_16_regular.svg",
+      "size": 16,
+      "sha256": "118c94c171be3364e5104983a97ba3d37d53b21ebc4d6f127eef31dc4aa76716"
+    },
+    {
+      "file": "dismiss_20_regular.svg",
+      "upstreamPath": "assets/Dismiss/SVG/ic_fluent_dismiss_20_regular.svg",
+      "size": 20,
+      "sha256": "e84ad771fa8afba8e3ef52c98d9ab2d8ef4fc8e23c5954766a1c4e88fc13b355"
+    },
+    {
+      "file": "cut_16_regular.svg",
+      "upstreamPath": "assets/Cut/SVG/ic_fluent_cut_16_regular.svg",
+      "size": 16,
+      "sha256": "bfb6f7181e1777458e4cd35a1411c84d8a1ea294ce1bbb45fb8c708051263f3c"
+    },
+    {
+      "file": "cut_20_regular.svg",
+      "upstreamPath": "assets/Cut/SVG/ic_fluent_cut_20_regular.svg",
+      "size": 20,
+      "sha256": "4b5759efc50249e40bd217968e16b32a74e6ed95b1cecf891288d2465b81953c"
+    },
+    {
+      "file": "clipboard_paste_16_regular.svg",
+      "upstreamPath": "assets/Clipboard Paste/SVG/ic_fluent_clipboard_paste_16_regular.svg",
+      "size": 16,
+      "sha256": "8bd4026f393fff7d7d1d84ae3efb446dd7398a80397cd514d9c9ccb4d758640c"
+    },
+    {
+      "file": "clipboard_paste_20_regular.svg",
+      "upstreamPath": "assets/Clipboard Paste/SVG/ic_fluent_clipboard_paste_20_regular.svg",
+      "size": 20,
+      "sha256": "67bd7c52559b7e64164af86e3da74dcea010b89180380164521f26f0d971a194"
+    },
+    {
+      "file": "arrow_undo_16_regular.svg",
+      "upstreamPath": "assets/Arrow Undo/SVG/ic_fluent_arrow_undo_16_regular.svg",
+      "size": 16,
+      "sha256": "0530e3e4f17b4ed4d18bba8cc7c00e0f54bc1bac237db37a14793bdbc0f733b0"
+    },
+    {
+      "file": "arrow_undo_20_regular.svg",
+      "upstreamPath": "assets/Arrow Undo/SVG/ic_fluent_arrow_undo_20_regular.svg",
+      "size": 20,
+      "sha256": "a6f6566eb86df531ce5332ab4153b056fb8ff8af37655058f30afaf127892a2f"
+    },
+    {
+      "file": "arrow_redo_16_regular.svg",
+      "upstreamPath": "assets/Arrow Redo/SVG/ic_fluent_arrow_redo_16_regular.svg",
+      "size": 16,
+      "sha256": "34e3a4130fb91e7a04ee685f4f3a1708567570afde6a812b91ef235a45a248e4"
+    },
+    {
+      "file": "arrow_redo_20_regular.svg",
+      "upstreamPath": "assets/Arrow Redo/SVG/ic_fluent_arrow_redo_20_regular.svg",
+      "size": 20,
+      "sha256": "374ec6ed97949ac3ae5ec6739c283f16a4a56fa7ad374b33e0b15d4d2154b991"
+    },
+    {
+      "file": "select_all_on_16_regular.svg",
+      "upstreamPath": "assets/Select All On/SVG/ic_fluent_select_all_on_16_regular.svg",
+      "size": 16,
+      "sha256": "7eb05eed3c2f2b2aa35efc5cfc1c9af61088cc1fea8105cb5b28db89ad03640e"
+    },
+    {
+      "file": "select_all_on_20_regular.svg",
+      "upstreamPath": "assets/Select All On/SVG/ic_fluent_select_all_on_20_regular.svg",
+      "size": 20,
+      "sha256": "e4bbc137ccaa11b35e41a0cbbf061c68249037d4da9f7177b5d6d353b782e737"
+    }
+  ]
+}

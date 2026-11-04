@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "capability": "misans-4.009-fluent-system-icons-v1",
+  "fontFamily": "MiSans",
+  "fontVersion": "4.009",
+  "fontArchive": "https://hyperos.mi.com/font-download/MiSans.zip",
+  "fontLicense": "https://hyperos.mi.com/font-download/MiSans%E5%AD%97%E4%BD%93%E7%9F%A5%E8%AF%86%E4%BA%A7%E6%9D%83%E8%AE%B8%E5%8F%AF%E5%8D%8F%E8%AE%AE.pdf",
+  "fonts": [
+    {
+      "path": "fonts/MiSans-Regular.otf",
+      "archiveMember": "MiSans/otf/MiSans-Regular.otf",
+      "logicalWeight": 400,
+      "physicalWeight": 330,
+      "sha256": "8e9caa6f34f27c6baad1ecf0058cc13e1801efff698bc23e6e0b095d9a9ed9cb"
+    },
+    {
+      "path": "fonts/MiSans-Semibold.otf",
+      "archiveMember": "MiSans/otf/MiSans-Semibold.otf",
+      "logicalWeight": 600,
+      "physicalWeight": 520,
+      "sha256": "8a194c3e7f6813f73a2c68988bf77483296268416fb0c1d0870338a0b23b8c9a"
+    },
+    {
+      "path": "fonts/MiSans-Bold.otf",
+      "archiveMember": "MiSans/otf/MiSans-Bold.otf",
+      "logicalWeight": 700,
+      "physicalWeight": 630,
+      "sha256": "575d0481f579785fab27754a337ad77118a17ba3353210ed84c8af4e96e86247"
+    }
+  ],
+  "fluentSystemIconsCommit": "9bfae3d782fda4c8764f2128cec4d0dda160b283",
+  "fluentSystemIconsSource": "https://github.com/microsoft/fluentui-system-icons",
+  "licenses": [
+    {
+      "path": "MiSans-Font-License.pdf",
+      "sha256": "4a93a27cd2bd81b3b5ecfd0a853144a876fa26938a93a68443c67d74172fcb86"
+    },
+    {
+      "path": "Fluent-System-Icons-MIT.txt",
+      "sha256": "69bc45dc42b9acb96a69823adbc6ae538374e3c0bde169b855b32c48eaaef52f"
+    }
+  ]
+}

@@ -3,10 +3,6 @@
   <ItemGroup>
     <PackageReference Include="Avalonia.Skia" Version="12.1.4" />
     <PackageReference Include="SkiaSharp.Skottie" Version="3.119.4" />
-    <!-- Noto Sans SC (OFL-1.1) is the Simplified Chinese fallback where Microsoft YaHei UI is absent. The files sit
-         beside each UI executable so the platform font manager can open them by path (see Typography.cs). -->
-    <Content Include="Fonts/*.otf" Link="fonts/%(Filename)%(Extension)"
-             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <!-- The App's loading indicator follows the same visibility rules as the animations it stands in for. -->
     <InternalsVisibleTo Include="HeyMelody" />
     <InternalsVisibleTo Include="HeyMelody.App.Tests" />

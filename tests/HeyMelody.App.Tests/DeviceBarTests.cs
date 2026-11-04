@@ -64,14 +64,7 @@ internal static class DeviceBarTests
         if (!icon.IsEffectivelyVisible || icon.Bounds.Width != 28 || icon.Bounds.Height != 28
             || icon.Child is not FAIconSourceElement { Width: 24, Height: 24 } element)
             return false;
-        return (element.IconSource, AppIcons.Source(AppIcon.Earbuds, 24)) switch
-        {
-            (FAFontIconSource actual, FAFontIconSource expected) => actual.Glyph == expected.Glyph
-                && Equals(actual.FontFamily, expected.FontFamily) && actual.FontSize == expected.FontSize,
-            (FASymbolIconSource actual, FASymbolIconSource expected) => actual.Symbol == expected.Symbol
-                && actual.FontSize == expected.FontSize,
-            _ => false
-        };
+        return IconTests.Matches(element.IconSource, AppIcon.Earbuds, 24);
     }
 
     private static async Task DeviceSelectionAsync()

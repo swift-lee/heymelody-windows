@@ -247,6 +247,7 @@ def write_manifest(bundle: Path, version: str, source_manifest_hash: str) -> Non
     write_json(bundle / "Contents/Resources/manifest.json", {"schemaVersion": 1, "version": version,
         "runtimeIdentifier": "osx-arm64", "minimumMacOS": "15.0", "signing": "ad-hoc",
         "notarized": False, "bluetoothHardwareVerified": False,
+        "uiAssets": "misans-4.009-fluent-system-icons-v1",
         "filamentSourceManifestSha256": source_manifest_hash, "components": list(COMPONENTS),
         "mainExecutableIntegrity": "outer bundle code signature; hashing it here would be self-referential", "files": entries})
 

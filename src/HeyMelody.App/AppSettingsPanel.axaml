@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:fa="clr-namespace:FluentAvalonia.UI.Controls;assembly=FluentAvalonia"
+             xmlns:icons="clr-namespace:HeyMelodyWindows.App;assembly=HeyMelody.Desktop"
              x:Class="HeyMelodyWindows.App.AppSettingsPanel">
   <UserControl.Styles>
     <Style Selector="TextBlock.settings-group">
@@ -18,16 +19,14 @@
   </UserControl.Styles>
   <StackPanel x:Name="SettingsRoot" MinWidth="460" Spacing="0">
     <TextBlock Classes="settings-group" Text="外观" Margin="1,0,0,6" />
-    <fa:FASettingsExpanderItem Content="应用主题" Description="选择界面的颜色模式，选择后立即预览">
-      <fa:FASettingsExpanderItem.IconSource><fa:FASymbolIconSource Symbol="DarkTheme" /></fa:FASettingsExpanderItem.IconSource>
+    <fa:FASettingsExpanderItem Content="应用主题" Description="选择界面的颜色模式，选择后立即预览" IconSource="{icons:AppIcon DarkTheme}">
       <fa:FASettingsExpanderItem.Footer>
         <ComboBox x:Name="ThemeChoice" MinWidth="150" AutomationProperties.Name="应用主题" />
       </fa:FASettingsExpanderItem.Footer>
     </fa:FASettingsExpanderItem>
 
     <fa:FASettingsExpanderItem x:Name="UiBasicRenderCard" Content="使用 Basic Render 兼容模式"
-                               Description="显示异常时尝试启用，会降低流畅度；重新打开主界面后生效">
-      <fa:FASettingsExpanderItem.IconSource><fa:FASymbolIconSource Symbol="Sync" /></fa:FASettingsExpanderItem.IconSource>
+                               Description="显示异常时尝试启用，会降低流畅度；重新打开主界面后生效" IconSource="{icons:AppIcon Sync}">
       <fa:FASettingsExpanderItem.Footer>
         <ToggleSwitch x:Name="UiBasicRenderSwitch" OnContent="开" OffContent="关"
                       AutomationProperties.Name="使用 Basic Render 兼容模式" />
@@ -35,14 +34,12 @@
     </fa:FASettingsExpanderItem>
 
     <fa:FASettingsExpanderItem x:Name="ModelCompatibilityCard" Content="3D模型渲染API"
-                               Description="若存在渲染问题，请尝试切换到 OpenGL">
-      <fa:FASettingsExpanderItem.IconSource><fa:FASymbolIconSource Symbol="Sync" /></fa:FASettingsExpanderItem.IconSource>
+                               Description="若存在渲染问题，请尝试切换到 OpenGL" IconSource="{icons:AppIcon Sync}">
       <fa:FASettingsExpanderItem.Footer>
         <ComboBox x:Name="ModelBackendChoice" MinWidth="150" AutomationProperties.Name="3D模型渲染API" />
       </fa:FASettingsExpanderItem.Footer>
     </fa:FASettingsExpanderItem>
-    <fa:FASettingsExpanderItem x:Name="ModelFrameRateCard" Content="3D模型渲染帧率">
-      <fa:FASettingsExpanderItem.IconSource><fa:FASymbolIconSource Symbol="Rotate" /></fa:FASettingsExpanderItem.IconSource>
+    <fa:FASettingsExpanderItem x:Name="ModelFrameRateCard" Content="3D模型渲染帧率" IconSource="{icons:AppIcon Rotate}">
       <fa:FASettingsExpanderItem.Footer>
         <Grid x:Name="ModelFrameRateEditor" Width="216" RowDefinitions="Auto,20">
           <Slider x:Name="ModelFrameRateSlider" Margin="28,0" Minimum="0" Maximum="2" Value="2"
@@ -60,21 +57,18 @@
     <TextBlock Classes="settings-group" Text="耳机资源" />
     <TextBlock x:Name="ResourceLockNotice" Classes="caption" TextWrapping="Wrap" Margin="2,0,0,6" IsVisible="False"
                Text="正在连接或切换耳机，完成后可修改资源与设备设置。" />
-    <fa:FASettingsExpanderItem Content="使用在线资源" Description="关闭后，已缓存的较新版本仍可使用">
-      <fa:FASettingsExpanderItem.IconSource><fa:FASymbolIconSource Symbol="Globe" /></fa:FASettingsExpanderItem.IconSource>
+    <fa:FASettingsExpanderItem Content="使用在线资源" Description="关闭后，已缓存的较新版本仍可使用" IconSource="{icons:AppIcon Globe}">
       <fa:FASettingsExpanderItem.Footer>
         <ToggleSwitch x:Name="OnlineSwitch" OnContent="开" OffContent="关" AutomationProperties.Name="使用在线资源" />
       </fa:FASettingsExpanderItem.Footer>
     </fa:FASettingsExpanderItem>
-    <fa:FASettingsExpanderItem Content="自定义云端密钥" Description="留空时使用欢律预置密钥">
-      <fa:FASettingsExpanderItem.IconSource><fa:FASymbolIconSource Symbol="Permissions" /></fa:FASettingsExpanderItem.IconSource>
+    <fa:FASettingsExpanderItem Content="自定义云端密钥" Description="留空时使用欢律预置密钥" IconSource="{icons:AppIcon Permissions}">
       <fa:FASettingsExpanderItem.Footer>
         <TextBox x:Name="KeyBox" Width="190" PasswordChar="●" PlaceholderText="自定义云端密钥" MaxLength="1024"
                  AutomationProperties.Name="云端资源密钥" />
       </fa:FASettingsExpanderItem.Footer>
     </fa:FASettingsExpanderItem>
-    <fa:FASettingsExpanderItem x:Name="RedownloadCard" Content="重新下载在线资源">
-      <fa:FASettingsExpanderItem.IconSource><fa:FASymbolIconSource Symbol="CloudDownload" /></fa:FASettingsExpanderItem.IconSource>
+    <fa:FASettingsExpanderItem x:Name="RedownloadCard" Content="重新下载在线资源" IconSource="{icons:AppIcon CloudDownload}">
       <fa:FASettingsExpanderItem.Footer>
         <StackPanel Orientation="Horizontal" Spacing="12">
           <fa:FAProgressRing x:Name="RedownloadProgress" IsIndeterminate="False" Width="20" Height="20" IsVisible="False"
@@ -87,8 +81,7 @@
     <TextBlock x:Name="ResourceStatusText" Classes="caption" TextWrapping="Wrap" Margin="2,2,0,0" />
 
     <TextBlock Classes="settings-group" Text="设备" />
-    <fa:FASettingsExpanderItem Content="耳机列表" Description="选择由 HeyMelody 控制的已配对耳机">
-      <fa:FASettingsExpanderItem.IconSource><fa:FASymbolIconSource Symbol="SpeakerBluetooth" /></fa:FASettingsExpanderItem.IconSource>
+    <fa:FASettingsExpanderItem Content="耳机列表" Description="选择由 HeyMelody 控制的已配对耳机" IconSource="{icons:AppIcon SpeakerBluetooth}">
       <fa:FASettingsExpanderItem.Footer>
         <Button x:Name="ManageDevicesButton" Content="管理设备" />
       </fa:FASettingsExpanderItem.Footer>
@@ -97,7 +90,7 @@
     <TextBlock Classes="settings-group" Text="故障诊断" />
     <!-- The expander holds the saved draft (next-start switch and components); the directory card, the
          current-cycle status and errors act at once and stay visible while it is collapsed. -->
-    <fa:FASettingsExpander x:Name="DiagnosticExpander" Header="在下次启动程序时记录日志"
+    <fa:FASettingsExpander x:Name="DiagnosticExpander" Header="在下次启动程序时记录日志" IconSource="{icons:AppIcon Repair}"
                            Description="保存并重启托盘后台后开始，仅记录一轮" Margin="0,0,0,4">
       <fa:FASettingsExpander.Resources>
         <!-- In the ~500 px dialog the chevron narrows the header below FluentAvalonia's 460 px wrap width; keep the
@@ -107,7 +100,6 @@
         <Thickness x:Key="SettingsExpanderPadding">16,10</Thickness>
         <x:Double x:Key="SettingsExpanderMinHeight">48</x:Double>
       </fa:FASettingsExpander.Resources>
-      <fa:FASettingsExpander.IconSource><fa:FASymbolIconSource Symbol="Repair" /></fa:FASettingsExpander.IconSource>
       <fa:FASettingsExpander.Footer>
         <ToggleSwitch x:Name="LogNextStartSwitch" OnContent="开" OffContent="关" AutomationProperties.Name="在下次启动程序时记录日志" />
       </fa:FASettingsExpander.Footer>
@@ -127,8 +119,7 @@
         </StackPanel>
       </fa:FASettingsExpanderItem>
     </fa:FASettingsExpander>
-    <fa:FASettingsExpanderItem x:Name="LogDirectoryItem" Content="日志目录">
-      <fa:FASettingsExpanderItem.IconSource><fa:FASymbolIconSource Symbol="OpenFolder" /></fa:FASettingsExpanderItem.IconSource>
+    <fa:FASettingsExpanderItem x:Name="LogDirectoryItem" Content="日志目录" IconSource="{icons:AppIcon OpenFolder}">
       <fa:FASettingsExpanderItem.Footer>
         <Button x:Name="OpenLogDirectoryButton" Content="打开日志目录" AutomationProperties.Name="打开日志目录" />
       </fa:FASettingsExpanderItem.Footer>
@@ -144,8 +135,9 @@
                Text="日志包含完整协议收发、设备标识和本地路径，可能涉及个人信息；云端密钥与请求签名只记录长度和哈希前缀。分享前请自行检查。" />
 
     <TextBlock Classes="settings-group" Text="关于" />
-    <fa:FASettingsExpanderItem x:Name="AboutCard" Description="社区客户端 · 通过蓝牙管理已配对的耳机">
-      <fa:FASettingsExpanderItem.IconSource><fa:FASymbolIconSource Symbol="Help" /></fa:FASettingsExpanderItem.IconSource>
+    <fa:FASettingsExpanderItem x:Name="AboutCard" Description="社区客户端 · 通过蓝牙管理已配对的耳机" IconSource="{icons:AppIcon Help}">
     </fa:FASettingsExpanderItem>
+    <TextBlock x:Name="UiAssetCredits" Classes="caption" TextWrapping="Wrap" Margin="2,8,2,0"
+               Text="界面字体使用 MiSans；通用系统图标使用 Fluent System Icons（MIT）。" />
   </StackPanel>
 </UserControl>

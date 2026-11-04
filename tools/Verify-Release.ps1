@@ -69,6 +69,25 @@ function Checked-File([string]$Directory, [string]$RelativePath) {
 function Add-CriticalFile([string]$Path) {
     [void]$criticalPaths.Add([IO.Path]::GetRelativePath($taskStage, $Path).Replace('\', '/'))
 }
+function Check-UiAssets([string]$Directory) {
+    $contractPath = Join-Path $taskRoot 'packaging/licenses/UI-Assets-SOURCE.json'
+    $contract = Read-Json $contractPath
+    Require ($contract.schemaVersion -eq 1) 'Unexpected UI asset contract.'
+    foreach ($entry in $contract.fonts) {
+        $path = Checked-File $Directory $entry.path
+        Require ((Hash-File $path) -eq $entry.sha256) ('UI font checksum mismatch: ' + $path)
+        Add-CriticalFile $path
+    }
+    $notices = Join-Path $Directory 'licenses/upstream'
+    foreach ($entry in $contract.licenses) {
+        $path = Checked-File $notices $entry.path
+        Require ((Hash-File $path) -eq $entry.sha256) ('UI license checksum mismatch: ' + $path)
+        Add-CriticalFile $path
+    }
+    $receipt = Checked-File $notices 'UI-Assets-SOURCE.json'
+    Require ((Hash-File $receipt) -eq (Hash-File $contractPath)) 'UI asset source receipt differs from source.'
+    Add-CriticalFile $receipt
+}
 function Check-ResourceBundle([string]$Bundle) {
     $reference = Join-Path $taskRoot 'src/HeyMelody.Resources/Bundles'
     $manifests = @('artwork.json', 'provenance.json', 'supplemental.json')
@@ -284,6 +303,17 @@ foreach ($architecture in $targetArchitectures) {
     $hostNotice = Read-Json (Join-Path $hostDirectory 'PACKAGE-NOTICES.json')
     Require ($hostNotice.schemaVersion -eq 1) ('Unexpected backend notice schema: ' + $architecture)
     Check-Notice $hostDirectory $hostNotice
+    $declaresUiAssets = $manifest.PSObject.Properties.Name -contains 'uiAssets'
+    $hasUiReceipt = (Test-Path -LiteralPath (Join-Path $appDirectory 'licenses/upstream/UI-Assets-SOURCE.json')) -or
+        (Test-Path -LiteralPath (Join-Path $hostDirectory 'licenses/upstream/UI-Assets-SOURCE.json'))
+    if ($declaresUiAssets -or $hasUiReceipt) {
+        if ($declaresUiAssets) {
+            $uiContract = Read-Json (Join-Path $taskRoot 'packaging/licenses/UI-Assets-SOURCE.json')
+            Require ($manifest.uiAssets -eq $uiContract.capability) 'Unexpected packaged UI asset capability.'
+        }
+        Check-UiAssets $appDirectory
+        Check-UiAssets $hostDirectory
+    }
     if ($resourceRelease) {
         Require (@($notice.packages | Where-Object { $_.package -eq 'SkiaSharp.Skottie' }).Count -eq 1) ('Lottie dependency notice missing: ' + $architecture)
         # Builds that declare it ship one ResourceBundles beside the GUI; the backend reads that copy. Older builds carry two.

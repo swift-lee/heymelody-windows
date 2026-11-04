@@ -30,6 +30,7 @@ foreach ($profile in @('Windows', 'MacOS', 'Renderer')) {
     $profiles[$profile] = @($description.projects | ForEach-Object name)
     Assert-Contract ($profiles[$profile].Count -eq @($profiles[$profile] | Select-Object -Unique).Count) "$profile project list is unique"
     Assert-Contract ($description.pythonStructureTests -eq $true) "$profile checks project structure"
+    Assert-Contract ($description.pythonUiAssetTests -eq $true) "$profile checks UI font and license sources"
     Assert-Contract ($description.pythonPackageTests -eq ($profile -eq 'MacOS')) "$profile packaging fixtures policy"
     Assert-Contract ($description.pythonReleaseVerifierTests -eq ($profile -eq 'Windows')) "$profile Windows release verifier fixtures policy"
     foreach ($project in $description.projects) {

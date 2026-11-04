@@ -118,9 +118,17 @@ macOS 背景使用原生 NSVisualEffectView Blur，按窗口实际协商的透�
 
 ## 字体与字符渲染
 
-界面只支持简体中文。0.9.0 之前没有配置字体：默认字体族为 Segoe UI，汉字靠回退匹配，而 Avalonia 的回退按文本区域性（为空时取界面区域性）给字体打分，英文 Windows 上可能选到日文字体，同一汉字显示日本字形。现在各界面进程把界面区域性设为 zh-CN（不改变数字和日期格式），默认字体为系统 Microsoft YaHei UI（西文与数字也由它显示，中英混排行高一致），并用 `FontManagerOptions.FontFallbacks` 把汉字、CJK 标点和全角字符固定回退到同一字体，先于任何按区域的打分。雅黑只有细体、常规、粗体，550–699 字重（如 SemiBold 标题）映射到真实粗体字面，不合成加粗。没有雅黑的系统使用随包 `fonts/` 中的 Noto Sans SC（常规、中等、粗体，OFL-1.1）。
+界面只支持简体中文，各界面进程把界面区域性设为 zh-CN，不改变数字和日期格式。应用自绘文字在各平台统一使用随包标准 MiSans，而非系统雅黑、PingFang 或 Noto 回退。字体为官方 Version 4.009 静态 OTF Regular、Semibold、Bold，不使用 TC／VF，不做子集化或内部重命名。该版本的物理字重分别为 330、520、630；共享 Typography 把 Normal、SemiBold、Bold 请求映射到真实字面，字符匹配使用同一规则，不合成加粗。中文、西文、数字、CJK 标点和全角字符均优先使用同一字体。
 
-窗口显式设置完整 hinting（经 DirectWrite 使用雅黑的手工微调）与像素对齐基线；抗锯齿方式由 Avalonia 决定：不透明表面使用子像素，图层与 Mica 透明区域改用灰度以免彩边。中文最小字号 12 px。托盘菜单由 Avalonia 绘制，同样使用这些设置；托盘提示文字与任务栏标题由 Windows 绘制，英文系统上仍按系统字体链显示。共享实现现位于 `src/HeyMelody.Desktop/Typography.cs`，主题与窗口集成同属 Desktop，不再从主程序链接源码。字体文件仍由 Artwork 输出到 `fonts/`；macOS 的 PingFang SC 行为见 [macOS 说明](macos.md)。此前 Linux 无头环境验证过英文区域下的匹配结果，en-US Windows 的实际观感仍需在 Windows 上目视确认（可检查“直、骨、角、写、画”）。
+窗口继续显式设置完整 hinting 与像素对齐基线；抗锯齿方式由 Avalonia 决定：不透明表面使用子像素，图层与 Mica 透明区域改用灰度以免彩边。中文最小字号 12 px。Windows 托盘菜单由 Avalonia 绘制，同样使用 MiSans；系统提示、任务栏文字、macOS 原生菜单及系统对话框仍由操作系统绘制。共享实现位于 `src/HeyMelody.Desktop/Typography.cs`，Desktop 将三份字体输出到各入口的 `fonts/`，包括独立 Host。集合与物理字面在进程内复用；字体加载和渲染会产生一次性原生常驻，窗口生命周期回归应区分该常驻与逐窗口持续增长，不用工作集下降作为对象释放的唯一证据。
+
+## 系统图标与资源边界
+
+仅将 Segoe 和 Avalonia／FluentAvalonia 提供的图标迁移到 Microsoft Fluent System Icons 的固定提交 `9bfae3d782fda4c8764f2128cec4d0dda160b283`，使用保留 viewBox 留白与填充规则的 Regular 矢量子集，不依赖系统图标字体。清单记录每个角色、上游路径、可用源尺寸及 SHA-256；不存在的尺寸明确缩放已有源图，不拼凑文件名。
+
+欢律及既有 ColorOS 资源、官方 ANC 图片与听感引导 Lottie、左右耳／盒子电量路径、项目自绘波形与设备图形、品牌标识全部保持原样，不恢复已退出来源。功能区内的原始资源与页头系统字形分别处理：仅旧系统字形缺少精确对应时，降噪采用 `sound_wave_circle`、听感采用 `headphones_sound_wave`、贴合度采用 `surface_earbuds`，均衡器采用 `options`；不新绘专用图形。资源加载失败时只迁移旧 FA 兜底图标，原优先链不变。
+
+默认 ComboBox、CheckBox 和设置展开器仅替换必要图标模板；InfoBar 与编辑菜单替换图标来源，不改命令、权限和交互。RadioButton 圆点、开关滑块等结构几何，以及原生窗口装饰不替换。MiSans 协议、Fluent MIT 许可和字体摘要随包保留，应用设置包含使用声明；具体来源见[打包来源说明](../packaging/SOURCE-NOTES.md)。
 
 ## 构建与界面验证
 

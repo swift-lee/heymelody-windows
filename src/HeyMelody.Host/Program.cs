@@ -48,5 +48,5 @@ public static class Program
             RenderingMode = [Win32RenderingMode.Software],
             CompositionMode = [Win32CompositionMode.RedirectionSurface]
         })
-        .UseHeyMelodyDiagnostics().UseHeyMelodyTypography(bundledFallback: false).StartWithClassicDesktopLifetime(args);
+        .UseHeyMelodyDiagnostics().UseHeyMelodyTypography().StartWithClassicDesktopLifetime(args);
 }

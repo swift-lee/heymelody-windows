@@ -10,6 +10,11 @@ from pathlib import Path
 import plistlib
 import subprocess
 
+if __package__:
+    from .verify_ui_assets import verify_packaged_ui_assets
+else:
+    from verify_ui_assets import verify_packaged_ui_assets
+
 COMPONENTS = ("HeyMelody", "HeyMelody.Host", "HeyMelody.DeviceManager", "HeyMelody.FitTest", "HeyMelody.HearingSetup")
 MACHO_MAGICS = {b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
                 b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca", b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca"}
@@ -91,6 +96,7 @@ def check_bundle(bundle: Path, version: str | None = None) -> dict:
             raise ValueError(f"Missing shared desktop implementation: {component}")
         if (binary.parent / "HeyMelody.Windows.dll").exists():
             raise ValueError(f"Windows platform implementation leaked into the macOS package: {component}")
+        verify_packaged_ui_assets(manifest, binary.parent, bundle / "Contents/Resources/licenses/upstream")
         if component == "HeyMelody.Host":
             for required in ("HeyMelody.MacOS.dll", "libHeyMelodyMac.dylib"):
                 if not (binary.parent / required).is_file():

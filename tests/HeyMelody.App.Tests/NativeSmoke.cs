@@ -11,6 +11,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using FluentAvalonia.UI.Controls;
 using HeyMelodyWindows.App;
+using HeyMelodyWindows.Ui;
 using HeyMelodyWindows.Resources;
 using HeyMelodyWindows.Artwork;
 
@@ -47,7 +48,7 @@ internal static class NativeSmoke
         {
             try
             {
-                var builder = AppBuilder.Configure<SmokeApplication>().UsePlatformDetect();
+                var builder = AppBuilder.Configure<SmokeApplication>().UsePlatformDetect().UseHeyMelodyTypography();
                 if (useRenderingSetup)
                 {
                     System.Diagnostics.Trace.Listeners.Add(new System.Diagnostics.ConsoleTraceListener());
@@ -55,7 +56,6 @@ internal static class NativeSmoke
                     if (renderingFailure is not null)
                         builder = builder.With(HeyMelodyWindows.Ui.RenderingSetup.CreateWindowsOptions(true,
                             () => renderingFailure == "software-fallback" ? null : Enumerable.Repeat((byte)0x7f, 8).ToArray()));
-                    builder = HeyMelodyWindows.Ui.Typography.UseHeyMelodyTypography(builder);
                 }
                 builder.LogToTrace(useRenderingSetup ? Avalonia.Logging.LogEventLevel.Information : Avalonia.Logging.LogEventLevel.Warning)
                     .StartWithClassicDesktopLifetime([], ShutdownMode.OnExplicitShutdown);

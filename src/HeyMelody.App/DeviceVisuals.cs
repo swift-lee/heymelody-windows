@@ -84,7 +84,7 @@ public static class DeviceVisuals
             }
         }
         catch (IOException) { }
-        var fallback = new FASymbolIcon { Symbol = key switch { "off" => FASymbol.Cancel, "transparency" => FASymbol.Volume, "adaptive" or "smart" => FASymbol.Sync, _ => FASymbol.Audio }, FontSize = 24 };
+        var fallback = AppIcons.Element(key switch { "off" => AppIcon.Cancel, "transparency" => AppIcon.Speaker2, "adaptive" or "smart" => AppIcon.Sync, _ => AppIcon.Audio }, 24);
         fallback.Bind(FAIconElement.ForegroundProperty, new DynamicResourceExtension(brushKey));
         return fallback;
     }
@@ -122,7 +122,7 @@ public static class DeviceVisuals
 
         private static Control CreateGenericProduct()
         {
-            var icon = new FASymbolIcon { Symbol = FASymbol.Audio, FontSize = 96 };
+            var icon = AppIcons.Element(AppIcon.Audio, 96);
             icon.Bind(FAIconElement.ForegroundProperty, new DynamicResourceExtension("TextFillColorSecondaryBrush"));
             var shell = new Border
             {

@@ -13,6 +13,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.DeviceManager;
+using HeyMelodyWindows.Ui;
 
 /// <summary>Real Win32/DWM verification with an in-memory catalog. Never creates a ClientBridge.</summary>
 internal static class NativeSmoke
@@ -28,7 +29,7 @@ internal static class NativeSmoke
         {
             try
             {
-                var builder = AppBuilder.Configure<SmokeApplication>().UsePlatformDetect();
+                var builder = AppBuilder.Configure<SmokeApplication>().UsePlatformDetect().UseHeyMelodyTypography();
                 if (basicRenderMode is not null)
                     builder = HeyMelodyWindows.Ui.RenderingSetup.UseHeyMelodyRendering(builder, basicRenderMode.Value);
                 _state.ExitCode = builder.LogToTrace().StartWithClassicDesktopLifetime([], ShutdownMode.OnExplicitShutdown);

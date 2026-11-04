@@ -268,7 +268,7 @@ if ($ValidationPath) {
     }
     Copy-Item -LiteralPath $ValidationPath -Destination (Join-Path $stage 'VALIDATION.json')
 }
-$manifest = [ordered]@{ schemaVersion = 2; version = $Version; builtAtUtc = [DateTime]::UtcNow.ToString('o'); builds = $builds; modelRenderer = 'Filament'; diagnosticLogging = 'one-host-session-debug-jsonl-v1'; nativeArm64ExecutionVerified = $false; validationScope = 'build-only unless an exact-version execution receipt is supplied' }
+$manifest = [ordered]@{ schemaVersion = 2; version = $Version; builtAtUtc = [DateTime]::UtcNow.ToString('o'); builds = $builds; modelRenderer = 'Filament'; uiAssets = 'misans-4.009-fluent-system-icons-v1'; diagnosticLogging = 'one-host-session-debug-jsonl-v1'; nativeArm64ExecutionVerified = $false; validationScope = 'build-only unless an exact-version execution receipt is supplied' }
 $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $stage 'manifest.json') -Encoding UTF8
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $archive, [System.IO.Compression.CompressionLevel]::Optimal, $false)

@@ -73,6 +73,18 @@ DeviceModelView.DefaultFactoryOverride = new RecordingFilamentRendererFactory();
 using var session = HeadlessUnitTestSession.StartNew(typeof(PreviewBootstrap));
 try
 {
+    if (args is ["--default-icon-theme-tests"])
+    {
+        int count = DefaultIconThemeTests.Run(session);
+        Console.WriteLine(JsonSerializer.Serialize(new { passed = count, success = true, nativeBluetoothCalls = 0, screenshots = 0, output }));
+        return 0;
+    }
+    if (args is ["--ui-asset-tests"])
+    {
+        int count = TypographyTests.Run(session) + IconTests.Run(session) + DefaultIconThemeTests.Run(session);
+        Console.WriteLine(JsonSerializer.Serialize(new { passed = count, success = true, nativeBluetoothCalls = 0, screenshots = 0, output }));
+        return 0;
+    }
     if (args is ["--ui-layout-helper-tests"] or ["--ui-layout-helper-tests", "--output-dir", _])
     {
         int count = MainUiTestLayoutTests.Run(session);
@@ -245,6 +257,9 @@ try
     passed += RenderingSettingsTests.Run(session, output);
     passed += startupChecks + settingsManagementChecks;
     var typographyChecks = TypographyTests.Run(session);
+    var iconChecks = IconTests.Run(session);
+    var defaultIconChecks = DefaultIconThemeTests.Run(session);
+    passed += iconChecks + defaultIconChecks;
     passed += typographyChecks;
     var frameLoopChecks = FrameLoopTests.Run(session, output);
     passed += frameLoopChecks;
@@ -255,7 +270,8 @@ try
         + (HeyMelody.Platform.DesktopCapabilities.SupportsHeadsetControl ? 9 : 7)
         + startupChecks + settingsManagementChecks
         + demoChecks + renderingChecks + animationChecks + layoutChecks + selectionChecks
-        + gameAudioChecks + typographyChecks + frameLoopChecks + gestureChecks + ancFeatureChecks + layoutHelperChecks;
+        + gameAudioChecks + typographyChecks + iconChecks + defaultIconChecks
+        + frameLoopChecks + gestureChecks + ancFeatureChecks + layoutHelperChecks;
     Check(passed == expected, $"Every UI scenario and interaction case must finish: passed={passed}, expected={expected}, "
         + $"startupChecks={startupChecks}, settingsManagementChecks={settingsManagementChecks}");
     var report = new { schemaVersion = 1, version = AppVersion.Display, passed, success = true, nativeBluetoothCalls = 0,

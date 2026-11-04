@@ -402,7 +402,7 @@
               <Button x:Name="AddDeviceButton" Width="64" Height="64" Click="AddDevice_Click"
                       IsEnabled="{Binding !Closing}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                       ToolTip.Tip="添加设备；长按 2 秒显示 Demo 设备" AutomationProperties.Name="添加设备">
-                <fa:FASymbolIcon Symbol="Add" FontSize="24" />
+                <fa:FAIconSourceElement IconSource="{icons:AppIcon Add, Size=24}" Width="24" Height="24" />
               </Button>
             </Border>
           </StackPanel>

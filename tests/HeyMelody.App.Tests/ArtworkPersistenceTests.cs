@@ -193,7 +193,7 @@ internal static class ArtworkPersistenceTests
             var cards = dialog.GetVisualDescendants().OfType<FASettingsExpanderItem>()
                 .Where(card => card.IsVisible && card.Parent is StackPanel { Name: "SettingsRoot" }).ToArray();
             int expectedCards = 8 + (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? 1 : 0) + (OperatingSystem.IsMacOS() ? 0 : 1);
-            Check(cards.Length == expectedCards && cards.All(card => card.IconSource is FASymbolIconSource)
+            Check(cards.Length == expectedCards && cards.All(card => card.IconSource is FAPathIconSource)
                 && cards.Any(card => card.Name == "ModelFrameRateCard"),
                 "Every visible top-level setting, including the 3D frame rate, is an icon card; "
                 + $"expected={expectedCards}, actual={cards.Length}.");

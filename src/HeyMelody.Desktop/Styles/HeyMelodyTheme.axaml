@@ -43,6 +43,8 @@
     </ResourceDictionary>
   </Styles.Resources>
 
+  <StyleInclude Source="avares://HeyMelody.Desktop/Styles/FluentSystemIconThemes.axaml" />
+
   <!-- Typography: Chinese text stays at 12 px or larger. -->
   <Style Selector="TextBlock.muted">
     <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />

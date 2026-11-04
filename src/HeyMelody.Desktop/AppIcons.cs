@@ -1,6 +1,11 @@
+using System.Collections.Concurrent;
+using System.Globalization;
+using System.Text.Json;
+using System.Xml.Linq;
 using Avalonia;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
+using Avalonia.Platform;
 using FluentAvalonia.UI.Controls;
 
 namespace HeyMelodyWindows.App;
@@ -8,19 +13,18 @@ namespace HeyMelodyWindows.App;
 public enum AppIcon
 {
     Settings, Refresh, Copy, Charging, NoiseControl, Equalizer, Sound, Earbuds, Gestures,
-    Hearing, FitTest, Info, History, Battery, BatteryLeft, BatteryRight, BatteryCase
+    Hearing, FitTest, Info, History, Battery, BatteryLeft, BatteryRight, BatteryCase,
+    Add, DarkTheme, Sync, Rotate, Globe, Permissions, CloudDownload, SpeakerBluetooth, Repair, OpenFolder, Help,
+    Play, Pause, Speaker0, Speaker2, SpeakerMute, Rename, Checkmark, Audio, Cancel,
+    ChevronDown, Subtract, Warning, Error, Success, Dismiss, Cut, Paste, Undo, Redo, SelectAll
 }
 
-/// <summary>Resolves interface icons from system or FluentAvalonia fonts, bundled HeyMelody device shapes and independent fallbacks.</summary>
+/// <summary>Resolves bundled Fluent System Icons and the original HeyMelody battery device shapes.</summary>
 public static class AppIcons
 {
-    private const string SegoeFluentName = "Segoe Fluent Icons", BundledSymbolsName = "Symbols";
-    private static readonly FontFamily SegoeFluent = new(SegoeFluentName);
-    // FluentAvalonia's bundled symbol font maps the same code points, so Windows 10 and previews keep the glyphs.
-    private static readonly FontFamily BundledSymbols = new("avares://FluentAvalonia/Fonts#Symbols");
-    private static readonly Dictionary<(string Family, int CodePoint), bool> Coverage = [];
-    // Original 24-unit outline for platforms without the system battery glyph.
-    private const string BatteryOutline = "M2,6 H20 V18 H2 Z M4,8 V16 H18 V8 Z M20,10 H23 V14 H20 Z";
+    private const string AssetRoot = "avares://HeyMelody.Desktop/Assets/Icons/";
+    private static readonly Lazy<IconCatalog> Catalog = new(LoadCatalog);
+    private static readonly ConcurrentDictionary<string, SvgPath> Paths = new();
 
     // Exact pathData from HeyMelody 17.6.5 battery device vectors; see docs/research/battery-device-icons.md.
     // F0 preserves evenOdd letter/indicator cutouts; the desktop inherits its themed foreground.
@@ -31,70 +35,69 @@ public static class AppIcons
     private const string BatteryCaseShape =
         "F0 M5.667,1.389H5.68H8.32H8.334H8.334C8.627,1.389 8.788,1.389 8.927,1.397C11.148,1.513 13.002,2.995 13.667,5.021H12.967C12.967,5.021 12.967,5.021 12.967,5.02H10.278C10.189,4.642 9.849,4.36 9.443,4.36H4.559C4.153,4.36 3.813,4.642 3.724,5.02H1.034C1.034,5.021 1.033,5.021 1.033,5.021H0.333C0.998,2.995 2.852,1.513 5.074,1.397C5.212,1.389 5.373,1.389 5.666,1.389H5.667ZM13.537,5.879H13.871C13.896,6.048 13.914,6.219 13.923,6.393C13.93,6.531 13.93,6.692 13.93,6.986V6.999V7.013C13.93,7.306 13.93,7.468 13.923,7.606C13.781,10.304 11.625,12.461 8.927,12.602C8.788,12.609 8.627,12.609 8.334,12.609H8.32H5.68H5.666C5.373,12.609 5.212,12.609 5.074,12.602C2.375,12.461 0.219,10.304 0.077,7.606C0.07,7.468 0.07,7.307 0.07,7.013V7.013V6.999V6.986V6.985C0.07,6.692 0.07,6.531 0.077,6.393C0.087,6.219 0.104,6.048 0.129,5.879H0.464C0.464,5.879 0.464,5.879 0.464,5.878H3.798C3.941,6.153 4.228,6.34 4.559,6.34H9.443C9.774,6.34 10.061,6.153 10.204,5.878H13.537C13.537,5.879 13.537,5.879 13.537,5.879ZM7,8.98C7.364,8.98 7.66,8.684 7.66,8.32C7.66,7.955 7.364,7.66 7,7.66C6.635,7.66 6.34,7.955 6.34,8.32C6.34,8.684 6.635,8.98 7,8.98Z";
 
-    private abstract record Candidate;
-    private sealed record Glyph(int CodePoint) : Candidate;
-    private sealed record Vector(string Data, double Viewport) : Candidate;
-
-    private static Candidate[] Candidates(AppIcon icon) => icon switch
-    {
-        AppIcon.Settings => [new Glyph(0xE713)],
-        AppIcon.Refresh => [new Glyph(0xE72C)],
-        AppIcon.Copy => [new Glyph(0xE8C8)],
-        AppIcon.Charging => [new Glyph(0xE945)],
-        AppIcon.NoiseControl => [new Glyph(0xF61F)],
-        AppIcon.Equalizer => [new Glyph(0xE9E9)],
-        AppIcon.Sound => [new Glyph(0xE995)],
-        AppIcon.Earbuds => [new Glyph(0xF4C0)],
-        AppIcon.Gestures => [new Glyph(0xE815)],
-        AppIcon.Hearing => [new Glyph(0xF270)],
-        AppIcon.FitTest => [new Glyph(0xF27C)],
-        AppIcon.Info => [new Glyph(0xE946)],
-        AppIcon.History => [new Glyph(0xE81C)],
-        AppIcon.Battery => [new Glyph(0xE850), new Vector(BatteryOutline, 24)],
-        AppIcon.BatteryLeft => [new Vector(BatteryLeftShape, 14)],
-        AppIcon.BatteryRight => [new Vector(BatteryRightShape, 14)],
-        AppIcon.BatteryCase => [new Vector(BatteryCaseShape, 14)],
-        _ => throw new ArgumentOutOfRangeException(nameof(icon))
-    };
-
     /// <summary>Creates a new icon source; icon sources are never shared between controls.</summary>
     public static FAIconSource Source(AppIcon icon, double size = 20)
     {
-        foreach (var candidate in Candidates(icon))
+        if (!double.IsFinite(size) || size <= 0)
+            throw new ArgumentOutOfRangeException(nameof(size));
+
+        var batteryShape = icon switch
         {
-            switch (candidate)
-            {
-                case Glyph glyph when Covers(SegoeFluent, SegoeFluentName, glyph.CodePoint):
-                    return Font(SegoeFluent, glyph.CodePoint, size);
-                case Glyph glyph when Covers(BundledSymbols, BundledSymbolsName, glyph.CodePoint):
-                    return Font(BundledSymbols, glyph.CodePoint, size);
-                case Vector vector:
-                    // Keep the fallback's padding at the requested icon size.
-                    var data = Geometry.Parse(vector.Data);
-                    data.Transform = new ScaleTransform(size / vector.Viewport, size / vector.Viewport);
-                    return new FAPathIconSource { Data = data, Stretch = Stretch.None };
-            }
+            AppIcon.BatteryLeft => BatteryLeftShape,
+            AppIcon.BatteryRight => BatteryRightShape,
+            AppIcon.BatteryCase => BatteryCaseShape,
+            _ => null
+        };
+        if (batteryShape is not null)
+        {
+            var battery = Geometry.Parse(batteryShape);
+            battery.Transform = new ScaleTransform(size / 14, size / 14);
+            return new FAPathIconSource { Data = battery, Stretch = Stretch.None };
         }
-        return new FASymbolIconSource { Symbol = icon is AppIcon.NoiseControl or AppIcon.Hearing or AppIcon.FitTest or AppIcon.Earbuds
-            ? FASymbol.Audio : FASymbol.Help, FontSize = size };
+
+        if (!Catalog.Value.Roles.TryGetValue(icon, out var slug))
+            throw new ArgumentOutOfRangeException(nameof(icon));
+        var file = $"{slug}_{(size <= 16 && Catalog.Value.Files.Contains($"{slug}_16_regular.svg") ? 16 : 20)}_regular.svg";
+        var svg = Paths.GetOrAdd(file, LoadPath);
+        // Opposite closed contours cancel their fill but retain the SVG canvas in Skia's path bounds.
+        var viewport = FormattableString.Invariant(
+            $"M0 0 H{svg.Viewport} V{svg.Viewport} H0 Z M0 0 V{svg.Viewport} H{svg.Viewport} V0 Z");
+        var geometry = Geometry.Parse((svg.FillRule == FillRule.EvenOdd ? "F0 " : "F1 ") + svg.Data + " " + viewport);
+        geometry.Transform = new ScaleTransform(size / svg.Viewport, size / svg.Viewport);
+        return new FAPathIconSource { Data = geometry, Stretch = Stretch.None };
     }
 
     public static FAIconSourceElement Element(AppIcon icon, double size = 16) =>
         new() { IconSource = Source(icon, size), Width = size, Height = size };
 
-    private static FAFontIconSource Font(FontFamily family, int codePoint, double size) =>
-        new() { FontFamily = family, Glyph = char.ConvertFromUtf32(codePoint), FontSize = size };
-
-    private static bool Covers(FontFamily family, string familyName, int codePoint)
+    private static IconCatalog LoadCatalog()
     {
-        if (Coverage.TryGetValue((familyName, codePoint), out var covered)) return covered;
-        // A missing family resolves to the default text font, so compare the family that was found.
-        covered = FontManager.Current.TryGetGlyphTypeface(new Typeface(family), out var typeface)
-            && string.Equals(typeface.FamilyName, familyName, StringComparison.OrdinalIgnoreCase)
-            && typeface.CharacterToGlyphMap.ContainsGlyph(codePoint);
-        Coverage[(familyName, codePoint)] = covered;
-        return covered;
+        using var stream = AssetLoader.Open(new Uri(AssetRoot + "fluent-icons.json"));
+        using var document = JsonDocument.Parse(stream);
+        var roles = document.RootElement.GetProperty("roles").EnumerateObject()
+            .ToDictionary(x => Enum.Parse<AppIcon>(x.Name), x => x.Value.GetString()!);
+        var files = document.RootElement.GetProperty("assets").EnumerateArray()
+            .Select(x => x.GetProperty("file").GetString()!).ToHashSet(StringComparer.Ordinal);
+        return new IconCatalog(roles, files);
     }
+
+    private static SvgPath LoadPath(string file)
+    {
+        using var stream = AssetLoader.Open(new Uri(AssetRoot + file));
+        var root = XDocument.Load(stream).Root ?? throw new InvalidDataException("The bundled Fluent SVG has no root.");
+        var viewport = root.Attribute("viewBox")!.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => double.Parse(x, CultureInfo.InvariantCulture)).ToArray();
+        var path = root.Elements(root.Name.Namespace + "path").Single();
+        if (viewport.Length != 4 || viewport[0] != 0 || viewport[1] != 0 || viewport[2] <= 0
+            || viewport[2] != viewport[3] || path.Attribute("transform") is not null)
+            throw new InvalidDataException("The bundled Fluent SVG does not use the curated square path format.");
+        var fillRule = (path.Attribute("fill-rule") ?? root.Attribute("fill-rule"))?.Value == "evenodd"
+            ? FillRule.EvenOdd : FillRule.NonZero;
+        return new SvgPath(path.Attribute("d")!.Value, viewport[2], fillRule);
+    }
+
+    private sealed record IconCatalog(IReadOnlyDictionary<AppIcon, string> Roles, IReadOnlySet<string> Files);
+    private sealed record SvgPath(string Data, double Viewport, FillRule FillRule);
 }
 
 /// <summary>XAML access to <see cref="AppIcons"/>, for example <c>{local:AppIcon Equalizer}</c>.</summary>
