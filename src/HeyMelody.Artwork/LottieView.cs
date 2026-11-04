@@ -35,9 +35,12 @@ public class LottieView(ILottieSource source, Func<Control?>? fallback = null,
     private bool _attached;
     private VisibilityTracker? _visibility;
     private long _renderedFrames;
+    private double _presentedElapsedSeconds;
     private Size _sourceSize;
     private DispatcherTimer? _poster;
     internal long RenderedFrameCount => Interlocked.Read(ref _renderedFrames);
+    internal double PresentedElapsedSeconds => Volatile.Read(ref _presentedElapsedSeconds);
+    internal Func<TimeSpan>? AnimationClockForTests { get; set; }
     public bool AnimationActive { get; private set; }
     public bool AnimationLoaded { get; private set; }
     public string? LoadError { get; private set; }
@@ -60,11 +63,8 @@ public class LottieView(ILottieSource source, Func<Control?>? fallback = null,
             _poster.Tick += (_, _) => { StopPoster(); if (_attached && generation == _generation && !AnimationLoaded && LoadError is null) Content = poster(); };
             _poster.Start();
         }
-        AnimationYield.Changed += OnYieldChanged;
         _ = LoadAsync(generation);
     }
-
-    private void OnYieldChanged(object? sender, EventArgs e) => _composition?.SendHandlerMessage(AnimationYield.Active ? LottieCommand.Yield : LottieCommand.Unyield);
 
     private async Task LoadAsync(int generation)
     {
@@ -78,11 +78,15 @@ public class LottieView(ILottieSource source, Func<Control?>? fallback = null,
             StopPoster(); Content = null;
             Plan = playback.Plan;
             _sourceSize = new Size(playback.Plan.Crop.Width, playback.Plan.Crop.Height);
-            _composition = parent.Compositor.CreateCustomVisual(new LottieHandler(playback, () => Interlocked.Increment(ref _renderedFrames)));
+            _composition = parent.Compositor.CreateCustomVisual(new LottieHandler(playback, elapsed =>
+            {
+                Volatile.Write(ref _presentedElapsedSeconds, elapsed);
+                Interlocked.Increment(ref _renderedFrames);
+            }, AnimationClockForTests));
             AnimationLoaded = true;
             playback = null; // The compositor owns all native Skia objects from here.
             ElementComposition.SetElementChildVisual(this, _composition);
-            InvalidateMeasure(); InvalidateArrange(); Resize(); RefreshActivity(); OnYieldChanged(null, EventArgs.Empty);
+            InvalidateMeasure(); InvalidateArrange(); Resize(); RefreshActivity();
         }
         catch (Exception error)
         {
@@ -97,7 +101,6 @@ public class LottieView(ILottieSource source, Func<Control?>? fallback = null,
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         _attached = false; ++_generation;
-        AnimationYield.Changed -= OnYieldChanged;
         StopPoster();
         _visibility?.Dispose();
         _visibility = null;
@@ -110,7 +113,7 @@ public class LottieView(ILottieSource source, Func<Control?>? fallback = null,
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
-        if (e.Property == BoundsProperty) Resize();
+        if (e.Property == BoundsProperty) { Resize(); RefreshActivity(); }
         if (e.Property == IsVisibleProperty) RefreshActivity();
     }
     protected override Size MeasureOverride(Size availableSize)
@@ -120,16 +123,19 @@ public class LottieView(ILottieSource source, Func<Control?>? fallback = null,
     private void Resize() { if (_composition is not null) _composition.Size = new Vector2((float)Bounds.Width, (float)Bounds.Height); }
     private void RefreshActivity()
     {
-        AnimationActive = _attached && IsEffectivelyVisible && _window is { IsVisible: true } && _window.WindowState != WindowState.Minimized;
+        bool active = _attached && _composition is not null && Bounds.Width > 0 && Bounds.Height > 0
+            && double.IsFinite(Bounds.Width) && double.IsFinite(Bounds.Height) && IsEffectivelyVisible
+            && _window is { IsVisible: true } && _window.WindowState != WindowState.Minimized;
+        if (active == AnimationActive) return;
+        AnimationActive = active;
         _composition?.SendHandlerMessage(AnimationActive ? LottieCommand.Play : LottieCommand.Pause);
     }
 
-    private enum LottieCommand { Play, Pause, Dispose, Yield, Unyield }
-    private sealed class LottieHandler(LottiePlayback playback, Action rendered) : CompositionCustomVisualHandler
+    private enum LottieCommand { Play, Pause, Dispose }
+    private sealed class LottieHandler(LottiePlayback playback, Action<double> rendered, Func<TimeSpan>? clock) : CompositionCustomVisualHandler
     {
         private LottiePlayback? _playback = playback;
-        private bool _playing, _settled, _yielding;
-        private long _presentedStep = -1;
+        private bool _playing, _settled;
         // A held final frame is rendered once into a GPU surface and redrawn as an image; looping frames never are.
         private SKImage? _settledImage;
         private GRContext? _settledContext;
@@ -140,10 +146,9 @@ public class LottieView(ILottieSource source, Func<Control?>? fallback = null,
         public override void OnMessage(object message)
         {
             if (message is not LottieCommand command) return;
-            if (command is LottieCommand.Yield or LottieCommand.Unyield) { _yielding = command == LottieCommand.Yield; return; }
             ReleaseSettledImage();
             if (command == LottieCommand.Dispose)
-            { _playing = false; _playback?.Dispose(); _playback = null; return; }
+            { _playing = false; _playback?.Dispose(); _playback = null; clock = null; return; }
             _playing = command == LottieCommand.Play;
             _lastFrame = null;
             Invalidate();
@@ -152,12 +157,11 @@ public class LottieView(ILottieSource source, Func<Control?>? fallback = null,
         public override void OnAnimationFrameUpdate()
         {
             if (!_playing || _playback is null || _settled) return;
-            if (_lastFrame is { } last) _elapsed += Math.Max(0, (CompositionNow - last).TotalSeconds);
-            _lastFrame = CompositionNow;
+            var now = clock?.Invoke() ?? CompositionNow;
+            if (_lastFrame is { } last) _elapsed += Math.Max(0, (now - last).TotalSeconds);
+            _lastFrame = now;
             _playback.Plan.TimeAt(_elapsed, out _settled);
-            // While yielding, time keeps advancing every callback but a new frame is drawn only when the 30 fps step changes.
-            long step = (long)Math.Floor(_elapsed * AnimationYield.FrameRate);
-            if (!_yielding || _settled || step != _presentedStep) { _presentedStep = step; Invalidate(); }
+            Invalidate();
             // A held final frame needs no further frame callbacks.
             if (!_settled) RegisterForNextAnimationFrameUpdate();
         }
@@ -179,7 +183,7 @@ public class LottieView(ILottieSource source, Func<Control?>? fallback = null,
                 if (!(_settled && lease.GrContext is { } gpu && DrawSettled(lease.SkCanvas, gpu, animation, destination, bounds)))
                 { ReleaseSettledImage(); animation.Render(lease.SkCanvas, destination); }
             }
-            rendered();
+            rendered(_elapsed);
         }
 
         private bool DrawSettled(SKCanvas canvas, GRContext gpu, Animation animation, SKRect destination, Rect bounds)

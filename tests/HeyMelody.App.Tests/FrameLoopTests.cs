@@ -11,9 +11,10 @@ internal static class FrameLoopTests
         var pacingChecks = ModelFramePacingTests.Run();
         Run("model frame rates expose exactly 30 fps, 60 fps and unlimited", () => { Choices(); return Task.CompletedTask; });
         Run("the model frame-rate preference persists beside the theme and compatibility choices", () => { Preference(output); return Task.CompletedTask; });
-        Run("the model loop advances on animation ticks and pauses while hidden or minimized", LoopAsync);
+        Run("the model loop advances on animation ticks and pauses while hidden, minimized or zero-sized", LoopAsync);
         Run("changing only the model frame rate retains its renderer and motion", ChangeRateAsync);
-        return pacingChecks + 4 + FrameCopyTests.Run(session);
+        Run("cleanup activity never changes the model's selected frame cadence", ActivityCadenceAsync);
+        return pacingChecks + 5 + FrameCopyTests.Run(session);
 
         void Run(string name, Func<Task> action)
         {
@@ -73,7 +74,7 @@ internal static class FrameLoopTests
             await Until(() => model.AnimationActive, "The loop starts once the model is loaded in a visible window.");
             var before = model.CameraUpdateCount;
             await Task.Delay(40); Dispatcher.UIThread.RunJobs();
-            Check(model.CameraUpdateCount == before, "Without display frames the loop draws nothing.");
+            Check(model.CameraUpdateCount == before, "The initial automatic-rotation wait does not submit camera updates.");
             // Idle rotation starts 0.65 s after activation; tick through that pause first.
             var clock = System.Diagnostics.Stopwatch.StartNew();
             while (clock.Elapsed < TimeSpan.FromSeconds(ModelOrbitMotion.IdleDelaySeconds + .2)) await Tick();
@@ -81,6 +82,8 @@ internal static class FrameLoopTests
             for (var frame = 0; frame < 6; frame++) await Tick();
             Check(model.CameraUpdateCount >= before + 4, "Spaced display frames advance the idle rotation; got "
                 + (model.CameraUpdateCount - before) + " updates for 6 frames.");
+            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            int oldGeneration = (int)typeof(DeviceModelView).GetField("_loopGeneration", flags)!.GetValue(model)!;
             window.Hide(); Dispatcher.UIThread.RunJobs();
             Check(!model.AnimationActive && !model.Motion.IsActive, "Hiding the window stops the loop.");
             var hidden = model.CameraUpdateCount;
@@ -88,6 +91,9 @@ internal static class FrameLoopTests
             Check(model.CameraUpdateCount == hidden, "A hidden window receives no camera updates.");
             window.Show(); Dispatcher.UIThread.RunJobs();
             Check(model.AnimationActive, "Showing the window resumes the loop.");
+            long callbacks = model.AnimationCallbackCount;
+            typeof(DeviceModelView).GetMethod("OnFrame", flags)!.Invoke(model, [TimeSpan.FromDays(1), oldGeneration]);
+            Check(model.AnimationCallbackCount == callbacks, "A callback from before hiding cannot revive its old chain after restore.");
             window.WindowState = WindowState.Minimized;
             Dispatcher.UIThread.RunJobs();
             Check(!model.AnimationActive && !model.Motion.IsActive, "Minimizing the window stops model work.");
@@ -106,6 +112,15 @@ internal static class FrameLoopTests
             ancestor.IsVisible = true;
             Dispatcher.UIThread.RunJobs();
             await Until(() => model.AnimationActive, "Showing an ancestor restarts the model frame loop.");
+            model.Width = model.Height = 0;
+            await Tick();
+            await Until(() => !model.AnimationActive, "A zero-sized model viewport stops the loop.");
+            hidden = model.CameraUpdateCount;
+            for (var frame = 0; frame < 3; frame++) await Tick();
+            Check(model.CameraUpdateCount == hidden, "A zero-sized viewport submits no queued camera updates.");
+            model.Width = model.Height = double.NaN;
+            await Tick();
+            await Until(() => model.AnimationActive, "Restoring the model allocation resumes the loop.");
         }
         finally { window.Close(); }
     }
@@ -143,6 +158,76 @@ internal static class FrameLoopTests
             window.Show(); Dispatcher.UIThread.RunJobs();
             await Until(() => model.AnimationActive, "The hidden rate change applies when the window resumes.");
             Check(factory.CreateCalls == 1 && !renderer.Disposed, "Resuming after a rate change retains the same renderer.");
+        }
+        finally
+        {
+            window.Close();
+            ModelRenderingPreferences.Apply(compatibility, originalRate);
+        }
+    }
+
+    private static async Task ActivityCadenceAsync()
+    {
+        var compatibility = ModelRenderingPreferences.CompatibilityMode;
+        var originalRate = ModelRenderingPreferences.FrameRate;
+        var factory = new RecordingFilamentRendererFactory();
+        var model = new DeviceModelView(new DeviceModelVisual(new ArtworkFile(
+            new Uri("avares://HeyMelody/Assets/Devices/EncoFree4Dynaudio/model.glb"), "", EncoFree4DynaudioModelView.ModelSha256),
+            DeviceVisuals.GenericProduct), factory);
+        var window = new Window { Content = model, Width = 160, Height = 120 };
+        long now = 0;
+        int cleanups = 0;
+        using var cleanup = ArtworkCleanupTriggers.BeginTestScope(() => now, () => cleanups++);
+        try
+        {
+            ArtworkCleanupTriggers.AttachWindow(window);
+            window.Show(); Dispatcher.UIThread.RunJobs();
+            await Until(() => model.AnimationActive, "The activity-cadence fixture finishes loading.");
+            var renderer = factory.Instances.Single();
+            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var frame = typeof(DeviceModelView).GetMethod("OnFrame", flags)!;
+            int generation = (int)typeof(DeviceModelView).GetField("_loopGeneration", flags)!.GetValue(model)!;
+            // The real callback chain is covered separately; isolate this controlled-clock fixture from its queue.
+            typeof(DeviceModelView).GetField("_frameSource", flags)!.SetValue(model, null);
+            long timestamp = TimeSpan.FromSeconds(100).Ticks;
+            void Advance(long ticks)
+            {
+                timestamp += ticks;
+                now = timestamp / TimeSpan.TicksPerMillisecond;
+                frame.Invoke(model, [TimeSpan.FromTicks(timestamp), generation]);
+                ArtworkCleanupTriggers.FlushPendingForTests();
+            }
+
+            // Use a controlled display clock; no wall-clock sleeps or catch-up callback loop is involved.
+            for (int i = 0; i < 12; i++) Advance(TimeSpan.TicksPerSecond / 10);
+            Check(model.Motion.Phase == ModelOrbitPhase.Idle, "The fixture samples automatic rotation, not a drag.");
+            foreach (var rate in new[] { ModelFrameRate.Unlimited, ModelFrameRate.Fps60, ModelFrameRate.Fps30 })
+            {
+                ModelRenderingPreferences.Apply(compatibility, rate);
+                long callbacks = model.AnimationCallbackCount;
+                long updates = model.CameraUpdateCount;
+                int requests = renderer.FrameRequests;
+                int beforeCleanup = cleanups;
+                long start = timestamp;
+                for (int i = 1; i <= 288; i++)
+                {
+                    if (i % 48 == 1) ArtworkCleanupTriggers.ScheduleCleanup(ArtworkCleanupTriggers.ExpanderDelay);
+                    if (i % 48 == 25) ArtworkCleanupTriggers.ScheduleCleanup(ArtworkCleanupTriggers.ScrollDelay);
+                    if (i == 97) HeadlessWindowActivity.SetActive(window, false);
+                    if (i == 193) HeadlessWindowActivity.SetActive(window, true);
+                    Advance(start + i * TimeSpan.TicksPerSecond / 144 - timestamp);
+                }
+                long expected = rate == ModelFrameRate.Unlimited ? 288 : (int)rate * 2;
+                long actual = model.CameraUpdateCount - updates;
+                Check(model.AnimationCallbackCount - callbacks == 288, "Each controlled callback is processed once.");
+                Check(Math.Abs(actual - expected) <= 1 && renderer.FrameRequests - requests == actual,
+                    $"Cleanup cannot select another cadence: {rate}, expected about {expected}, got {actual}.");
+                timestamp += 600 * TimeSpan.TicksPerMillisecond;
+                now = timestamp / TimeSpan.TicksPerMillisecond;
+                ArtworkCleanupTriggers.FlushPendingForTests();
+                Check(cleanups == beforeCleanup + 2 && !ArtworkCleanupTriggers.HasPendingCleanup,
+                    "Deactivation requests cleanup once and repeated activity coalesces independently of animation.");
+            }
         }
         finally
         {

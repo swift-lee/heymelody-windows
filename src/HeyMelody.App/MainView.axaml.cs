@@ -48,8 +48,8 @@ public partial class MainView : UserControl
     {
         InitializeComponent();
         SmoothScrolling.Attach(ControlScroll);
-        AnimationYieldTriggers.RegisterExpanders();
-        AnimationYieldTriggers.AttachScroll(ControlScroll);
+        ArtworkCleanupTriggers.RegisterExpanders();
+        ArtworkCleanupTriggers.AttachScroll(ControlScroll);
         InitializeDeviceBar();
         InitializeDemoDeviceInteraction();
         UpdateConnectionIndicator();

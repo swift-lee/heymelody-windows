@@ -6,7 +6,7 @@ using FluentAvalonia.UI.Controls;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Artwork;
 
-/// <summary>The renderer-to-bitmap copy path, and the animation yield gate and GPU janitor rate limit that need no GPU.</summary>
+/// <summary>The renderer-to-bitmap copy path and event-driven GPU cleanup that need no GPU.</summary>
 internal static class FrameCopyTests
 {
     internal static int Run(HeadlessUnitTestSession session)
@@ -14,10 +14,11 @@ internal static class FrameCopyTests
         Run("model frames copy straight into the locked bitmap and match the expected pixels", DirectAsync);
         Run("the managed copy still presents frames when the direct path is unavailable", FallbackAsync);
         Run("an idle model does not lock its bitmap or poll the renderer", NoRequestAsync);
-        Run("animation yield pulses extend, hold and notify only on transitions", YieldAsync);
-        Run("settings expanders trigger a yield pulse", ExpanderAsync);
+        Run("artwork cleanup events share one deadline and do not create an idle loop", CleanupAsync);
+        Run("settings expanders schedule cleanup without an animation gate", ExpanderAsync);
+        Run("window cleanup hooks deactivate once and detach on close", WindowCleanupAsync);
         Run("GPU cleanup requests are rate limited", () => { Gate(); return Task.CompletedTask; });
-        return 6;
+        return 7;
 
         void Run(string name, Func<Task> action)
         {
@@ -98,49 +99,90 @@ internal static class FrameCopyTests
         finally { window.Close(); }
     }
 
-    private static async Task YieldAsync()
+    private static Task CleanupAsync()
     {
-        AnimationYield.Reset();
-        int changes = 0, ended = 0;
-        EventHandler onChanged = (_, _) => changes++, onEnded = (_, _) => ended++;
-        AnimationYield.Changed += onChanged; AnimationYield.PulseEnded += onEnded;
-        try
+        long now = 1_000;
+        int requests = 0;
+        using (ArtworkCleanupTriggers.BeginTestScope(() => now, () => requests++))
         {
-            Check(!AnimationYield.Active, "The gate starts inactive.");
-            var owner = new object();
-            AnimationYield.SetHold(owner, true); AnimationYield.SetHold(owner, true);
-            Check(AnimationYield.Active && changes == 1, "A hold activates the gate once.");
-            AnimationYield.Pulse(TimeSpan.FromMilliseconds(60));
-            Check(changes == 1, "A pulse during a hold is not a transition.");
-            AnimationYield.SetHold(owner, false);
-            Check(AnimationYield.Active && changes == 1, "A pending pulse keeps the gate active after the hold ends.");
-            AnimationYield.Pulse(TimeSpan.FromMilliseconds(150));
-            await Until(() => ended == 1, "The extended pulse ends.");
-            Check(!AnimationYield.Active && changes == 2, "The gate deactivates once, after the longest pulse.");
-            AnimationYield.Pulse(TimeSpan.FromMilliseconds(30));
-            Check(AnimationYield.Active && changes == 3, "A new pulse reactivates the gate.");
-            await Until(() => ended == 2 && !AnimationYield.Active, "The short pulse ends too.");
-            Check(changes == 4, "Each activation reports exactly one deactivation.");
+            ArtworkCleanupTriggers.ScheduleCleanup(TimeSpan.Zero);
+            Check(!ArtworkCleanupTriggers.HasPendingCleanup && requests == 0, "An empty delay does not schedule work.");
+            ArtworkCleanupTriggers.ScheduleCleanup(ArtworkCleanupTriggers.ExpanderDelay);
+            now = 1_100;
+            ArtworkCleanupTriggers.ScheduleCleanup(ArtworkCleanupTriggers.ScrollDelay);
+            Check(ArtworkCleanupTriggers.PendingDeadlineMilliseconds == 1_600,
+                "A shorter scroll delay cannot shorten pending expander cleanup.");
+            now = 1_300;
+            ArtworkCleanupTriggers.ScheduleCleanup(ArtworkCleanupTriggers.ExpanderDelay);
+            Check(ArtworkCleanupTriggers.PendingDeadlineMilliseconds == 1_900,
+                "Later events extend the same cleanup deadline.");
+            now = 1_899; ArtworkCleanupTriggers.FlushPendingForTests();
+            Check(requests == 0 && ArtworkCleanupTriggers.HasPendingCleanup, "Cleanup waits until the exact deadline.");
+            now++; ArtworkCleanupTriggers.FlushPendingForTests();
+            Check(requests == 1 && !ArtworkCleanupTriggers.HasPendingCleanup, "One merged cleanup runs at its deadline.");
+            now = 50_000; ArtworkCleanupTriggers.FlushPendingForTests(); ArtworkCleanupTriggers.FlushPendingForTests();
+            Check(requests == 1 && !ArtworkCleanupTriggers.HasPendingCleanup, "An idle UI does not request recurring cleanup.");
+            ArtworkCleanupTriggers.ScheduleCleanup(ArtworkCleanupTriggers.ScrollDelay);
         }
-        finally { AnimationYield.Changed -= onChanged; AnimationYield.PulseEnded -= onEnded; AnimationYield.Reset(); }
+        Check(!ArtworkCleanupTriggers.HasPendingCleanup, "A finished test scope drops pending callbacks and delegates.");
+        return Task.CompletedTask;
     }
 
-    private static async Task ExpanderAsync()
+    private static Task ExpanderAsync()
     {
-        AnimationYield.Reset();
-        AnimationYieldTriggers.RegisterExpanders();
+        long now = 1_000;
+        int requests = 0;
+        using var cleanup = ArtworkCleanupTriggers.BeginTestScope(() => now, () => requests++);
+        ArtworkCleanupTriggers.RegisterExpanders();
         var expander = new FASettingsExpander { Header = "x" };
         var window = new Window { Content = expander, Width = 280, Height = 240 };
         try
         {
             window.Show(); Dispatcher.UIThread.RunJobs();
-            Check(!AnimationYield.Active, "Showing an expander does not yield.");
+            Check(!ArtworkCleanupTriggers.HasPendingCleanup, "Showing an expander does not schedule cleanup.");
             expander.IsExpanded = true;
-            Check(AnimationYield.Active, "Expanding yields animations.");
+            Check(ArtworkCleanupTriggers.PendingDeadlineMilliseconds == 1_600 && requests == 0,
+                "Expanding schedules delayed cleanup without requesting it immediately.");
+            now = 1_200;
             expander.IsExpanded = false;
-            await Until(() => !AnimationYield.Active, "The yield ends after its pulse.");
+            Check(ArtworkCleanupTriggers.PendingDeadlineMilliseconds == 1_800, "Collapsing extends the same cleanup deadline.");
+            now = 1_800; ArtworkCleanupTriggers.FlushPendingForTests();
+            Check(requests == 1 && !ArtworkCleanupTriggers.HasPendingCleanup, "The expander changes produce one cleanup request.");
         }
-        finally { window.Close(); AnimationYield.Reset(); }
+        finally { window.Close(); }
+        return Task.CompletedTask;
+    }
+
+    private static Task WindowCleanupAsync()
+    {
+        int requests = 0, observedDeactivations = 0;
+        using var cleanup = ArtworkCleanupTriggers.BeginTestScope(() => 1_000, () => requests++);
+        var window = new Window { Width = 100, Height = 100 };
+        EventHandler deactivated = (_, _) => observedDeactivations++;
+        window.Deactivated += deactivated;
+        ArtworkCleanupTriggers.AttachWindow(window);
+        try
+        {
+            window.Show(); Dispatcher.UIThread.RunJobs();
+            int beforeActivation = requests;
+            HeadlessWindowActivity.SetActive(window, true);
+            Check(requests == beforeActivation, "Activation does not request cleanup or install an animation hold.");
+            var deactivate = HeadlessWindowActivity.GetCallback(window, false);
+            deactivate();
+            Check(!window.IsActive && requests == beforeActivation + 1 && !ArtworkCleanupTriggers.HasPendingCleanup,
+                "Actual deactivation requests cleanup immediately without scheduling animation state.");
+            ArtworkCleanupTriggers.AttachWindow(window);
+            HeadlessWindowActivity.SetActive(window, true);
+            deactivate();
+            Check(requests == beforeActivation + 2, "Repeated hookup does not duplicate the window cleanup handler.");
+            window.Close(); Dispatcher.UIThread.RunJobs();
+            int afterClose = requests, observedAfterClose = observedDeactivations;
+            deactivate();
+            Check(observedDeactivations == observedAfterClose + 1 && requests == afterClose,
+                "A captured platform callback still reaches Deactivated after close, but the cleanup handler is unhooked.");
+        }
+        finally { window.Deactivated -= deactivated; window.Close(); }
+        return Task.CompletedTask;
     }
 
     private static void Gate()

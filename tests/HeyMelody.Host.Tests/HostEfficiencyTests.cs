@@ -1,4 +1,5 @@
 using HeyMelody.Platform;
+using System.Reflection;
 using System.Text.Json;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Host;
@@ -13,14 +14,17 @@ internal static class HostEfficiencyTests
             string path = Path.Combine(scratch, "io-unchanged.json"); var store = new DeviceStateStore(path);
             var start = new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero); string key = new('a', 64);
             store.Remember(key, Presentation(start));
-            await UntilAsync(() => Persisted(path, key)?.SampleTime == start);
+            Check((await ReadAfterAutomaticWriteAsync(store, path, key))?.SampleTime == start,
+                "The initial sample was not automatically persisted");
             byte[] original = File.ReadAllBytes(path);
             store.Remember(key, Presentation(start.AddSeconds(10)));
             await Task.Delay(400);
+            await ObserveAutomaticWriterAsync(store);
             Check(File.ReadAllBytes(path).AsSpan().SequenceEqual(original), "A timestamp-only change rewrote the file");
             Check(store.Find(key)!.SampleTime == start.AddSeconds(10), "Memory did not take the newer sample");
             store.Remember(key, Presentation(start.AddSeconds(59)));
             await Task.Delay(400);
+            await ObserveAutomaticWriterAsync(store);
             Check(File.ReadAllBytes(path).AsSpan().SequenceEqual(original), "59 s after the queued sample still rewrote the file");
             await store.FlushAsync();
             Check(Persisted(path, key)!.SampleTime == start.AddSeconds(59), "Flush did not persist the latest skipped sample");
@@ -31,20 +35,27 @@ internal static class HostEfficiencyTests
             string path = Path.Combine(scratch, "io-written.json"); var store = new DeviceStateStore(path);
             var start = new DateTimeOffset(2026, 10, 1, 12, 0, 0, TimeSpan.Zero); string key = new('b', 64);
             store.Remember(key, Presentation(start));
-            await UntilAsync(() => Persisted(path, key)?.SampleTime == start);
+            Check((await ReadAfterAutomaticWriteAsync(store, path, key))?.SampleTime == start,
+                "The initial sample was not automatically persisted");
             store.Remember(key, Presentation(start.AddSeconds(61)));
-            await UntilAsync(() => Persisted(path, key)?.SampleTime == start.AddSeconds(61));
+            Check((await ReadAfterAutomaticWriteAsync(store, path, key))?.SampleTime == start.AddSeconds(61),
+                "A timestamp beyond sixty seconds was not automatically persisted");
             store.Remember(key, Presentation(start.AddSeconds(62), "2.0"));
-            await UntilAsync(() => Persisted(path, key)?.Firmware == "2.0");
+            Check((await ReadAfterAutomaticWriteAsync(store, path, key))?.Firmware == "2.0",
+                "Changed content was not automatically persisted");
             store.Remember(key, Presentation(start.AddSeconds(122), "2.0"));
-            await UntilAsync(() => Persisted(path, key)?.SampleTime == start.AddSeconds(122));
+            Check((await ReadAfterAutomaticWriteAsync(store, path, key))?.SampleTime == start.AddSeconds(122),
+                "The next sixty-second boundary was not automatically persisted");
             store.Remember(key, Presentation(start.AddSeconds(100), "2.0"));
-            await UntilAsync(() => Persisted(path, key)?.SampleTime == start.AddSeconds(100));
+            Check((await ReadAfterAutomaticWriteAsync(store, path, key))?.SampleTime == start.AddSeconds(100),
+                "An earlier sample was not automatically persisted");
             // Retiring the entry forgets what was queued, so the same content is written again at once.
             store.RetireOtherProducts(key, "AAAAAA");
-            await UntilAsync(() => Persisted(path, key) is null);
+            Check(await ReadAfterAutomaticWriteAsync(store, path, key) is null,
+                "Retiring the entry was not automatically persisted");
             store.Remember(key, Presentation(start.AddSeconds(101), "2.0"));
-            await UntilAsync(() => Persisted(path, key)?.SampleTime == start.AddSeconds(101));
+            Check((await ReadAfterAutomaticWriteAsync(store, path, key))?.SampleTime == start.AddSeconds(101),
+                "Remembering the retired key was not automatically persisted");
         });
         await test("device state: eviction forgets the queued fingerprint of the evicted key", async () =>
         {
@@ -54,7 +65,8 @@ internal static class HostEfficiencyTests
             await store.FlushAsync();
             Check(Persisted(path, 0.ToString("x64")) is null && Persisted(path, 128.ToString("x64")) is not null, "Oldest entry was not evicted");
             store.Remember(0.ToString("x64"), Presentation(start.AddSeconds(129)));
-            await UntilAsync(() => Persisted(path, 0.ToString("x64"))?.SampleTime == start.AddSeconds(129));
+            Check((await ReadAfterAutomaticWriteAsync(store, path, 0.ToString("x64")))?.SampleTime == start.AddSeconds(129),
+                "Remembering an evicted key was not automatically persisted");
         });
         await test("one serialization serves every client: shared line, per-event coalescing keys and identical bytes on the wire", async () =>
         {
@@ -127,6 +139,21 @@ internal static class HostEfficiencyTests
         new() { ProductId = "06EC10", SampleTime = sample, Firmware = firmware };
     // A second store reads what is on disk, never what the first holds in memory.
     private static DevicePresentation? Persisted(string path, string key) => new DeviceStateStore(path).Find(key);
+    private static async Task<DevicePresentation?> ReadAfterAutomaticWriteAsync(DeviceStateStore store, string path, string key)
+    {
+        await ObserveAutomaticWriterAsync(store);
+        return Persisted(path, key);
+    }
+
+    private static async Task ObserveAutomaticWriterAsync(DeviceStateStore store)
+    {
+        // Polling the file can deny Windows' atomic overwrite even with FileShare.Delete.
+        // Observe only the writer Remember already started; never queue, flush or retry a write.
+        var field = typeof(DeviceStateStore).GetField("_writer", BindingFlags.Instance | BindingFlags.NonPublic);
+        if (field?.FieldType != typeof(Task) || field.GetValue(store) is not Task writer)
+            throw new InvalidOperationException("This test requires DeviceStateStore's existing _writer Task; review its synchronization contract.");
+        await writer.WaitAsync(TimeSpan.FromSeconds(4));
+    }
     private static BluetoothCandidate Audio(ulong address) => new(address, "耳机 " + address, false, true, true, 0x404);
     private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
     private static async Task UntilAsync(Func<bool> condition)

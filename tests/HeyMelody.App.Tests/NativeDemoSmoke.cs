@@ -17,14 +17,15 @@ using HeyMelodyWindows.App;
 using HeyMelodyWindows.Ui;
 
 /// <summary>Runs the dedicated demo startup in a real Win32 window without a Bluetooth backend.</summary>
-internal static class NativeDemoSmoke
+internal static partial class NativeDemoSmoke
 {
     private static State _state = new();
 
-    public static int Run(string? output = null, FilamentBackend backend = FilamentBackend.Vulkan)
+    public static int Run(string? output = null, FilamentBackend backend = FilamentBackend.Vulkan,
+        bool activityRegression = false)
     {
         if (!OperatingSystem.IsWindows()) return 2;
-        _state = new() { Output = output, RequestedBackend = backend };
+        _state = new() { Output = output, RequestedBackend = backend, ActivityRegression = activityRegression };
         if (output is not null) Directory.CreateDirectory(output);
         var thread = new Thread(() =>
         {
@@ -37,9 +38,11 @@ internal static class NativeDemoSmoke
             try
             {
                 ModelRenderingPreferences.Reload();
-                ModelRenderingPreferences.Apply(backend == FilamentBackend.OpenGL);
-                AppBuilder.Configure<SmokeApplication>().UsePlatformDetect().UseHeyMelodyTypography().LogToTrace()
-                    .StartWithClassicDesktopLifetime([], ShutdownMode.OnExplicitShutdown);
+                if (activityRegression) ModelRenderingPreferences.Apply(backend == FilamentBackend.OpenGL, ModelFrameRate.Unlimited);
+                else ModelRenderingPreferences.Apply(backend == FilamentBackend.OpenGL);
+                var builder = AppBuilder.Configure<SmokeApplication>().UsePlatformDetect().UseHeyMelodyTypography().LogToTrace();
+                if (activityRegression) builder = builder.UseHeyMelodyRendering(basicRenderMode: false);
+                builder.StartWithClassicDesktopLifetime([], ShutdownMode.OnExplicitShutdown);
                 Check(!File.Exists(_state.PreferencesPath), "Native demo verification never writes user preferences.");
             }
             catch (Exception error) { _state.Failure = error.ToString(); }
@@ -51,7 +54,22 @@ internal static class NativeDemoSmoke
         }) { IsBackground = true, Name = "HeyMelody native demo smoke" };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        if (!thread.Join(TimeSpan.FromSeconds(60))) _state.Failure ??= "Native demo window did not stop within sixty seconds.";
+        var timeout = activityRegression ? TimeSpan.FromMinutes(8) : TimeSpan.FromSeconds(60);
+        if (!thread.Join(timeout))
+        {
+            var timeoutReport = new
+            {
+                success = false, timedOut = true, windowClosed = false, activityRegression,
+                requestedBackend = backend.ToString(), timeoutSeconds = timeout.TotalSeconds,
+                scope = "minimal timeout receipt; the UI thread is still alive, so its mutable counters and samples are not inspected",
+                failure = $"Native demo window did not stop within {timeout.TotalSeconds:0} seconds."
+            };
+            Console.WriteLine(JsonSerializer.Serialize(timeoutReport));
+            if (output is not null)
+                File.WriteAllText(Path.Combine(output, "native-demo-receipts.json"),
+                    JsonSerializer.Serialize(timeoutReport, new JsonSerializerOptions { WriteIndented = true }));
+            return 1;
+        }
         bool success = _state.Failure is null && _state.Completed && _state.Closed;
         var report = new
         {
@@ -63,9 +81,18 @@ internal static class NativeDemoSmoke
             nativeLibrarySha256 = NativeLibraryHash(),
             _state.PreferredBackend, _state.ActiveBackend, backendTransitions = _state.BackendTransitions, controlLayouts = _state.ControlLayouts,
             frameRateTransitions = _state.FrameRateTransitions,
+            activityRegression = _state.ActivityRegression, activityPhases = _state.ActivityPhases,
+            activityFocusDiagnostics = _state.ActivityFocusDiagnostics,
+            startupDiagnostics = _state.StartupDiagnostics,
+            guiRenderingPolicy = _state.ActivityRegression
+                ? "shared default hardware compositor selection configured; actual Avalonia GPU is not observed by this receipt"
+                : "existing native smoke platform defaults",
             preferencesWritten = _state.PreferencesPath is { } preferencePath && File.Exists(preferencePath),
             screenshots = _state.Screenshots,
-            scope = "real Win32 demo startup, model scene and animation, themes, responsive layout, local action guards and dirty close; optional local Filament model-frame captures; no Bluetooth backend",
+            scope = _state.ActivityRegression
+                ? "fixed native Win32 demo, DPI, Dynaudio model, actual backend and Unlimited; thirty-second activity/lifecycle phases with real sustained native focus loss; "
+                    + "one hit-tested native click in this test's blank helper with the cursor restored; progress/backpressure observations, not a minimum FPS or hardware receipt"
+                : "real Win32 demo startup, model scene and animation, themes, responsive layout, local action guards and dirty close; optional local Filament model-frame captures; no Bluetooth backend",
             failure = _state.Failure
         };
         Console.WriteLine(JsonSerializer.Serialize(report));
@@ -156,21 +183,89 @@ internal static class NativeDemoSmoke
         return module is null ? null : Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(module.FileName))).ToLowerInvariant();
     }
 
+    private static void CaptureStartupDiagnostics(MainWindow window, ProductArtwork hero)
+    {
+        try
+        {
+            var snapshot = new
+            {
+                capturedBeforeClose = !_state.Closed,
+                requestedBackend = _state.RequestedBackend.ToString(),
+                preferredBackend = ModelRenderingPreferences.Backend.ToString(),
+                frameRate = ModelRenderingPreferences.FrameRate.ToString(),
+                compatibilityMode = ModelRenderingPreferences.CompatibilityMode,
+                window = new
+                {
+                    control = StartupControlState(window), state = window.WindowState.ToString(),
+                    window.IsActive, window.RenderScaling
+                },
+                hero = StartupControlState(hero),
+                models = hero.GetVisualDescendants().OfType<DeviceModelView>().Select(model =>
+                {
+                    var diagnostics = model.Diagnostics;
+                    return new
+                    {
+                        type = model.GetType().Name,
+                        model.ModelDigest, model.ModelReady, model.LoadError, model.VisibleStatus,
+                        model.AnimationActive, model.AnimationCallbackCount, model.CameraUpdateCount, model.LoadTimings,
+                        motion = new { model.Motion.IsActive, phase = model.Motion.Phase.ToString() },
+                        control = StartupControlState(model),
+                        root = StartupControlState(model.Content as Control),
+                        viewport = StartupControlState(model.Viewport),
+                        diagnostics = new
+                        {
+                            state = diagnostics.State.ToString(), diagnostics.Backend,
+                            requestedBackend = diagnostics.RequestedBackend?.ToString(),
+                            actualBackend = diagnostics.ActualBackend?.ToString(),
+                            diagnostics.Width, diagnostics.Height, diagnostics.FrameId, diagnostics.Generation,
+                            diagnostics.SourceMeshes, diagnostics.SourceTriangles, diagnostics.CreationTimings
+                        }
+                    };
+                }).ToArray()
+            };
+            // Validate and freeze the snapshot before teardown; diagnostic failures must not mask the scene assertion.
+            _state.StartupDiagnostics = JsonSerializer.SerializeToElement(snapshot, new JsonSerializerOptions
+            {
+                NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals
+            });
+        }
+        catch (Exception error)
+        {
+            _state.StartupDiagnostics = new { captureFailed = true, error = error.ToString() };
+        }
+    }
+
+    private static object? StartupControlState(Control? control)
+    {
+        if (control is null) return null;
+        var bounds = control.Bounds;
+        return new
+        {
+            control.IsVisible, control.IsEffectivelyVisible,
+            attached = TopLevel.GetTopLevel(control) is not null,
+            x = bounds.X, y = bounds.Y, width = bounds.Width, height = bounds.Height
+        };
+    }
+
     private sealed class State
     {
         public int Passed, CalibrationLaunches;
         public bool Completed, Closed;
+        public bool ActivityRegression;
         public string? Failure;
         public string? Output;
         public string? PreferencesPath, PreferredBackend, ActiveBackend;
         public FilamentBackend RequestedBackend;
         public long FirstRenderedTriangles;
         public int FirstRenderedSceneItems;
+        public object? StartupDiagnostics;
+        public object? ActivityFocusDiagnostics;
         public DemoService Service { get; } = new();
         public List<object> Screenshots { get; } = [];
         public List<object> ControlLayouts { get; } = [];
         public List<string> BackendTransitions { get; } = [];
         public List<object> FrameRateTransitions { get; } = [];
+        public List<object> ActivityPhases { get; } = [];
     }
 
     public sealed class SmokeApplication : App
@@ -180,11 +275,18 @@ internal static class NativeDemoSmoke
             var desktop = (IClassicDesktopStyleApplicationLifetime)ApplicationLifetime!;
             var window = new MainWindow(_state.Service, preview: true)
             {
-                StartWithDemo = true, ShowActivated = _state.Output is not null,
-                WindowStartupLocation = _state.Output is null ? WindowStartupLocation.Manual : WindowStartupLocation.CenterScreen,
-                Topmost = _state.Output is not null
+                StartWithDemo = true, ShowActivated = _state.Output is not null || _state.ActivityRegression,
+                WindowStartupLocation = _state.Output is null && !_state.ActivityRegression
+                    ? WindowStartupLocation.Manual : WindowStartupLocation.CenterScreen,
+                Topmost = _state.Output is not null || _state.ActivityRegression
             };
-            if (_state.Output is null) window.Position = new(-10000, -10000);
+            if (_state.Output is null && !_state.ActivityRegression) window.Position = new(-10000, -10000);
+            if (_state.ActivityRegression)
+            {
+                window.Width = 1280;
+                window.Height = 900;
+                window.CanResize = false;
+            }
             window.FindControl<MainView>("Page")!.SetModelDemo();
             desktop.MainWindow = window;
             window.Closed += (_, _) => _state.Closed = true;
@@ -218,9 +320,13 @@ internal static class NativeDemoSmoke
                 "ANC starts expanded while the demo's optional groups start collapsed.");
             // The following native checks inspect all editors; explicitly open them
             // after verifying the same collapsed defaults offered to real users.
-            await UntilAsync(() => hero.GetVisualDescendants().OfType<EncoFree4DynaudioModelView>().Any(model => model.ModelReady
-                && model.Diagnostics.FrameId > 0 && model.Diagnostics.SourceTriangles > 0),
-                "The bundled Dynaudio scene renders on the first native window load.");
+            try
+            {
+                await UntilAsync(() => hero.GetVisualDescendants().OfType<EncoFree4DynaudioModelView>().Any(model => model.ModelReady
+                    && model.Diagnostics.FrameId > 0 && model.Diagnostics.SourceTriangles > 0),
+                    "The bundled Dynaudio scene renders on the first native window load.");
+            }
+            finally { CaptureStartupDiagnostics(window, hero); }
             var model = hero.GetVisualDescendants().OfType<DeviceModelView>().Single();
             _state.PreferredBackend = _state.RequestedBackend.ToString();
             _state.ActiveBackend = model.Diagnostics.Backend;
@@ -236,6 +342,18 @@ internal static class NativeDemoSmoke
                 && _state.FirstRenderedTriangles is > 0 and <= DynaudioModelTests.ExpectedTriangles && model.Diagnostics.State == FilamentRendererState.Ready,
                 "The first native scene retains all 20 Dynaudio meshes and 94,927 source triangles without a renderer error.");
             await DynaudioModelTests.VerifyAsync();
+            if (_state.ActivityRegression)
+            {
+                await CheckActivityRegressionAsync(window, page, model);
+                Check(_state.Service.Enumerations == 1 && _state.Service.ForbiddenCalls == 0 && _state.CalibrationLaunches == 0,
+                    "Long native demo activity never calls a headset/artwork backend or launches device/audio calibration.");
+                window.Close();
+                await UntilAsync(() => _state.Closed, "The activity regression closes its native window.");
+                Check(!model.ModelReady && !model.AnimationActive && model.Viewport.Source is null,
+                    "The activity regression unloads its native scene and stops frame work on close.");
+                _state.Completed = true;
+                return;
+            }
             await CheckNativeModelInteractionAsync(window, model);
             await CheckFrameRateSwitchingAsync(model);
             await CheckBackendSwitchingAsync(model);
@@ -429,7 +547,7 @@ internal static class NativeDemoSmoke
 
     private static async Task WatchdogAsync(IClassicDesktopStyleApplicationLifetime desktop)
     {
-        await Task.Delay(TimeSpan.FromSeconds(55));
+        await Task.Delay(_state.ActivityRegression ? TimeSpan.FromMinutes(7) : TimeSpan.FromSeconds(55));
         if (_state.Completed) return;
         _state.Failure ??= "Native demo watchdog expired.";
         desktop.Shutdown(1);

@@ -75,9 +75,6 @@ public class DeviceModelView : UserControl
     private int _loopGeneration;
     private TimeSpan? _lastFrame;
     private readonly ModelFramePacer _framePacer = new();
-    // Idle auto-rotation steps down to 30 fps while AnimationYield is active; dragging and inertia keep _framePacer.
-    private readonly ModelFramePacer _yieldPacer = new(ModelFrameRate.Fps30);
-    private bool _yielding;
     // Locking a WriteableBitmap invalidates its Skia image (a new GPU upload) even if nothing is written, so the renderer
     // is polled only until a frame arrives after the last request. Requests can overlap (the frame copied first may predate
     // the last pose), so polling continues for a short grace after the last request instead of stopping at the first frame.
@@ -105,6 +102,9 @@ public class DeviceModelView : UserControl
     public string? LoadError { get; private set; }
     public long CameraUpdateCount { get; private set; }
     internal long AnimationCallbackCount { get; private set; }
+    internal FilamentFrameInfo LastPresentedFrame => _lastFrameInfo;
+    internal long PresentedFrameCount => _presentedFrames;
+    internal double[] PresentationIntervalsMilliseconds => _presentationIntervals.ToArray();
     public bool AnimationActive => _loopActive;
     public FilamentDiagnostics Diagnostics
     {
@@ -132,7 +132,8 @@ public class DeviceModelView : UserControl
         Content = _root;
         AutomationProperties.SetName(this, "耳机三维模型，可用鼠标拖动旋转");
         AutomationProperties.SetAccessibilityView(_diagnostics, AccessibilityView.Raw);
-        Viewport.PropertyChanged += (_, change) => { if (change.Property == BoundsProperty) FitCamera(); };
+        Viewport.PropertyChanged += OnViewportBoundsChanged;
+        _root.PropertyChanged += OnViewportBoundsChanged;
         _root.PointerPressed += OnPointerPressed;
         _root.PointerMoved += OnPointerMoved;
         _root.AddHandler(PointerReleasedEvent, OnPointerReleased, RoutingStrategies.Tunnel, handledEventsToo: true);
@@ -522,6 +523,15 @@ public class DeviceModelView : UserControl
         ApplyCamera(force: true);
     }
 
+    private bool HasViewport => _root.Bounds.Width > 0 && _root.Bounds.Height > 0;
+
+    private void OnViewportBoundsChanged(object? sender, AvaloniaPropertyChangedEventArgs change)
+    {
+        if (change.Property != BoundsProperty) return;
+        FitCamera();
+        RefreshActivity();
+    }
+
     private void OnWindowPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
         if (e.Property == Window.WindowStateProperty || e.Property == IsVisibleProperty) RefreshActivity();
@@ -546,7 +556,7 @@ public class DeviceModelView : UserControl
     {
         bool visible = _attached && IsEffectivelyVisible && _window?.IsVisible == true && _window.WindowState != WindowState.Minimized;
         if (!visible) _motionToRestore = null;
-        var active = visible && ModelReady && _renderer is not null;
+        var active = visible && HasViewport && ModelReady && _renderer is not null;
         Motion.SetActive(active);
         if (!active) { StopFrameLoop(); ReleasePointer(); return; }
         if (_loopActive || TopLevel.GetTopLevel(this) is not { } source) return;
@@ -575,9 +585,7 @@ public class DeviceModelView : UserControl
             var dt = _lastFrame is { } last ? Math.Clamp((time - last).TotalSeconds, 0, .1) : 0;
             _lastFrame = time;
             Motion.Step(dt);
-            bool yielding = AnimationYield.Active && Motion.Phase == ModelOrbitPhase.Idle;
-            if (yielding != _yielding) { _yielding = yielding; _yieldPacer.Reset(ModelFrameRate.Fps30); }
-            if ((yielding ? _yieldPacer : _framePacer).ShouldRender(time)) ApplyCamera();
+            if (_framePacer.ShouldRender(time)) ApplyCamera();
             PresentLatestFrame();
         }
         catch (Exception exception) { FailRenderer(exception); return; }
@@ -586,7 +594,7 @@ public class DeviceModelView : UserControl
 
     private void ApplyCamera(bool force = false)
     {
-        if (_renderer is null || _configuration.Width <= 0 || _configuration.Height <= 0) return;
+        if (_renderer is null || !HasViewport || _configuration.Width <= 0 || _configuration.Height <= 0) return;
         var yaw = (float)Motion.Yaw;
         var pitch = (float)Motion.Pitch;
         if (!force && yaw == _appliedYaw && pitch == _appliedPitch) return;

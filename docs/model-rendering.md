@@ -14,7 +14,34 @@ Vulkan 不可用时显示静态 detail 外观并提示手动选择 OpenGL，不�
 
 当前运行验收范围为 Windows x64 的 Vulkan、OpenGL；ARM64 为交叉构建和静态校验。macOS Metal、Linux Vulkan／EGLHeadless 的构建准备、ABI 2、探测程序及验证边界见 [Filament 构建与接口](filament-renderer.md)。完整截图留在本地，只检查本轮变更的模型和设置区域。
 
-帧复制与让路：`PresentLatestFrame` 从 `ApplyCamera` 等请求新帧（`_frameRequested`）起轮询渲染器，直到已取到帧且距最后一次请求满 0.25 s 才停止，因为锁定 `WriteableBitmap` 即使不写入也会使 Skia 快照失效并触发一次纹理上传；连续请求可能重叠，先取到的帧未必是最后姿态，宽限期保证停止转动时最后一帧仍会呈现；位图尺寸与配置相同且 `RowBytes == 宽×4` 时，渲染器直接写入已锁定的位图，托管 `_frameBuffer` 逐行复制只作为步幅或尺寸不符、渲染器拒绝较小目标缓冲时的回退（`DirectCopyDisabled`）。`AnimationYield`（`HeyMelody.Artwork`）在设置展开（脉冲 600 ms）、滚动（300 ms）和主窗口失活期间要求装饰动画降到 30 fps：空闲自转（`Motion.Phase == Idle`）改用独立的 30 fps `ModelFramePacer`，`Motion.Step` 仍逐回调推进以保持自转时间连续；拖动和惯性仍用用户设定的帧率。Lottie 同样只在 30 fps 步进变化时重绘；停在末帧的 Product 动画在有 GPU 上下文时只渲染一次并以 `SKImage` 重绘，循环动画从不缓存。这些都是离线验证，30 fps 让路的实际流畅度与 GPU 缓存效果需 Windows 实机确认。
+帧复制：`PresentLatestFrame` 从 `ApplyCamera` 等请求新帧（`_frameRequested`）起轮询渲染器，直到已取到帧且距最后一次请求满 0.25 s 才停止，因为锁定 `WriteableBitmap` 即使不写入也会使 Skia 快照失效并触发一次纹理上传；连续请求可能重叠，先取到的帧未必是最后姿态，宽限期保证停止转动时最后一帧仍会呈现；位图尺寸与配置相同且 `RowBytes == 宽×4` 时，渲染器直接写入已锁定的位图，托管 `_frameBuffer` 逐行复制只作为步幅或尺寸不符、渲染器拒绝较小目标缓冲时的回退（`DirectCopyDisabled`）。
+
+动画调度不再按窗口焦点、空闲／非交互、设置展开或滚动自动降档。原全局 `AnimationYield` 及其 hold／pulse 状态已移除：3D 自转、拖动和惯性统一使用用户选择的 30／60／无限制 `ModelFramePacer`，`Motion.Step` 仍按真实时间积分；`.65 s` 自转等待、隐藏／最小化／祖先不可见／卸载暂停不变。Lottie 不再接收外部 30 fps 消息；WebP 原有资源帧时长、循环次数、Lottie 末帧静态缓存不变，循环动画不因此新增整段缓存。恢复可见后仍逐动画回调推进，不建立后台忙循环或追赶补帧。无限制不保证固定实测 FPS，也不绕过原生渲染背压、请求合并、像素复制和最终帧宽限。
+
+GPU 清理与动画调度独立。`ArtworkCleanupTriggers` 只在展开／折叠后的 600 ms、滚动后的 300 ms 合并一次清理请求；连续事件延长同一 deadline，复用一个短期计时器，到期后停止，不保留窗口失活 hold 或空闲循环。窗口失活直接请求清理，关闭时解绑。`GpuJanitor` 仍最多每 10 s 清理 30 s 未使用的 Skia 资源，256 MiB 缓存预算不变。这一策略变更回应 8cx Gen 3 与本机 Demo 旋转后帧率波动的反馈，不代表已证明所有波动由旧降档导致或已完成对应硬件回测。
+
+### 调度回归与实机复验
+
+定向离线入口为 `dotnet run --project tests/HeyMelody.App.Tests -c Release -- --model-loading-tests`、同项目的 `--animation-tests`（Lottie／WebP）、`--smooth-scroll-tests` 及默认 ModelPreview.Tests；默认 App.Tests 继续覆盖这些契约，完整集合使用 Windows offline profile。`--native-demo-cli-tests` 单独运行 18 项参数检查，不打开窗口。清理合并检查使用注入时钟同步到期，不依赖真实等待 600 ms；它只验证清理请求，不将其用作动画 FPS 门。无头回调与模拟 renderer 证明调度和生命周期契约，不证明 GPU 吞吐或硬件平滑度。
+
+真实 Windows Demo 可从应用的 `--3d-demo` 入口打开，使用 `HEYMELODY_RENDER_DIAGNOSTICS=1` 或 Ctrl+Shift+F12 观察合成器及模型统计。原生长测仅限 Windows，必须显式传入 `--activity-regression`；分别选择 `vulkan` 或 `opengl` 并使用新的输出目录：
+
+```text
+dotnet run --project tests/HeyMelody.App.Tests -c Release -- --native-demo-smoke --activity-regression --backend vulkan --output-dir <新的Vulkan目录>
+dotnet run --project tests/HeyMelody.App.Tests -c Release -- --native-demo-smoke --activity-regression --backend opengl --output-dir <新的OpenGL目录>
+```
+
+长测固定 1280×900、同一丹拿版模型、已记录的 DPI、所选实际模型后端及 Unlimited，不写用户偏好。自转、拖动后惯性／自转恢复、持续原生失焦、滚动／展开、隐藏、显示恢复、最小化、还原恢复共 8 段，每段至少 30 s；失焦通过独立原生前台窗口和真实活动状态验证，辅助窗口不得遮挡模型。为取得真实前台焦点，测试只在原生命中确认属于辅助窗口的空白位置发送一次鼠标点击，正常路径恢复原光标位置；若部分输入后的补偿释放失败，则不再移动光标并报告失败，避免将未结束的拖动带出辅助窗口。命中、输入或恢复失败均不能视为通过，不修改系统焦点策略或绕过锁屏。隐藏／最小化期间 UI 帧工作停止，恢复不批量追帧；7 分钟 watchdog、外层 8 分钟 Join 为失败保护。未传该参数仍是原有短测，现有 CI 入口不自动启用长测。
+
+JSON 的帧间隔统计来自近期、相互重叠的呈现历史，不是完整阶段分布，也不能把各次 median／P95 拼成整段直方图。阶段通过只说明固定条件下的生命周期与进度约束，不设最低 FPS，不能据此证明随机掉帧根因已定位。另行记录提交、架构、GPU／驱动、显示刷新率、请求与实际后端、原生库摘要，并将 x64 本机与 8cx Gen 3 ARM64 的匹配架构实测分开。测试使用 Demo，不连接真实耳机；只加载库的 ABI 检查、Avalonia compositor GPU 字符串及模型首帧加载日志都不是持续 Filament FPS 或硬件兼容性证据。
+
+### 本轮本机验证与未闭合项（2026-11-04）
+
+Windows offline profile 最终收尾重跑的 22 个入口全部通过，其中 App 为 189 项、Host 为 132 项、ModelPreview 为 180 项；主界面／设备管理器／校准组件的原生窗口退出回归分别为 10／8／11 项通过。Vulkan／OpenGL 默认短测各 76 项通过。这些离线与短测结果不替代下述持续失焦等长测，也不连接真实耳机。
+
+本机为 Windows x64、NVIDIA RTX 2060，WMI 报告刷新率 144 Hz、驱动版本 `32.0.16.1742`；OpenGL 原生日志为 `4.5 NVIDIA 617.42`。本次 Vulkan 路径实际为 Mesa Dozen 26.3 over D3D12，不能描述为原生 NVIDIA Vulkan 驱动验证或与之等同的性能测试。选定的 ABI 2 原生输入 DLL 摘要前缀为 `db1b10aa...`，已通过 `RequireCurrent`；完整摘要、真实导出核对和本机验证记录索引位于 `artifacts/hero-throttle-removal-20261104/`（含 `native-input-review.json`），仅本机保存、不随普通 clone 提供。
+
+Vulkan 长测只有自转及拖动后惯性／自转恢复两段各至少 30 s 通过。辅助窗口安全命中／真实前台门未满足，独立前台诊断确认是 Windows `LockApp`；该次 `InputSent=false`，没有向锁屏或第三方窗口发送输入，也未绕过锁屏。不能据此宣称 8 段长测通过。OpenGL 长测未执行；剩余长测场景及 8cx Gen 3 的匹配架构实机验证仍待用户解锁后另行复验，随机帧率波动的硬件根因仍未证明。
 
 ## 模型加载、预读与计时
 

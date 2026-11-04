@@ -93,21 +93,29 @@ internal static class SmoothScrollingTests
     {
         var content = Rows(100); var target = content.Children[70];
         var scroll = Viewer(content); SmoothScrolling.Attach(scroll);
-        AnimationYieldTriggers.AttachScroll(scroll);
+        long cleanupTime = 1_000;
+        int cleanupRequests = 0;
+        using var cleanup = ArtworkCleanupTriggers.BeginTestScope(() => cleanupTime, () => cleanupRequests++);
+        ArtworkCleanupTriggers.AttachScroll(scroll);
         var window = WindowFor(scroll);
         try
         {
             window.Show(); await PumpAsync(window, 100);
             Wheel(window, scroll, -1);
             await PumpAsync(window, 30);
-            Check(AnimationYield.Active, "Smooth offsets still pulse the decorative-animation yield through ScrollChanged.");
+            Check(ArtworkCleanupTriggers.HasPendingCleanup && cleanupRequests == 0,
+                "Smooth offsets schedule delayed cleanup without changing artwork animation cadence.");
             var single = await SettleAsync(window, scroll);
             double singleFinal = scroll.Offset.Y;
             Check(singleFinal > 1 && single.Any(value => value.Y > .1 && value.Y < singleFinal - .1)
                 && single.Select(value => Math.Round(value.Y, 2)).Distinct().Count() >= 3,
                 "One wheel notch produces several intermediate offsets before it settles.", new { singleFinal });
-            await PumpAsync(window, (int)AnimationYieldTriggers.ScrollPulse.TotalMilliseconds + 80);
-            Check(!AnimationYield.Active, "The decorative-animation yield releases after smooth scrolling settles.");
+            cleanupTime += (long)ArtworkCleanupTriggers.ScrollDelay.TotalMilliseconds - 1;
+            ArtworkCleanupTriggers.FlushPendingForTests();
+            Check(cleanupRequests == 0, "Scroll cleanup waits for its quiet-period deadline.");
+            cleanupTime++; ArtworkCleanupTriggers.FlushPendingForTests();
+            Check(cleanupRequests == 1 && !ArtworkCleanupTriggers.HasPendingCleanup,
+                "Settled scrolling requests cleanup once, independently of artwork scheduling.");
 
             scroll.Offset = default; await PumpAsync(window, 60);
             for (int index = 0; index < 3; index++) { Wheel(window, scroll, -1); await PumpAsync(window, 12); }

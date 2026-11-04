@@ -124,16 +124,59 @@ internal static class AnimatedWebpTests
             }
             container.IsVisible = false; Dispatcher.UIThread.RunJobs();
             Check(!animation.AnimationActive, "Hidden ancestors pause the product animation.");
-            container.IsVisible = true; Dispatcher.UIThread.RunJobs();
-            Check(animation.AnimationActive, "Showing the product resumes without reacquiring its source.");
+            await CheckPausedAsync("a hidden ancestor", () => container.IsVisible = true);
             window.WindowState = WindowState.Minimized; Dispatcher.UIThread.RunJobs();
             Check(!animation.AnimationActive, "Minimizing the window pauses animation.");
-            window.WindowState = WindowState.Normal; Dispatcher.UIThread.RunJobs();
-            Check(animation.AnimationActive, "Restoring the window resumes animation.");
+            await CheckPausedAsync("a minimized window", () => window.WindowState = WindowState.Normal);
+            window.Hide(); Dispatcher.UIThread.RunJobs();
+            await CheckPausedAsync("a hidden window", window.Show);
+            artwork.Width = artwork.Height = 0; Dispatcher.UIThread.RunJobs();
+            await DrawForAsync(60);
+            Check(!animation.AnimationActive, "A zero-sized WebP viewport pauses its timeline and decoding.");
+            long emptyFrames = animation.RenderedFrameCount;
+            await DrawForAsync(160);
+            Check(animation.RenderedFrameCount == emptyFrames, "A zero-sized WebP viewport does not draw frames.");
+            artwork.Width = artwork.Height = 160; Dispatcher.UIThread.RunJobs();
+            await PumpAsync(() =>
+            {
+                using var frame = window.CaptureRenderedFrame();
+                return animation.RenderedFrameCount > emptyFrames;
+            });
+            Check(acquired == 1 && released == 0, "Restoring WebP visibility and viewport retains its original source lease.");
             window.Content = null; Dispatcher.UIThread.RunJobs();
             await PumpAsync(() => { using var frame = window.CaptureRenderedFrame(); return released == acquired; });
             Check(acquired == 1 && released == 1 && !animation.AnimationActive && !animation.AnimationLoaded,
                 "Detaching releases the codec and its package lease once.");
+            long detachedFrames = animation.RenderedFrameCount;
+            await DrawForAsync(160);
+            Check(animation.RenderedFrameCount == detachedFrames, "An unloaded WebP stops actual compositor draws.");
+
+            async Task DrawForAsync(int milliseconds)
+            {
+                long until = Environment.TickCount64 + milliseconds;
+                do
+                {
+                    using var frame = window.CaptureRenderedFrame();
+                    await Task.Delay(10); Dispatcher.UIThread.RunJobs();
+                } while (Environment.TickCount64 < until);
+            }
+            async Task CheckPausedAsync(string reason, Action resume)
+            {
+                Check(!animation.AnimationActive, $"WebP pauses for {reason}.");
+                // A decode already in flight may publish its final frame once after the pause.
+                await DrawForAsync(60);
+                long pausedFrames = animation.RenderedFrameCount;
+                await DrawForAsync(160);
+                Check(animation.RenderedFrameCount == pausedFrames, $"WebP stops actual draws for {reason}.");
+                resume(); Dispatcher.UIThread.RunJobs();
+                await PumpAsync(() =>
+                {
+                    using var frame = window.CaptureRenderedFrame();
+                    return animation.RenderedFrameCount > pausedFrames;
+                });
+                Check(animation.AnimationActive && acquired == 1 && released == 0,
+                    $"WebP resumes from {reason} without loading a second source.");
+            }
         }
         finally { window.Close(); }
     }

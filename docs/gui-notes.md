@@ -59,6 +59,8 @@ macOS 背景使用原生 NSVisualEffectView Blur，按窗口实际协商的透�
 
 左侧产品区的加载状态统一使用居中的 48 px 不定进度环（`HeroLoadingIndicator`），不显示文字。适用于首次查找或下载设备美术、位图解码、Lottie 与动态 WebP 加载、3D 模型加载直至首帧呈现。进度环在加载开始 200 ms 后才出现，较快的解码不会闪现；只在窗口显示且未最小化、自身实际可见时转动，离开视觉树、隐藏或最小化时停止。带 detail 海报的 Lottie／WebP 不显示进度环，仍在 250 ms 后显示海报（海报本身解码时显示进度环），以免进度环与海报相继闪现。首次美术查找失败后退回通用耳机图标，后续重试期间不再显示进度环。3D 加载失败时显示原有的失败说明文字。模型加载提速的 Windows 交接见[交接书](research/model-loading-handoff-2026-10-23.md)。
 
+产品区所有动效不再因窗口失焦、空闲／非交互、滚动或设置展开自动降低帧率。3D 继续遵守用户选择的 30／60／无限制；Lottie、WebP 保留原始时间轴、循环及结束状态。隐藏、最小化、无效视口与卸载仍停止工作，恢复不批量追赶补帧；这与“后台无限循环”不同。GPU 资源清理保留独立事件合并及 10 s／30 s 门，不再向动效发送降档消息。对应测试入口与 x64／8cx Gen 3 实机验证边界见[模型调度回归](model-rendering.md#调度回归与实机复验)，不能据此宣称用户反馈的全部随机帧率波动已定位或修复。
+
 上述路径是图像采用时的原始出处。2026-10-08 归档后的访问入口为 [主界面参考](../research/screenshots/main-page.png)、[设置参考](../research/screenshots/headphone-configs.png)、[X4 产品大图](../research/screenshots/x4-pods-with-earphones.png) 与 [X4 底栏图标](../research/screenshots/x4-both-earphones.png)；文件仍仅在本地保存，组织规则见 [研究资料归档](research/README.md)。
 
 早期按蓝牙名称识别 X4 的规则已在 0.8.1 移除。当前外观只依据实际产品 ID 与协议颜色：来源是 Host 按设备持久化的外观提示（`UiDevice.ProductId/Color`），以及所选设备会话中的实时值，不从蓝牙名称推断。美术目录中的已知值只增不减，资源版本号前进时在后台重新解析，内容相同时保留原渲染控件；没有资源服务的预览模式仍按产品 ID 显示内嵌的 X4 PNG。外观提示只影响显示，不授予控制能力。详见 [外观资源持久化](artwork-persistence.md)；应用设置已改为设置卡片，并提供“重新下载在线资源”。

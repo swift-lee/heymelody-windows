@@ -38,18 +38,37 @@ if (args.FirstOrDefault() == "--native-model-settings-smoke")
 if (args is ["--native-startup-smoke"]) return NativeStartupSmoke.Run();
 if (args is ["--native-backend-smoke"]) return NativeBackendSmoke.Run();
 if (args.FirstOrDefault() == "--native-model-loading-benchmark") return ModelLoadingBenchmark.Run(args);
+if (args.FirstOrDefault() == "--native-demo-cli-tests")
+{
+    if (args is not ["--native-demo-cli-tests"])
+    {
+        Console.Error.WriteLine("Usage: --native-demo-cli-tests");
+        return 2;
+    }
+    int count = NativeDemoSmokeCommandLineTests.Run();
+    Console.WriteLine(JsonSerializer.Serialize(new { passed = count, success = true, windowsStarted = 0, nativeBluetoothCalls = 0 }));
+    return 0;
+}
 if (args.FirstOrDefault() == "--native-demo-smoke")
 {
-    FilamentBackend backend = FilamentBackend.Vulkan;
-    string? nativeDemoOutput = null;
-    for (int index = 1; index < args.Length; index++)
+    if (!NativeDemoSmokeOptions.TryParse(args, out var options, out var error))
     {
-        if (args[index] == "--backend" && ++index < args.Length && args[index] is "vulkan" or "opengl")
-            backend = args[index] == "opengl" ? FilamentBackend.OpenGL : FilamentBackend.Vulkan;
-        else if (args[index] == "--output-dir" && ++index < args.Length) nativeDemoOutput = Path.GetFullPath(args[index]);
-        else { Console.Error.WriteLine("Usage: --native-demo-smoke [--backend vulkan|opengl] [--output-dir path]"); return 2; }
+        Console.Error.WriteLine(error);
+        Console.Error.WriteLine(NativeDemoSmokeOptions.Usage);
+        return 2;
     }
-    return NativeDemoSmoke.Run(nativeDemoOutput, backend);
+    return NativeDemoSmoke.Run(options.Output, options.Backend, options.ActivityRegression);
+}
+if (args.Contains("--activity-regression", StringComparer.Ordinal))
+{
+    Console.Error.WriteLine(NativeDemoSmokeOptions.Usage);
+    return 2;
+}
+if (args.FirstOrDefault() == "--animation-tests"
+    && args is not ["--animation-tests"] and not ["--animation-tests", "--output-dir", _])
+{
+    Console.Error.WriteLine("Usage: --animation-tests [--output-dir path]");
+    return 2;
 }
 
 RenderingPolicyTests.Run();
@@ -63,6 +82,7 @@ string output = args.Length == 2 && args[0] == "--output-dir" ? Path.GetFullPath
     : args is ["--rendering-settings-tests", "--output-dir", var renderSettingsOutput] ? Path.GetFullPath(renderSettingsOutput)
     : args is ["--device-bar-tests", "--output-dir", var deviceBarOutput] ? Path.GetFullPath(deviceBarOutput)
     : args is ["--ui-layout-helper-tests", "--output-dir", var layoutHelperOutput] ? Path.GetFullPath(layoutHelperOutput)
+    : args is ["--animation-tests", "--output-dir", var animationOutput] ? Path.GetFullPath(animationOutput)
     : Path.Combine(Directory.GetCurrentDirectory(), "artifacts", "avalonia-ui-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8]);
 Directory.CreateDirectory(output);
 var receipts = new List<object>();
@@ -73,6 +93,12 @@ DeviceModelView.DefaultFactoryOverride = new RecordingFilamentRendererFactory();
 using var session = HeadlessUnitTestSession.StartNew(typeof(PreviewBootstrap));
 try
 {
+    if (args is ["--animation-tests"] or ["--animation-tests", "--output-dir", _])
+    {
+        int count = DeviceVisualTests.RunAnimations(session) + AnimatedWebpTests.Run(session, output, receipts);
+        Console.WriteLine(JsonSerializer.Serialize(new { passed = count, success = true, nativeBluetoothCalls = 0, screenshots = receipts, output }));
+        return 0;
+    }
     if (args is ["--default-icon-theme-tests"])
     {
         int count = DefaultIconThemeTests.Run(session);
@@ -105,7 +131,7 @@ try
     }
     if (args is ["--model-loading-tests"] or ["--model-loading-tests", "--output-dir", _])
     {
-        int count = FrameLoopTests.Run(session, output);
+        int count = NativeDemoSmokeCommandLineTests.Run() + FrameLoopTests.Run(session, output);
         count += VerifiedModelCacheTests.RunAsync(output).GetAwaiter().GetResult();
         session.Dispatch<bool>(async () =>
         {
@@ -263,15 +289,17 @@ try
     passed += typographyChecks;
     var frameLoopChecks = FrameLoopTests.Run(session, output);
     passed += frameLoopChecks;
+    var nativeDemoCliChecks = NativeDemoSmokeCommandLineTests.Run();
+    passed += nativeDemoCliChecks;
     var gestureChecks = DeviceGestureTests.Run(session);
     passed += gestureChecks;
-    // 54 = 21 layout/bound-control + 9 interaction + 11 visual + 10 artwork + 3 rendering-preference cases.
-    int expected = (5 * 2 * 2) + 1 + 9 + 11 + 10 + 3
+    // 55 = 21 layout/bound-control + 9 interaction + 12 visual + 10 artwork + 3 rendering-preference cases.
+    int expected = (5 * 2 * 2) + 1 + 9 + 12 + 10 + 3
         + (HeyMelody.Platform.DesktopCapabilities.SupportsHeadsetControl ? 9 : 7)
         + startupChecks + settingsManagementChecks
         + demoChecks + renderingChecks + animationChecks + layoutChecks + selectionChecks
         + gameAudioChecks + typographyChecks + iconChecks + defaultIconChecks
-        + frameLoopChecks + gestureChecks + ancFeatureChecks + layoutHelperChecks;
+        + frameLoopChecks + nativeDemoCliChecks + gestureChecks + ancFeatureChecks + layoutHelperChecks;
     Check(passed == expected, $"Every UI scenario and interaction case must finish: passed={passed}, expected={expected}, "
         + $"startupChecks={startupChecks}, settingsManagementChecks={settingsManagementChecks}");
     var report = new { schemaVersion = 1, version = AppVersion.Display, passed, success = true, nativeBluetoothCalls = 0,

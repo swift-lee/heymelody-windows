@@ -106,7 +106,7 @@ public class AnimatedWebpView(ILottieSource source, Func<Control?>? fallback = n
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
-        if (e.Property == BoundsProperty) Resize();
+        if (e.Property == BoundsProperty) { Resize(); RefreshActivity(); }
         if (e.Property == IsVisibleProperty) RefreshActivity();
     }
     protected override Size MeasureOverride(Size availableSize) => Content is not null
@@ -115,7 +115,11 @@ public class AnimatedWebpView(ILottieSource source, Func<Control?>? fallback = n
     private void Resize() { if (_composition is not null) _composition.Size = new Vector2((float)Bounds.Width, (float)Bounds.Height); }
     private void RefreshActivity()
     {
-        AnimationActive = _attached && IsEffectivelyVisible && _window is { IsVisible: true, WindowState: not WindowState.Minimized };
+        bool active = _attached && _composition is not null && Bounds.Width > 0 && Bounds.Height > 0
+            && double.IsFinite(Bounds.Width) && double.IsFinite(Bounds.Height) && IsEffectivelyVisible
+            && _window is { IsVisible: true, WindowState: not WindowState.Minimized };
+        if (active == AnimationActive) return;
+        AnimationActive = active;
         _composition?.SendHandlerMessage(AnimationActive ? Command.Play : Command.Pause);
     }
 

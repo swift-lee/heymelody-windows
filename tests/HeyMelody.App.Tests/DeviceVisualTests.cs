@@ -22,10 +22,18 @@ internal static class DeviceVisualTests
         var preparationTests = RunSelectedModelPreparation(session);
         Run("X4 product PNG uses independent presentation controls and shared bitmap data", PngAsync);
         Run("active renderer leases outlive catalog replacement and release exactly once", LeaseAsync);
+        var animationTests = RunAnimations(session);
+        Run("the product area shows a progress ring instead of text while artwork resolves or decodes", LoadingRingAsync);
+        return 6 + preparationTests + animationTests;
+        void Run(string label, Func<Task> test)
+        { session.Dispatch<bool>(async () => { await test(); return true; }, CancellationToken.None).GetAwaiter().GetResult(); Console.WriteLine("PASS " + label); }
+    }
+    internal static int RunAnimations(HeadlessUnitTestSession session)
+    {
         Run("Skottie renders embedded and package images and rejects escaped paths", LottieAsync);
         Run("original hearing Lottie renders a frame, pauses while hidden, and releases on detach", OriginalLottieAsync);
-        Run("the product area shows a progress ring instead of text while artwork resolves or decodes", LoadingRingAsync);
-        return 8 + preparationTests;
+        Run("Lottie keeps drawing every callback during focus, scroll and expander activity and pauses safely", LottieSchedulingAsync);
+        return 3;
         void Run(string label, Func<Task> test)
         { session.Dispatch<bool>(async () => { await test(); return true; }, CancellationToken.None).GetAwaiter().GetResult(); Console.WriteLine("PASS " + label); }
     }
@@ -379,6 +387,129 @@ internal static class DeviceVisualTests
                 "Detaching disposes native Skottie objects and releases the active package lease once.");
         }
         finally { window.Close(); }
+    }
+    private static async Task LottieSchedulingAsync()
+    {
+        var bundled = new BundledResourceStore();
+        var asset = bundled.FindNamedAsset("melody_ui_gold_hearing_detecting_guide")
+            ?? throw new InvalidOperationException("Original hearing Lottie is missing from the installed resource bundle.");
+        string path = bundled.FullPath(asset);
+        var animationClock = new ManualAnimationClock();
+        long cleanupMilliseconds = 0;
+        int cleanupCalls = 0, acquired = 0, released = 0;
+        var source = new ArtworkFile(new Uri(path), Path.GetDirectoryName(path)!, asset.Sha256,
+            () => { Interlocked.Increment(ref acquired); return new TestLease(() => Interlocked.Increment(ref released)); });
+        var animation = new LottieView(source)
+        {
+            Width = 128, Height = 128,
+            AnimationClockForTests = animationClock.Read
+        };
+        var container = new Border { Child = animation };
+        var scroll = new ScrollViewer { Height = 48, Content = new Border { Height = 400 } };
+        var expander = new FASettingsExpander { Header = "Animation activity" };
+        expander.Items.Add(new FASettingsExpanderItem { Content = new Border { Height = 16 } });
+        var window = new Window
+        {
+            Content = new StackPanel { Children = { container, scroll, expander } }, Width = 240, Height = 300
+        };
+        using var cleanup = ArtworkCleanupTriggers.BeginTestScope(() => cleanupMilliseconds, () => cleanupCalls++);
+        ArtworkCleanupTriggers.RegisterExpanders();
+        ArtworkCleanupTriggers.AttachScroll(scroll);
+        ArtworkCleanupTriggers.AttachWindow(window);
+        try
+        {
+            window.Show(); Dispatcher.UIThread.RunJobs();
+            await PumpUntilAsync(() => animation.AnimationLoaded || animation.LoadError is not null, "The scheduling animation loads.");
+            Check(animation.AnimationLoaded && animation.AnimationActive, "The scheduling animation starts with its original resource.");
+            await DrawStepsAsync(4);
+            await CheckCadenceAsync("an active window");
+
+            HeadlessWindowActivity.SetActive(window, false);
+            Check(cleanupCalls > 0, "The deactivation event still requests cleanup without a playback hold.");
+            await CheckCadenceAsync("an inactive window");
+            HeadlessWindowActivity.SetActive(window, true);
+            await CheckCadenceAsync("a reactivated window");
+
+            scroll.Offset = new Vector(0, 80); Dispatcher.UIThread.RunJobs();
+            Check(scroll.Offset.Y > 0 && ArtworkCleanupTriggers.HasPendingCleanup, "Real scrolling schedules cleanup only.");
+            await CheckCadenceAsync("scroll activity");
+            expander.IsExpanded = true; Dispatcher.UIThread.RunJobs();
+            Check(ArtworkCleanupTriggers.HasPendingCleanup, "A real expander schedules cleanup only.");
+            await CheckCadenceAsync("an opening expander");
+            expander.IsExpanded = false; Dispatcher.UIThread.RunJobs();
+            await CheckCadenceAsync("a closing expander");
+            cleanupMilliseconds += 1000;
+            ArtworkCleanupTriggers.FlushPendingForTests();
+            await CheckCadenceAsync("completion of scheduled cleanup");
+
+            container.IsVisible = false; Dispatcher.UIThread.RunJobs();
+            await CheckPausedAsync("a hidden ancestor", () => container.IsVisible = true);
+            window.WindowState = WindowState.Minimized; Dispatcher.UIThread.RunJobs();
+            await CheckPausedAsync("a minimized window", () => window.WindowState = WindowState.Normal);
+            window.Hide(); Dispatcher.UIThread.RunJobs();
+            await CheckPausedAsync("a hidden window", window.Show);
+
+            animation.Width = animation.Height = 0; Dispatcher.UIThread.RunJobs();
+            await DrawStepsAsync(3);
+            Check(!animation.AnimationActive, "A zero-sized viewport pauses the Lottie timeline.");
+            long emptyFrames = animation.RenderedFrameCount;
+            await DrawStepsAsync(8);
+            Check(animation.RenderedFrameCount == emptyFrames, "A zero-sized viewport does not draw Lottie frames.");
+            animation.Width = animation.Height = 128; Dispatcher.UIThread.RunJobs();
+            await CheckCadenceAsync("a restored viewport");
+
+            window.Content = null; Dispatcher.UIThread.RunJobs();
+            await DrawStepsAsync(4);
+            await PumpUntilAsync(() => released == acquired, "The detached animation releases its native source.");
+            long detachedFrames = animation.RenderedFrameCount;
+            await DrawStepsAsync(8);
+            Check(animation.RenderedFrameCount == detachedFrames && !animation.AnimationActive && !animation.AnimationLoaded
+                && acquired == 1 && released == 1, "Detaching stops actual draws and releases the unchanged source exactly once.");
+        }
+        finally { animation.AnimationClockForTests = null; window.Close(); }
+
+        async Task DrawStepsAsync(int count)
+        {
+            for (int index = 0; index < count; index++)
+            {
+                animationClock.Advance(TimeSpan.TicksPerSecond / 120);
+                AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+                Dispatcher.UIThread.RunJobs();
+                using var capture = window.CaptureRenderedFrame();
+                await Task.Yield();
+                Dispatcher.UIThread.RunJobs();
+            }
+        }
+        async Task CheckCadenceAsync(string reason)
+        {
+            const int steps = 24;
+            long before = animation.RenderedFrameCount;
+            await DrawStepsAsync(steps);
+            long drawn = animation.RenderedFrameCount - before;
+            Check(drawn >= steps - 2, $"Lottie draws on the controlled 120 Hz callbacks during {reason}: {drawn} actual draws.");
+        }
+        async Task CheckPausedAsync(string reason, Action resume)
+        {
+            Check(!animation.AnimationActive, $"Lottie stops playback for {reason}.");
+            await DrawStepsAsync(3);
+            long frames = animation.RenderedFrameCount;
+            double elapsed = animation.PresentedElapsedSeconds;
+            animationClock.Advance(TimeSpan.TicksPerSecond * 20);
+            await DrawStepsAsync(8);
+            Check(animation.RenderedFrameCount == frames, $"Lottie produces no actual draws for {reason}.");
+            resume(); Dispatcher.UIThread.RunJobs();
+            await DrawStepsAsync(2);
+            Check(animation.AnimationActive && animation.RenderedFrameCount > frames
+                && animation.PresentedElapsedSeconds - elapsed < .1,
+                $"Lottie resumes from {reason} without advancing through the hidden 20 seconds.");
+            Check(acquired == 1 && released == 0, "Visibility changes retain the same loaded source lease.");
+        }
+    }
+    private sealed class ManualAnimationClock
+    {
+        private long _ticks;
+        public TimeSpan Read() => TimeSpan.FromTicks(Interlocked.Read(ref _ticks));
+        public void Advance(long ticks) => Interlocked.Add(ref _ticks, ticks);
     }
     private static UiArtwork Art(string role) => new(Guid.NewGuid().ToString("N"), Path.GetFullPath("artwork-" + role + ".png"), "image", Path.GetFullPath("."), "", 1, 0);
     private static UiArtwork ModelArt(string name, char digest) => Art(name) with
