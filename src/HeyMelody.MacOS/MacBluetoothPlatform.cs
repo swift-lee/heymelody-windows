@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using HeyMelody.Diagnostics;
 using HeyMelody.Platform;
 
 namespace HeyMelody.MacOS;
@@ -43,6 +44,8 @@ public sealed class MacBluetoothPlatform : IBluetoothPlatform
                 throw new PlatformNotSupportedException("macOS 后台仅支持 Apple Silicon。");
             if (Interlocked.Exchange(ref _started, 1) == 0)
             {
+                DiagnosticLog.Info("macOS.Bluetooth", "adapter.start", "Starting the native macOS Bluetooth bridge.",
+                    new { bridgeVersion = NativeBluetooth.hm_bt_bridge_version() });
                 _self = GCHandle.Alloc(this);
                 try { NativeBluetooth.hm_bt_start(_callback, GCHandle.ToIntPtr(_self)); }
                 catch { _self.Free(); _started = 0; throw; }
@@ -70,7 +73,19 @@ public sealed class MacBluetoothPlatform : IBluetoothPlatform
     public async Task<IReadOnlyList<BluetoothCandidate>> EnumeratePairedAsync(CancellationToken token)
     {
         await StartAsync(token);
-        return (IReadOnlyList<BluetoothCandidate>)await ExecuteAsync(NativeBluetooth.hm_bt_enumerate, token);
+        DiagnosticLog.Debug("macOS.Bluetooth", "devices.enumeration-started", "Enumerating paired Classic Bluetooth devices.");
+        try
+        {
+            var candidates = (IReadOnlyList<BluetoothCandidate>)await ExecuteAsync(NativeBluetooth.hm_bt_enumerate, token);
+            DiagnosticLog.Debug("macOS.Bluetooth", "devices.enumerated", "Enumerated paired Classic Bluetooth devices.",
+                new { count = candidates.Count, connected = candidates.Count(candidate => candidate.Connected) });
+            return candidates;
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            DiagnosticLog.Error("macOS.Bluetooth", "devices.enumeration-failed", "Bluetooth device enumeration failed.", error);
+            throw;
+        }
     }
     public async Task<Stream> OpenControlChannelAsync(ulong address, IReadOnlyList<Guid> serviceIds, CancellationToken token)
     {
@@ -78,7 +93,20 @@ public sealed class MacBluetoothPlatform : IBluetoothPlatform
         if (serviceIds.Count == 0 || serviceIds.Any(x => x == Guid.Empty)) throw new ArgumentException("No valid control UUIDs.", nameof(serviceIds));
         await StartAsync(token);
         var ids = JsonSerializer.Serialize(serviceIds.Distinct());
-        return (Stream)await ExecuteAsync(id => NativeBluetooth.hm_bt_open(id, address, ids), token);
+        DiagnosticLog.Info("macOS.Bluetooth", "control.open.requested", "Resolving the configured RFCOMM control channel.",
+            new { serviceCount = serviceIds.Count });
+        try
+        {
+            var stream = (Stream)await ExecuteAsync(id => NativeBluetooth.hm_bt_open(id, address, ids), token);
+            DiagnosticLog.Info("macOS.Bluetooth", "control.opened", "The RFCOMM control channel is open.");
+            return stream;
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            DiagnosticLog.Error("macOS.Bluetooth", "control.failed", "The RFCOMM control channel could not be opened.", error,
+                new { serviceCount = serviceIds.Count });
+            throw;
+        }
     }
     internal async Task WriteAsync(long channel, ReadOnlyMemory<byte> bytes, CancellationToken token)
     {
@@ -141,6 +169,8 @@ public sealed class MacBluetoothPlatform : IBluetoothPlatform
                 var access = (BluetoothAccess)root.GetProperty("access").GetInt32();
                 bool? radio = root.GetProperty("radioAvailable").ValueKind == JsonValueKind.Null ? null : root.GetProperty("radioAvailable").GetBoolean();
                 Status = new(access, radio, AccessMessage(access));
+                DiagnosticLog.Info("macOS.Bluetooth", "adapter.status", "macOS Bluetooth authorization or radio state changed.",
+                    new { access = access.ToString(), radioAvailable = radio });
                 Publish(new BluetoothStatusChanged(Status)); return;
             }
             if (kind == 6) { Publish(new BluetoothCatalogChanged()); return; }
@@ -162,6 +192,27 @@ public sealed class MacBluetoothPlatform : IBluetoothPlatform
             }
             if (kind == 8) { Publish(new BluetoothSuspensionChanged(status != 0)); return; }
             if (kind == 9) { Publish(new BluetoothConnectionChanged(unchecked((ulong)channel), status != 0)); return; }
+            if (kind == 11)
+            {
+                try
+                {
+                    using var json = JsonDocument.Parse(bytes); var root = json.RootElement;
+                    string stage = root.TryGetProperty("stage", out var stageValue) ? stageValue.GetString() ?? "unknown" : "unknown";
+                    long endpoints = root.TryGetProperty("endpoints", out var endpointValue) ? endpointValue.GetInt64() : 0;
+                    int diagnosticChannel = root.TryGetProperty("channel", out var channelValue) ? channelValue.GetInt32() : 0;
+                    int diagnosticStatus = root.TryGetProperty("status", out var statusValue) ? statusValue.GetInt32() : 0;
+                    long elapsedMs = root.TryGetProperty("elapsedMs", out var elapsedValue) ? elapsedValue.GetInt64() : 0;
+                    string? source = root.TryGetProperty("source", out var sourceValue) ? sourceValue.GetString() : null;
+                    DiagnosticLog.Info("macOS.Bluetooth", "sdp." + stage, "macOS Bluetooth service discovery stage.",
+                        new { endpoints, channel = diagnosticChannel, status = diagnosticStatus, elapsedMs, source });
+                }
+                catch (Exception error)
+                {
+                    DiagnosticLog.Warning("macOS.Bluetooth", "sdp.diagnostic-failed",
+                        "A native macOS Bluetooth diagnostic event could not be decoded.", error);
+                }
+                return;
+            }
             if (!_operations.TryRemove(operation, out var completion))
             { if (kind == 2 && status == 0) NativeBluetooth.hm_bt_close(channel); return; }
             completing = completion;
@@ -200,7 +251,7 @@ public sealed class MacBluetoothPlatform : IBluetoothPlatform
         BluetoothAccess.Unsupported => "此 Mac 的蓝牙适配器不可用。",
         _ => null
     };
-    private static Exception Failure(int status) => status switch
+    internal static Exception Failure(int status) => status switch
     {
         -2 => new BluetoothDiscoveryException(BluetoothDiscoveryFailure.ServiceNotFound, "耳机未公布已配置的控制服务。"),
         -3 => new BluetoothDiscoveryException(BluetoothDiscoveryFailure.AmbiguousServices, "耳机公布了多个控制服务，无法安全选择。"),
@@ -209,6 +260,9 @@ public sealed class MacBluetoothPlatform : IBluetoothPlatform
         -6 => new BluetoothAccessException(BluetoothAccess.NotDetermined, AccessMessage(BluetoothAccess.NotDetermined)!),
         -7 => new BluetoothAccessException(BluetoothAccess.Unsupported, AccessMessage(BluetoothAccess.Unsupported)!),
         -8 => new IOException("蓝牙已关闭，请在系统设置中开启蓝牙。"),
+        -9 => new IOException("耳机控制服务查询超时，请确认耳机已连接且未被其他设备占用。"),
+        -10 => new IOException("耳机控制通道打开超时，可能正被其他设备占用；请关闭手机上的欢律 App 后重试。"),
+        -11 => new IOException("耳机控制通道被其他设备占用，请关闭手机上的欢律 App 后重试。"),
         _ => new IOException($"macOS 蓝牙操作失败（{status}）。")
     };
     public void Dispose()
@@ -216,6 +270,7 @@ public sealed class MacBluetoothPlatform : IBluetoothPlatform
         lock (_callbackGate)
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            DiagnosticLog.Info("macOS.Bluetooth", "adapter.stopped", "Stopping the native macOS Bluetooth bridge.");
             foreach (var stream in _channels.Values) stream.Complete(new ObjectDisposedException(nameof(MacBluetoothPlatform)));
             _channels.Clear();
             foreach (var pending in _operations.Values) pending.TrySetException(new ObjectDisposedException(nameof(MacBluetoothPlatform)));

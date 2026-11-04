@@ -41,6 +41,7 @@ TX 分别记录提交意图和实际写入：`request.tx` 是待发送整包，`
 ## 排障线索与边界
 
 - `0x0114` 等查询：检查 TX、解码前 RX、命令与序号匹配、兼容布局、帧或字段解析异常、超时及连接结束。帧失败与字段失败分开记录；接收循环保存 pending 上下文，只有确证匹配才关联操作。
+- macOS 蓝牙：`macOS.Bluetooth/adapter.status` 区分授权与蓝牙开关；`sdp.cached`／`sdp.query`／`sdp.resolved`／`sdp.opened`／`sdp.failed` 记录端点数量、通道号、来源（缓存或完整查询）、耗时和状态（-2 未命中、-3 歧义、-9 查询超时、-10 打开超时、-11 通道被占用），不记录蓝牙地址。
 - Vulkan／OpenGL：检查实际 DXGI 候选及选择、驱动查询、用户设置、库与 probe 哈希、探测缓存、完整 stdout／stderr、退出码、超时、原生设备和创建返回码，再看界面提示原因。Avalonia 适配器与 Filament 实际设备分别记录；出现 OpenGL 建议不等于已证明该显卡不支持 Vulkan。
 - 校准、设置和试听：检查开始、阶段、提交、ACK、回读、取消和清理。日志记录不增加查询、SET、重试或设备接收通道。
 

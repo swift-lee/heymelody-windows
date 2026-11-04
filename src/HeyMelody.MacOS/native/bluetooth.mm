@@ -43,12 +43,30 @@ typedef void (*HMCallback)(void *, int, int64_t, int64_t, int, const void *, siz
 @property(nonatomic,strong) IOBluetoothRFCOMMChannel *channel;
 @property(nonatomic) BOOL closed;
 @property(nonatomic) BOOL opened;
+@property(nonatomic) BOOL openStarted;
+@property(nonatomic) BOOL sdpPending;
+@property(nonatomic) BOOL openPending;
+@property(nonatomic) BOOL fromCache;
+@property(nonatomic) BluetoothRFCOMMChannelID selectedChannel;
+@property(nonatomic) NSTimeInterval openRequestedAt;
+@property(nonatomic,strong) dispatch_source_t sdpTimer;
+@property(nonatomic,strong) dispatch_source_t rfcommTimer;
 @property(nonatomic,strong) NSMutableArray<NSData *> *earlyData;
 @property(nonatomic) NSUInteger earlyBytes;
 @property(nonatomic,strong) NSData *writeData;
 @property(nonatomic) NSUInteger writeOffset;
 @property(nonatomic) NSUInteger writeChunk;
 @property(nonatomic) int64_t writeOperation;
+- (void)beginOpen;
+- (void)beginSdpFallback;
+- (void)openChannel:(BluetoothRFCOMMChannelID)channelID;
+- (void)armSdpTimer;
+- (void)armRfcommTimer;
+- (void)cancelSdpTimer;
+- (void)cancelRfcommTimer;
+- (void)detachChannel;
+- (void)emitDiagnostic:(NSString *)stage status:(int)status endpoints:(NSUInteger)endpoints
+    channel:(BluetoothRFCOMMChannelID)channel source:(NSString *)source;
 - (void)failOpen:(int)status;
 - (void)close:(int)status;
 - (void)writeNext;
@@ -67,6 +85,45 @@ static NSString *AddressString(uint64_t address) {
     NSMutableArray *parts=[NSMutableArray array];
     for (NSUInteger i=0;i<12;i+=2) [parts addObject:[hex substringWithRange:NSMakeRange(i,2)]];
     return [parts componentsJoinedByString:@"-"];
+}
+static BluetoothRFCOMMChannelID HMChannelID(IOBluetoothSDPServiceRecord *service) {
+    BluetoothRFCOMMChannelID channel=0;
+    if (!service || [service getRFCOMMChannelID:&channel] != kIOReturnSuccess) return 0;
+    return channel >= 1 && channel <= 30 ? channel : 0;
+}
+// Reads the system's cached SDP records. The UUID-filtered performSDPQuery variant is
+// a no-op on macOS 12+, so this must not depend on it having populated -services.
+static NSArray<NSDictionary<NSString *, NSNumber *> *> *HMResolveEndpoints(IOBluetoothDevice *device,
+    NSArray<IOBluetoothSDPUUID *> *uuids) {
+    NSMutableDictionary<NSString *, NSNumber *> *endpoints=[NSMutableDictionary dictionary];
+    NSArray<IOBluetoothSDPServiceRecord *> *services=device.services;
+    for (IOBluetoothSDPUUID *uuid in uuids) {
+        BOOL found=NO;
+        for (IOBluetoothSDPServiceRecord *service in services) {
+            if (![service matchesUUIDArray:@[uuid]]) continue;
+            BluetoothRFCOMMChannelID channel=HMChannelID(service);
+            if (!channel) continue;
+            endpoints[[NSString stringWithFormat:@"%@:%u",uuid,channel]]=@(channel);
+            found=YES;
+        }
+        if (found) continue;
+        // getServiceRecordForUUID: is synchronous and may expose the system cache even
+        // when -services has not been populated for this process.
+        IOBluetoothSDPServiceRecord *service=[device getServiceRecordForUUID:uuid];
+        BluetoothRFCOMMChannelID channel=HMChannelID(service);
+        if (channel) endpoints[[NSString stringWithFormat:@"%@:%u",uuid,channel]]=@(channel);
+    }
+    NSMutableArray<NSDictionary<NSString *, NSNumber *> *> *result=[NSMutableArray arrayWithCapacity:endpoints.count];
+    [endpoints enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSNumber *channel, BOOL *stop) {
+        (void)stop;
+        NSMutableDictionary *endpoint=[NSMutableDictionary dictionary];
+        endpoint[@"key"]=key; endpoint[@"channel"]=channel;
+        [result addObject:endpoint];
+    }];
+    return result;
+}
+static int HMOpenStatus(IOReturn status) {
+    return status == kIOReturnExclusiveAccess || status == kIOReturnBusy ? -11 : (int)status;
 }
 @implementation HMBluetooth
 - (instancetype)init {
@@ -195,6 +252,132 @@ static NSString *AddressString(uint64_t address) {
 @implementation HMChannel
 - (void)remoteNameRequestComplete:(IOBluetoothDevice *)device status:(IOReturn)status { }
 - (void)connectionComplete:(IOBluetoothDevice *)device status:(IOReturn)status { }
+- (NSString *)sourceName { return self.fromCache ? @"cache" : @"sdp"; }
+- (void)emitDiagnostic:(NSString *)stage status:(int)status endpoints:(NSUInteger)endpoints
+    channel:(BluetoothRFCOMMChannelID)channel source:(NSString *)source {
+    NSMutableDictionary *data=[NSMutableDictionary dictionary];
+    data[@"stage"]=stage;
+    data[@"endpoints"]=@(endpoints);
+    if (channel) data[@"channel"]=@(channel);
+    if (status) data[@"status"]=@(status);
+    if (source) data[@"source"]=source;
+    data[@"elapsedMs"]=@(self.openRequestedAt > 0
+        ? (int64_t)(([NSDate date].timeIntervalSince1970-self.openRequestedAt)*1000) : 0);
+    [self.owner emit:11 operation:self.identifier channel:self.identifier status:status data:JSON(data)];
+}
+- (void)cancelSdpTimer {
+    dispatch_source_t timer=self.sdpTimer;
+    if (!timer) return;
+    self.sdpTimer=nil; dispatch_source_cancel(timer);
+}
+- (void)cancelRfcommTimer {
+    dispatch_source_t timer=self.rfcommTimer;
+    if (!timer) return;
+    self.rfcommTimer=nil; dispatch_source_cancel(timer);
+}
+- (void)detachChannel {
+    IOBluetoothRFCOMMChannel *channel=self.channel;
+    self.channel=nil;
+    if (!channel) return;
+    [channel setDelegate:nil]; [channel closeChannel];
+}
+- (void)armSdpTimer {
+    [self cancelSdpTimer];
+    dispatch_source_t timer=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,dispatch_get_main_queue());
+    dispatch_source_set_timer(timer,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(5*NSEC_PER_SEC)),DISPATCH_TIME_FOREVER,0);
+    __weak HMChannel *weakSelf=self;
+    dispatch_source_set_event_handler(timer,^{
+        HMChannel *live=weakSelf;
+        if (!live || live.closed || !live.sdpPending) return;
+        live.sdpPending=NO;
+        [live cancelSdpTimer];
+        // Keep queryLifetime: IOBluetooth may still deliver sdpQueryComplete, and the
+        // delegate target must outlive that callback even after this operation failed.
+        [live emitDiagnostic:@"failed" status:-9 endpoints:0 channel:0 source:@"query"];
+        [live failOpen:-9];
+    });
+    self.sdpTimer=timer;
+    dispatch_resume(timer);
+}
+- (void)armRfcommTimer {
+    [self cancelRfcommTimer];
+    dispatch_source_t timer=dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,0,0,dispatch_get_main_queue());
+    dispatch_source_set_timer(timer,dispatch_time(DISPATCH_TIME_NOW,(int64_t)(5*NSEC_PER_SEC)),DISPATCH_TIME_FOREVER,0);
+    __weak HMChannel *weakSelf=self;
+    dispatch_source_set_event_handler(timer,^{
+        HMChannel *live=weakSelf;
+        if (!live || live.closed || !live.openPending || live.opened) return;
+        live.openPending=NO;
+        [live cancelRfcommTimer];
+        [live detachChannel];
+        [live emitDiagnostic:@"failed" status:-10 endpoints:1 channel:live.selectedChannel source:live.sourceName];
+        [live failOpen:-10];
+    });
+    self.rfcommTimer=timer;
+    dispatch_resume(timer);
+}
+- (void)beginOpen {
+    if (self.closed || self.openStarted) return;
+    self.openStarted=YES;
+    self.openRequestedAt=[NSDate date].timeIntervalSince1970;
+    NSArray<NSDictionary<NSString *, NSNumber *> *> *endpoints=HMResolveEndpoints(self.device,self.uuids);
+    [self emitDiagnostic:@"cached" status:0 endpoints:endpoints.count channel:0 source:@"cache"];
+    if (endpoints.count == 1) {
+        self.fromCache=YES;
+        self.selectedChannel=(BluetoothRFCOMMChannelID)[endpoints[0][@"channel"] unsignedShortValue];
+        [self openChannel:self.selectedChannel];
+        return;
+    }
+    // Match the Windows path: a missing or non-unique cached result is refreshed
+    // over the air before uniqueness is enforced.
+    [self beginSdpFallback];
+}
+- (void)beginSdpFallback {
+    if (self.closed || self.sdpPending || self.opened) return;
+    self.fromCache=NO;
+    self.sdpPending=YES;
+    self.queryLifetime=self;
+    [self armSdpTimer];
+    [self emitDiagnostic:@"query" status:0 endpoints:0 channel:0 source:@"sdp"];
+    IOReturn status=[self.device performSDPQuery:self];
+    if (status != kIOReturnSuccess) {
+        [self cancelSdpTimer];
+        self.sdpPending=NO;
+        // No callback is delivered after an immediate failure, so the explicit hold
+        // can be released here.
+        self.queryLifetime=nil;
+        [self emitDiagnostic:@"failed" status:(int)status endpoints:0 channel:0 source:@"sdp"];
+        [self failOpen:(int)status];
+    }
+}
+- (void)openChannel:(BluetoothRFCOMMChannelID)channelID {
+    if (self.closed || self.opened) return;
+    self.selectedChannel=channelID;
+    self.openPending=YES;
+    [self armRfcommTimer];
+    IOBluetoothRFCOMMChannel *opened=nil;
+    IOReturn result=[self.device openRFCOMMChannelAsync:&opened withChannelID:channelID delegate:self];
+    if (opened) {
+        if (result != kIOReturnSuccess || self.closed) {
+            [opened setDelegate:nil]; [opened closeChannel];
+        } else self.channel=opened;
+        // Balance the documented retained out value on every path, including
+        // a defensive non-null out value accompanying an immediate failure.
+        CFRelease((__bridge CFTypeRef)opened);
+    }
+    if (result != kIOReturnSuccess) {
+        [self cancelRfcommTimer]; self.openPending=NO;
+        int code=HMOpenStatus(result);
+        [self emitDiagnostic:@"failed" status:code endpoints:1 channel:channelID source:self.sourceName];
+        [self failOpen:code];
+        return;
+    }
+    if (!self.closed && !opened) {
+        [self cancelRfcommTimer]; self.openPending=NO;
+        [self emitDiagnostic:@"failed" status:-1 endpoints:1 channel:channelID source:self.sourceName];
+        [self failOpen:-1];
+    }
+}
 - (void)failOpen:(int)status {
     if (self.closed) return;
     [self close:status];
@@ -202,7 +385,9 @@ static NSString *AddressString(uint64_t address) {
 - (void)close:(int)status {
     if (self.closed) return;
     self.closed=YES;
-    [self.channel setDelegate:nil]; [self.channel closeChannel]; self.channel=nil;
+    [self cancelSdpTimer]; [self cancelRfcommTimer];
+    self.sdpPending=NO; self.openPending=NO;
+    [self detachChannel];
     if (!self.opened) [self.owner emit:2 operation:self.identifier channel:self.identifier status:status ?: -1 data:nil];
     if (self.writeOperation) [self.owner emit:5 operation:self.writeOperation channel:self.identifier status:status ?: -1 data:nil];
     self.writeOperation=0; self.writeData=nil; self.earlyData=nil; self.earlyBytes=0;
@@ -213,39 +398,44 @@ static NSString *AddressString(uint64_t address) {
     OnMain(^{
         // IOBluetooth does not document ownership of its asynchronous SDP target.
         // The queued block now owns us; release the explicit query hold even if canceled.
+        [self cancelSdpTimer];
+        BOOL pending=self.sdpPending;
+        self.sdpPending=NO;
         self.queryLifetime=nil;
-        if (self.closed) return;
-        if (status != kIOReturnSuccess) { [self failOpen:(int)status]; return; }
-        NSMutableSet<NSString *> *endpoints=[NSMutableSet set];
-        BluetoothRFCOMMChannelID selected=0;
-        for (IOBluetoothSDPUUID *uuid in self.uuids) {
-            for (IOBluetoothSDPServiceRecord *service in device.services) {
-                if (![service matchesUUIDArray:@[uuid]]) continue;
-                BluetoothRFCOMMChannelID channel=0;
-                if ([service getRFCOMMChannelID:&channel] != kIOReturnSuccess || channel < 1 || channel > 30) continue;
-                [endpoints addObject:[NSString stringWithFormat:@"%@:%u",uuid,channel]]; selected=channel;
-            }
+        if (self.closed || !pending) return;
+        if (status != kIOReturnSuccess) {
+            [self emitDiagnostic:@"failed" status:(int)status endpoints:0 channel:0 source:@"sdp"];
+            [self failOpen:(int)status];
+            return;
         }
-        if (endpoints.count != 1) { [self failOpen:endpoints.count == 0 ? -2 : -3]; return; }
-        IOBluetoothRFCOMMChannel *opened=nil;
-        IOReturn result=[device openRFCOMMChannelAsync:&opened withChannelID:selected delegate:self];
-        if (opened) {
-            if (result != kIOReturnSuccess || self.closed) {
-                [opened setDelegate:nil]; [opened closeChannel];
-            } else self.channel=opened;
-            // Balance the documented retained out value on every path, including
-            // a defensive non-null out value accompanying an immediate failure.
-            CFRelease((__bridge CFTypeRef)opened);
+        NSArray<NSDictionary<NSString *, NSNumber *> *> *endpoints=HMResolveEndpoints(self.device,self.uuids);
+        [self emitDiagnostic:@"resolved" status:0 endpoints:endpoints.count channel:0 source:@"sdp"];
+        if (endpoints.count != 1) {
+            int code=endpoints.count == 0 ? -2 : -3;
+            [self emitDiagnostic:@"failed" status:code endpoints:endpoints.count channel:0 source:@"sdp"];
+            [self failOpen:code];
+            return;
         }
-        if (result != kIOReturnSuccess) { [self failOpen:(int)result]; return; }
-        if (!self.closed && !opened) [self failOpen:-1];
+        self.fromCache=NO;
+        self.selectedChannel=(BluetoothRFCOMMChannelID)[endpoints[0][@"channel"] unsignedShortValue];
+        [self openChannel:self.selectedChannel];
     });
 }
 - (void)rfcommChannelOpenComplete:(IOBluetoothRFCOMMChannel *)channel status:(IOReturn)status {
     OnMain(^{
+        [self cancelRfcommTimer];
+        self.openPending=NO;
         if (self.closed) { [channel setDelegate:nil]; [channel closeChannel]; return; }
-        if (status != kIOReturnSuccess) { [self failOpen:(int)status]; return; }
+        if (status != kIOReturnSuccess) {
+            if (channel && channel != self.channel) { [channel setDelegate:nil]; [channel closeChannel]; }
+            [self detachChannel];
+            int code=HMOpenStatus(status);
+            [self emitDiagnostic:@"failed" status:code endpoints:1 channel:self.selectedChannel source:self.sourceName];
+            [self failOpen:code];
+            return;
+        }
         self.channel=channel; self.opened=YES;
+        [self emitDiagnostic:@"opened" status:0 endpoints:1 channel:self.selectedChannel source:self.sourceName];
         [self.owner emit:2 operation:self.identifier channel:self.identifier status:0 data:nil];
         for (NSData *data in self.earlyData) [self.owner emit:3 operation:0 channel:self.identifier status:0 data:data];
         self.earlyData=nil; self.earlyBytes=0;
@@ -296,7 +486,7 @@ static NSString *AddressString(uint64_t address) {
 @end
 
 extern "C" {
-int hm_bt_bridge_version() { return 1; }
+int hm_bt_bridge_version() { return 2; }
 void hm_bt_start(HMCallback callback, void *context) {
     OnMain(^{
         if (gAdapter && gAdapter.context != context) [gAdapter shutdown];
@@ -355,11 +545,9 @@ void hm_bt_open(int64_t operation, uint64_t address, const char *serviceIds) {
         if (!device.isPaired || !device.isConnected || uuids.count != strings.count) { [adapter emit:2 operation:operation channel:operation status:-1 data:nil]; return; }
         HMChannel *channel=[HMChannel new]; channel.owner=adapter; channel.identifier=operation; channel.device=device; channel.uuids=uuids;
         adapter.channels[@(operation)]=channel;
-        // Cancellation detaches the channel from its owner but must not free an SDP
-        // callback target. If the OS never completes, the worker process bounds this hold.
-        channel.queryLifetime=channel;
-        IOReturn status=[device performSDPQuery:channel uuids:uuids];
-        if (status != kIOReturnSuccess) { channel.queryLifetime=nil; [channel failOpen:(int)status]; }
+        // beginOpen resolves the system's cached SDP records first and only performs
+        // an unfiltered query when the cache is missing or non-unique.
+        [channel beginOpen];
     });
 }
 void hm_bt_write(int64_t channel, int64_t operation, const void *data, size_t length) {

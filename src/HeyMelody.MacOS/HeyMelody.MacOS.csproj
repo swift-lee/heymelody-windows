@@ -10,6 +10,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="HeyMelody.MacOS.Tests" />
     <ProjectReference Include="../HeyMelody.Platform/HeyMelody.Platform.csproj" />
+    <ProjectReference Include="../HeyMelody.Diagnostics/HeyMelody.Diagnostics.csproj" />
     <Compile Remove="native/**" />
     <NativeBridgeSource Include="native/*.mm" />
     <None Include="$(NativeBridgeOutput)" Link="libHeyMelodyMac.dylib" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="'$(HeyMelodyDesktopPlatform)' == 'macOS'" />

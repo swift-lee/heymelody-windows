@@ -51,6 +51,8 @@ BlueZ 为外部 profile 提供稳定的系统 D-Bus 接口。建议原型按下�
 
 应用包需要 `NSBluetoothAlwaysUsageDescription`；采用 App Sandbox 时还需 `com.apple.security.device.bluetooth` entitlement。[Bluetooth 用途说明](https://developer.apple.com/documentation/bundleresources/information-property-list/nsbluetoothalwaysusagedescription)、[沙盒 Bluetooth 授权](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.device.bluetooth) 真机验收应覆盖授权允许/拒绝、后台辅助进程的权限归属、断连、睡眠和应用退出后的资源清理。`.app` 布局、签名与 notarization 在后台原型通过后单独处理。
 
+2026-11-05 更正：上文“限定 UUID 的 `performSDPQuery(_:uuids:)`”不再是当前实现。该调用自 macOS 12 起实际为空操作（Qt commit `f00ea686`、Apple 论坛 722228）；当前流程改为 `pairedDevices()` → 从 `getServiceRecord(for:)`／`services` 缓存解析唯一 RFCOMM 端点 → 缓存缺失或不唯一时执行无 UUID 过滤的 `performSDPQuery(_:)`，SDP 查询与 RFCOMM 打开各限 5 秒 → `openRFCOMMChannelAsync`。2026-11-05 已在 macOS 27.0.1／Enco X4 上验证控制连接、初始握手和 ANC 设置回读；根因证据、日志摘要与未验证项见 [macOS RFCOMM 连接记录](macos-rfcomm-connectivity-2026-11-05.md)。
+
 ## 耳机控制与 LHDC 音频分别推进
 
 耳机的 Hi-Res 开关、空间互斥与 codec 编号回读属于控制面；实际编码器、AVDTP 协商、媒体流发射码率、射频扩展和无损比例属于音频数据面。启用耳机开关不能证明主机在发送 LHDC，更不能证明 OPPO 手机的最高 2.3 Mbps 无损链路已移植到桌面系统。
