@@ -8,7 +8,7 @@
 
 2026-10-25 macOS 适配补充：Host 的业务、worker 监督及 IPC 复用，枚举、SDP/RFCOMM、系统事件和音频由中立平台接口提供。Windows 保留现有管道名称及登录会话隔离；Unix 按 UID 使用跨 shell 会话的单例与短绝对套接字路径。macOS 路径位于 `/private/tmp/heymelody-<uid>`；Linux 优先使用可信的 `XDG_RUNTIME_DIR`，超出 100 个 UTF-8 字节预算则使用 `/tmp` 的用户私有目录。目录必须由当前用户拥有、权限为 `0700` 且非符号链接，双向管道验证对端用户。
 
-macOS 主应用和四个 helper 共用同一个后台。主应用只在窗口存在时以 Regular 策略保留 Dock 图标，批准关闭后立即转为 Accessory；Host 和其余 helper 始终以 Accessory 运行，因此所有可见窗口关闭后只保留菜单栏图标。所有窗口的 ⌘Q 通过新增退出请求 RPC 发起下述既有投票流程，请求先应答再开始投票；⌘W 和关闭按钮保留本地组件关闭行为。Mac 原生蓝牙、授权与音频路由的实际耳机验证边界见 [macOS 说明](macos.md)，下文明确写 Windows 的原生 API 行为仍仅指 Windows。
+macOS 主应用和四个 helper 共用同一个后台。主应用只在窗口存在时以 Regular 策略保留 Dock 图标，批准关闭后立即转为 Accessory；主应用通过 LaunchServices 请求启动 Host，让 `LSUIElement` 在进程创建前生效，因此 Host 和其余 helper 始终以 Accessory 运行、从不注册 Dock 图标（包括启动瞬间），所有可见窗口关闭后只保留菜单栏图标。所有窗口的 ⌘Q 通过新增退出请求 RPC 发起下述既有投票流程，请求先应答再开始投票；⌘W 和关闭按钮保留本地组件关闭行为。Mac 原生蓝牙、授权与音频路由的实际耳机验证边界见 [macOS 说明](macos.md)，下文明确写 Windows 的原生 API 行为仍仅指 Windows。
 
 - App 与 DeviceManager 使用 schema-4 双向命名管道（历史版本为 schema 2／3）。端点按用户和 Windows Session ID 区分，服务端限制当前用户并检查客户端进程所在会话。公共契约只携带内存中的 opaque Identity，不携带蓝牙地址。
 - Host supervisor 管理白名单、设备目录、每台设备的控制状态和观察缓存。设备的产品 ID 与协议颜色按白名单键持久化在 `device-appearance.json`，只作为外观提示随设备目录发布，不授予控制（见 [外观资源持久化](artwork-persistence.md)）。独立的 `--catalog-worker` 执行同步原生枚举；每台耳机使用独立的 `--worker` 执行 SDP/RFCOMM。原生调用卡住时可以结束对应 worker，托盘和其他耳机保持响应。
