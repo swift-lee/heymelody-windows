@@ -157,17 +157,21 @@ internal static class NativeWindowLifetimeHarness
             WriteReceipt();
             var exitCode = Errors.Count == 0 ? 0 : 1;
             desktop.Shutdown(exitCode);
-            // The native loop can occasionally keep the test host alive after shutdown, leaving a Dock icon
-            // behind. The receipt is already written, so bound the wait and terminate the fixture explicitly.
+            // macOS can keep the native loop and Dock icon alive after shutdown. Windows must still
+            // expose a stuck fixture to the outer timeout rather than force a successful process exit.
             ExitLater(exitCode);
         }
     }
 
-    private static void ExitLater(int exitCode) => _ = Task.Run(async () =>
+    private static void ExitLater(int exitCode)
     {
-        await Task.Delay(TimeSpan.FromSeconds(2));
-        Environment.Exit(exitCode);
-    });
+        if (!OperatingSystem.IsMacOS()) return;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            Environment.Exit(exitCode);
+        });
+    }
 
     private static async Task VerifyFontWindowLifetimeAsync()
     {

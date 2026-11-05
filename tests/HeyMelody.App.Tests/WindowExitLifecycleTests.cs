@@ -24,6 +24,11 @@ internal static class WindowExitLifecycleTests
 
     private static async Task VerifyAsync()
     {
+        if (OperatingSystem.IsWindows())
+        {
+            DesktopBackdropTests.VerifyWindowsWindow();
+            Pass("macOS material tints do not alter Windows backgrounds, transparency hints or theme changes");
+        }
         if (OperatingSystem.IsMacOS())
         {
             VerifyActivationPolicy(MacActivationPolicy.Regular, "The main application starts with a Dock tile");

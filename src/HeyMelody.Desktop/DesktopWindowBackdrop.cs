@@ -81,29 +81,41 @@ internal sealed class DesktopWindowBackdrop : IDisposable
         try
         {
             var dark = _window.ActualThemeVariant == ThemeVariant.Dark;
-            var fallback = new SolidColorBrush(dark ? Color.FromRgb(32, 32, 32) : Color.FromRgb(243, 243, 243));
-            bool applied = _capabilities.Effect == DesktopBackdropEffect.NativeBlur
-                && _window.ActualTransparencyLevel is var level && (level == WindowTransparencyLevel.Blur || level == WindowTransparencyLevel.AcrylicBlur);
+            var isMacOS = OperatingSystem.IsMacOS();
+            var fallback = new SolidColorBrush(OpaqueBackground(dark));
+            var (background, applied) = ResolveBackground(_capabilities.Effect, _window.ActualTransparencyLevel,
+                isMacOS, dark, _macTint);
             _window.TransparencyBackgroundFallback = fallback;
-            // NSVisualEffectView supplies the material. The tint keeps text readable without covering it;
-            // component windows use a dense page-colored tint so arbitrary content stays on a stable surface.
-            _window.Background = applied ? new SolidColorBrush(MaterialTint(dark, _macTint)) : fallback;
+            _window.Background = applied ? new SolidColorBrush(background) : fallback;
             if (Applied != applied)
             {
                 Applied = applied; Changed?.Invoke();
                 DiagnosticLog.Info("ui.backdrop", "negotiated", "Window background effect negotiated",
-                    new { provider = _capabilities.Provider, requested = _capabilities.Effect.ToString(), actual = _window.ActualTransparencyLevel.ToString(), applied, tint = _macTint.ToString() });
+                    new { provider = _capabilities.Provider, requested = _capabilities.Effect.ToString(), actual = _window.ActualTransparencyLevel.ToString(), applied,
+                        tint = (isMacOS ? _macTint : MacBackdropTint.Standard).ToString() });
             }
         }
         finally { _updating = false; }
     }
-    private static Color MaterialTint(bool dark, MacBackdropTint tint) => (dark, tint) switch
+    internal static (Color Background, bool Applied) ResolveBackground(DesktopBackdropEffect effect,
+        WindowTransparencyLevel level, bool isMacOS, bool dark, MacBackdropTint macTint)
     {
-        (true, MacBackdropTint.Dense) => Color.FromArgb(240, 32, 32, 32),
-        (false, MacBackdropTint.Dense) => Color.FromArgb(244, 243, 243, 243),
-        (true, _) => Color.FromArgb(64, 24, 24, 24),
-        (false, _) => Color.FromArgb(40, 248, 248, 248)
-    };
+        var applied = effect == DesktopBackdropEffect.NativeBlur
+            && (level == WindowTransparencyLevel.Blur || level == WindowTransparencyLevel.AcrylicBlur);
+        if (!applied) return (OpaqueBackground(dark), false);
+        // Dense is a macOS vibrancy policy; a negotiated Linux effect retains its existing light tint.
+        var tint = isMacOS ? macTint : MacBackdropTint.Standard;
+        var background = (dark, tint) switch
+        {
+            (true, MacBackdropTint.Dense) => Color.FromArgb(240, 32, 32, 32),
+            (false, MacBackdropTint.Dense) => Color.FromArgb(244, 243, 243, 243),
+            (true, _) => Color.FromArgb(64, 24, 24, 24),
+            (false, _) => Color.FromArgb(40, 248, 248, 248)
+        };
+        return (background, true);
+    }
+    private static Color OpaqueBackground(bool dark) =>
+        dark ? Color.FromRgb(32, 32, 32) : Color.FromRgb(243, 243, 243);
     public void Dispose()
     {
         if (_disposed) return;

@@ -55,6 +55,8 @@ push 和手动运行成功后，在该次 Actions 的 Artifacts 下载 macOS 包
 
 Linux 预留 UI 层的动态背景能力提供方：只有提供方和窗口后端均确认支持时才启用效果，能力撤销后恢复不透明背景。2026-10-25 读取的官方 [ext-background-effect-v1 XML](https://gitlab.freedesktop.org/api/v4/projects/wayland%2Fwayland-protocols/repository/files/staging%2Fext-background-effect%2Fext-background-effect-v1.xml/raw?ref=main) 支持动态 `blur` 能力，仍属 staging/testing；不能据此宣称所有合成器可用。本轮不实现 Linux 窗口后端或协议绑定。
 
+2026-11-06 平台边界复查将加深色调限制为 macOS 策略，Linux 协商效果继续使用原有浅色调，Windows Mica 路径不变；原生桥版本读取失败也会完整回滚启动状态。LaunchServices 逻辑隔离在 Diagnostics 内部的 macOS helper，非 macOS 保持直接启动。测试宿主的延迟强退仅在 macOS 启用，不再隐藏 Windows 退出挂起。改动依据、定向检查与未验证范围见[平台边界复查](research/macos-platform-boundary-review-2026-11-06.md)。
+
 `HeyMelody.Platform` 仅依赖 BCL，提供设备、授权、事件、RFCOMM、音频与进程路径边界。Windows 实现在 Windows 适配层；macOS 使用 IOBluetooth 经典 RFCOMM、CoreBluetooth 广播及状态、CoreAudio/AudioQueue。Host 继续拥有单接收通道、能力门控、连接代次、校准租约和禁止重放 SET 的规则。
 
 Unix 使用稳定的用户标识、跨 shell 会话单例及长度不超过 100 个 UTF-8 字节的绝对管道路径；父目录检查当前用户、非符号链接及 `0700` 权限。Linux 复用该基础设施，蓝牙适配器仍待实现。Windows 的命名管道名称及登录会话隔离保持兼容。

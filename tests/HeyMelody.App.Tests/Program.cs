@@ -93,6 +93,12 @@ DeviceModelView.DefaultFactoryOverride = new RecordingFilamentRendererFactory();
 using var session = HeadlessUnitTestSession.StartNew(typeof(PreviewBootstrap));
 try
 {
+    if (args is ["--backdrop-policy-tests"])
+    {
+        int count = DesktopBackdropTests.Run();
+        Console.WriteLine(JsonSerializer.Serialize(new { passed = count, success = true, nativeBluetoothCalls = 0, screenshots = 0, output }));
+        return 0;
+    }
     if (args is ["--animation-tests"] or ["--animation-tests", "--output-dir", _])
     {
         int count = DeviceVisualTests.RunAnimations(session) + AnimatedWebpTests.Run(session, output, receipts);
@@ -293,13 +299,15 @@ try
     passed += nativeDemoCliChecks;
     var gestureChecks = DeviceGestureTests.Run(session);
     passed += gestureChecks;
+    var backdropChecks = DesktopBackdropTests.Run();
+    passed += backdropChecks;
     // 55 = 21 layout/bound-control + 9 interaction + 12 visual + 10 artwork + 3 rendering-preference cases.
     int expected = (5 * 2 * 2) + 1 + 9 + 12 + 10 + 3
         + (HeyMelody.Platform.DesktopCapabilities.SupportsHeadsetControl ? 9 : 7)
         + startupChecks + settingsManagementChecks
         + demoChecks + renderingChecks + animationChecks + layoutChecks + selectionChecks
         + gameAudioChecks + typographyChecks + iconChecks + defaultIconChecks
-        + frameLoopChecks + nativeDemoCliChecks + gestureChecks + ancFeatureChecks + layoutHelperChecks;
+        + frameLoopChecks + nativeDemoCliChecks + gestureChecks + ancFeatureChecks + layoutHelperChecks + backdropChecks;
     Check(passed == expected, $"Every UI scenario and interaction case must finish: passed={passed}, expected={expected}, "
         + $"startupChecks={startupChecks}, settingsManagementChecks={settingsManagementChecks}");
     var report = new { schemaVersion = 1, version = AppVersion.Display, passed, success = true, nativeBluetoothCalls = 0,

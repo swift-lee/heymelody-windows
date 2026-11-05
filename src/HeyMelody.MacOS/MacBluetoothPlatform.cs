@@ -42,16 +42,34 @@ public sealed class MacBluetoothPlatform : IBluetoothPlatform
             ObjectDisposedException.ThrowIf(_disposed != 0, this);
             if (!OperatingSystem.IsMacOS() || RuntimeInformation.ProcessArchitecture != Architecture.Arm64)
                 throw new PlatformNotSupportedException("macOS 后台仅支持 Apple Silicon。");
-            if (Interlocked.Exchange(ref _started, 1) == 0)
-            {
-                DiagnosticLog.Info("macOS.Bluetooth", "adapter.start", "Starting the native macOS Bluetooth bridge.",
-                    new { bridgeVersion = NativeBluetooth.hm_bt_bridge_version() });
-                _self = GCHandle.Alloc(this);
-                try { NativeBluetooth.hm_bt_start(_callback, GCHandle.ToIntPtr(_self)); }
-                catch { _self.Free(); _started = 0; throw; }
-            }
+            StartNativeBridge(NativeBluetooth.hm_bt_bridge_version,
+                context => NativeBluetooth.hm_bt_start(_callback, context));
         }
         return Task.CompletedTask;
+    }
+
+    internal void StartNativeBridge(Func<int> getVersion, Action<nint> start)
+    {
+        lock (_callbackGate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed != 0, this);
+            if (Interlocked.Exchange(ref _started, 1) == 0)
+            {
+                try
+                {
+                    DiagnosticLog.Info("macOS.Bluetooth", "adapter.start", "Starting the native macOS Bluetooth bridge.",
+                        new { bridgeVersion = getVersion() });
+                    _self = GCHandle.Alloc(this);
+                    start(GCHandle.ToIntPtr(_self));
+                }
+                catch
+                {
+                    if (_self.IsAllocated) _self.Free();
+                    _started = 0;
+                    throw;
+                }
+            }
+        }
     }
 
     /// <summary>Workers have no Avalonia lifetime. Their main thread owns the native run loop.</summary>
