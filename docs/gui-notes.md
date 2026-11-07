@@ -1,6 +1,6 @@
 # HeyMelody Avalonia 界面（0.9.2）
 
-macOS 背景使用原生 NSVisualEffectView Blur，按窗口实际协商的透明级别切换主题色调与不透明回退；主页面不再用不透明层遮住系统材料。Windows Mica/Mica Alt 保留原路径。Linux 预留动态能力提供方，只有窗口后端支持时启用；能力撤销立即恢复可读的不透明背景，细节见 [macOS 说明](macos.md#平台边界)。
+macOS 背景使用原生 NSVisualEffectView Blur，按窗口实际协商的透明级别切换主题色调与不透明回退。主窗口上半部分保持不透明，只有底部设备栏露出系统材料；设备管理、贴合度和黄金听感等组件窗口使用近不透明主题色调，让材质只作为轻微底感。macOS 材质主要服务标题栏、侧栏和菜单等 vibrancy 区域，不等同于面向任意内容的 Mica，因此不移植 Mica/MicaAlt。Windows Mica/Mica Alt 保留原路径。Linux 预留动态能力提供方，只有窗口后端支持时启用；能力撤销立即恢复可读的不透明背景，细节见 [macOS 说明](macos.md#平台边界)。
 
 2026-10-25 macOS：主窗口、设备管理器和校准窗口使用原生标题栏及应用菜单；⌘Q 参与全局安全退出，⌘W 关闭当前组件。普通 UI 默认 Metal，Basic Render 映射到软件绘制；Filament 仅提供 Metal。字体使用 macOS 字体与随包后备，不执行 Linux fontconfig 注册。黄金听感结果页新增蓝牙音频输出选择器，明确选择后才准备音乐试听；具体范围见 [macOS 说明](macos.md)。本轮仅审计变更区域，不向会话载入整套截图。
 

@@ -21,6 +21,7 @@ internal static class Program
             }
             TestFailureMapping();
             TestPlatformLifecycle();
+            TestStartupFailures();
             RunAsync().GetAwaiter().GetResult();
             TestObservationGenerations();
             Console.WriteLine($"PASS {_checks} macOS offline checks (no Bluetooth manager, pairing, connection or device writes).");
@@ -101,6 +102,64 @@ internal static class Program
     {
         using var platform = new MacBluetoothPlatform();
         Check(platform.Status.Access == BluetoothAccess.Unknown, "platform starts without probing native Bluetooth");
+        if (!OperatingSystem.IsMacOS() || RuntimeInformation.ProcessArchitecture != Architecture.Arm64)
+        {
+            bool rejected = false;
+            try { platform.StartAsync(CancellationToken.None).GetAwaiter().GetResult(); }
+            catch (PlatformNotSupportedException) { rejected = true; }
+            Check(rejected, "public startup keeps the macOS ARM64 guard without loading native Bluetooth");
+        }
+    }
+    private static void TestStartupFailures()
+    {
+        foreach (var failure in new Exception[] { new DllNotFoundException("missing bridge"),
+            new BadImageFormatException("wrong bridge architecture"), new EntryPointNotFoundException("missing version symbol") })
+        {
+            var platform = new MacBluetoothPlatform();
+            int versions = 0, starts = 0;
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                try
+                {
+                    platform.StartNativeBridge(() => { versions++; throw failure; }, _ => starts++);
+                    throw new InvalidOperationException("A failed version query must not complete startup.");
+                }
+                catch (Exception actual) when (ReferenceEquals(actual, failure))
+                { Check(true, "version query preserves the original native loading failure"); }
+            }
+            Check(versions == 2 && starts == 0, "version failure resets startup before retry and never invokes native start");
+            platform.Dispose();
+            platform.Dispose();
+            Check(true, "disposing after version failure is safe and does not enter native shutdown");
+        }
+
+        var failedStart = new MacBluetoothPlatform();
+        var startFailure = new IOException("native start failed");
+        int versionCalls = 0, startCalls = 0;
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            try
+            {
+                failedStart.StartNativeBridge(() => { versionCalls++; return 2; }, context =>
+                {
+                    startCalls++;
+                    Check(context != 0 && ReferenceEquals(GCHandle.FromIntPtr(context).Target, failedStart),
+                        "native start receives an allocated handle for its platform");
+                    throw startFailure;
+                });
+                throw new InvalidOperationException("A failed native start must not complete startup.");
+            }
+            catch (Exception actual) when (ReferenceEquals(actual, startFailure))
+            { Check(true, "start failure preserves the original exception after releasing its handle"); }
+        }
+        Check(versionCalls == 2 && startCalls == 2, "start failure resets startup before retry");
+        failedStart.Dispose();
+        failedStart.Dispose();
+        Check(true, "disposing after native start failure does not call native shutdown");
+        int disposedCalls = 0;
+        try { failedStart.StartNativeBridge(() => { disposedCalls++; return 2; }, _ => disposedCalls++); }
+        catch (ObjectDisposedException) { Check(disposedCalls == 0, "disposed platform never re-enters injected startup"); return; }
+        throw new InvalidOperationException("A disposed platform must reject startup.");
     }
     private static async Task Throws<T>(Func<Task> action, string message) where T : Exception
     {

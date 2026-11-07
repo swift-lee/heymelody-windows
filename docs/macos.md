@@ -4,7 +4,7 @@
 
 ## 使用
 
-将 DMG 内完整的 `HeyMelody.app` 复制到“应用程序”再启动。先在系统设置中配对并连接耳机，再通过设备管理器保存名单。后台在菜单栏继续运行；红色关闭按钮和 ⌘W 关闭当前组件，⌘Q 发起全体组件的确认退出。
+将 DMG 内完整的 `HeyMelody.app` 复制到“应用程序”再启动。先在系统设置中配对并连接耳机，再通过设备管理器保存名单。后台在菜单栏继续运行；主窗口存在时 Dock 显示主应用图标，批准关闭后立即移除。主应用通过 LaunchServices 请求启动 Host，`LSUIElement` 在进程创建前生效，因此 Host 和其余 helper 始终以菜单栏/辅助应用方式运行，从不注册 Dock 图标（包括启动瞬间）。红色关闭按钮和 ⌘W 关闭当前组件，⌘Q 发起全体组件的确认退出。
 
 主界面“+”和设备管理器的蓝牙设置按钮打开 macOS 系统蓝牙面板；“应用设置 → 管理设备”打开设备管理器。普通界面优先 Metal，开启 Basic Render 后重新打开界面使用软件绘制；Filament 三维视图固定使用 Metal。应用自绘内容统一使用随包标准 MiSans 的真实字重，不再优先 PingFang SC；原生菜单、交通灯和系统对话框仍由 macOS 绘制。字体、系统图标与资源保留边界见[界面说明](gui-notes.md#字体与字符渲染)。
 
@@ -51,9 +51,11 @@ push 和手动运行成功后，在该次 Actions 的 Artifacts 下载 macOS 包
 
 ## 平台边界
 
-窗口背景在 macOS 通过 Avalonia 的 `AcrylicBlur`／`Blur` 请求 NSVisualEffectView 系统材料。确认实际透明级别后使用浅色或深色色调，移除遮住效果的主页面不透明层；无法协商时使用不透明背景，保持文字可读。Windows 原有 Mica/Mica Alt 路径保留。
+窗口背景在 macOS 通过 Avalonia 的 `AcrylicBlur`／`Blur` 请求 NSVisualEffectView 系统材料。Avalonia.Native 为每个窗口创建一个固定 HUDWindow 材质的整窗效果视图，无法按区域选择材质，因此主窗口保留不透明的上半页面，只让底部设备栏露出材质；设备管理、贴合度和黄金听感窗口使用约 94% 不透明度的主题色调，材质只作为轻微底感。无法协商时使用不透明背景，保持文字可读。macOS 材质面向标题栏、侧栏和菜单等 vibrancy 场景，不是 Mica 那类任意内容背景，故不移植 Mica/MicaAlt。Windows 原有路径保留。详见[窗口材质与 Dock 研究记录](research/macos-window-material-and-dock-2026-11-05.md)。
 
 Linux 预留 UI 层的动态背景能力提供方：只有提供方和窗口后端均确认支持时才启用效果，能力撤销后恢复不透明背景。2026-10-25 读取的官方 [ext-background-effect-v1 XML](https://gitlab.freedesktop.org/api/v4/projects/wayland%2Fwayland-protocols/repository/files/staging%2Fext-background-effect%2Fext-background-effect-v1.xml/raw?ref=main) 支持动态 `blur` 能力，仍属 staging/testing；不能据此宣称所有合成器可用。本轮不实现 Linux 窗口后端或协议绑定。
+
+2026-11-06 平台边界复查将加深色调限制为 macOS 策略，Linux 协商效果继续使用原有浅色调，Windows Mica 路径不变；原生桥版本读取失败也会完整回滚启动状态。LaunchServices 逻辑隔离在 Diagnostics 内部的 macOS helper，非 macOS 保持直接启动。测试宿主的延迟强退仅在 macOS 启用，不再隐藏 Windows 退出挂起。改动依据、定向检查与未验证范围见[平台边界复查](research/macos-platform-boundary-review-2026-11-06.md)。
 
 `HeyMelody.Platform` 仅依赖 BCL，提供设备、授权、事件、RFCOMM、音频与进程路径边界。Windows 实现在 Windows 适配层；macOS 使用 IOBluetooth 经典 RFCOMM、CoreBluetooth 广播及状态、CoreAudio/AudioQueue。Host 继续拥有单接收通道、能力门控、连接代次、校准租约和禁止重放 SET 的规则。
 

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using HeyMelody.Diagnostics.Platforms.MacOS;
 using HeyMelody.Platform;
 
 namespace HeyMelody.Diagnostics;
@@ -29,6 +30,11 @@ public static class DiagnosticBackendLauncher
         DiagnosticLog.Info("client.lifecycle", "backendLaunch", "Launching the backend", new { fileName = start.FileName, arguments = start.ArgumentList.ToArray() });
         try
         {
+            if (MacBackendLauncher.TryStart(start, out var bundle))
+            {
+                DiagnosticLog.Info("client.lifecycle", "backendLaunchRequested", "Backend launch requested through LaunchServices", new { bundle });
+                return;
+            }
             using var process = Process.Start(start) ?? throw new IOException("无法启动蓝牙后台。");
             DiagnosticLog.Info("client.lifecycle", "backendLaunched", "Backend process started", new { processId = process.Id });
         }

@@ -4,12 +4,13 @@ using Avalonia.Controls.ApplicationLifetimes;
 using HeyMelody.TestSupport;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.DeviceManager;
+using HeyMelodyWindows.Ui;
 using static HeyMelody.TestSupport.NativeWindowLifetimeHarness;
 
 internal static class WindowExitLifecycleTests
 {
     private static void Check(bool condition, string message) => NativeWindowLifetimeHarness.Check(condition, message);
-    internal static int Run() => NativeWindowLifetimeHarness.Run<ExitApplication>(VerifyAsync, "manager");
+    internal static int Run() => NativeWindowLifetimeHarness.Run<ExitApplication>(VerifyAsync, "manager", showInDock: false);
     public sealed class ExitApplication : DeviceManagerApp
     { public override void OnFrameworkInitializationCompleted() => Ready(this); }
 
@@ -17,9 +18,10 @@ internal static class WindowExitLifecycleTests
     {
         if (OperatingSystem.IsMacOS())
         {
+            VerifyActivationPolicy(MacActivationPolicy.Accessory, "The manager helper runs without a Dock tile");
             var quitService = new ExitService();
             var quitWindow = await OpenAsync(quitService);
-            await VerifyBackdropAsync(quitWindow);
+            await VerifyBackdropAsync(quitWindow, minimumTintAlpha: 236);
             await MacBackdropCapture.CaptureAsync(quitWindow, "device-manager");
             var desktop = (IClassicDesktopStyleApplicationLifetime)Application.Current!.ApplicationLifetime!;
             Check(!desktop.TryShutdown(), "Native Quit bypassed the shared exit protocol.");
@@ -29,6 +31,7 @@ internal static class WindowExitLifecycleTests
             quitService.Push("exitCancelled", "native-quit");
             Check(quitWindow.IsVisible, "A cancelled native Quit closed the manager.");
             await StopAsync(quitWindow, quitService);
+            VerifyActivationPolicy(MacActivationPolicy.Accessory, "The manager stays an accessory after closing");
             Pass("macOS manager Quit requests global exit and waits for commit");
         }
         var service = new ExitService();

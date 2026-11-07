@@ -43,6 +43,7 @@ Apple Silicon macOS 的安装、平台边界、构建和验收见 [macOS 说明]
 - [后台内存审计](research/backend-memory-audit.md)：2026-10-21 后端内存方向的发现、已实施与暂缓项、Linux 测量结果；Windows 内存未测量。
 - [后台能耗与 CPU](research/backend-energy.md)：2026-10-22 后端能耗方向的效率模式、按需 BLE 扫描、空闲唤醒与 Windows 待验证清单；Windows 行为未验证。
 - [macOS RFCOMM 控制连接修复（2026-11-05）](research/macos-rfcomm-connectivity-2026-11-05.md)：macOS 12+ 过滤 SDP 查询为空操作的证据、缓存端点解析、5 秒超时、TCC 首次授权与 Enco X4 真机日志。
+- [macOS 窗口材质分层与 Dock 激活策略（2026-11-05）](research/macos-window-material-and-dock-2026-11-05.md)：整窗透明根因、Avalonia.Native 固定 HUDWindow 材质、近不透明组件背景与 Host/主应用激活策略。
 - [上下文读取风险排查](research/context-read-risk-2026-10-11.md)：大文件、超长单行与工具输出风险，后续读取和处理顺序；503 成因尚未确认。
 - [黄金听感与贴合度重新研究](research/calibration-reassessment.md)、[组件修复](research/calibration-repair.md)：两 APK 与 X4 v116 的路由、滤波、停止／保存流程及实现验证。
 - [游戏音效与 Hi-Res／空间音效](research/game-audio-spatial.md)：游戏开关和类型命令、包名、互斥方向与手机分支。

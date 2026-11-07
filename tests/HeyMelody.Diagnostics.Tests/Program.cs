@@ -8,6 +8,14 @@ if (OperatingSystem.IsWindows()) NativeMethods.SetErrorMode(3);
 if (args.FirstOrDefault() == "--bound-child") return await ChildLaunchChecks.RunChildAsync(args);
 
 if (await LogRetentionChecks.TryRunChildAsync(args) is int retentionChildExit) return retentionChildExit;
+if (args is ["--backend-launch-plan-tests"])
+{
+    int launchChecks = 0;
+    MacBackendLaunchChecks.Run((valid, name) =>
+    { if (!valid) throw new InvalidOperationException(name); Console.WriteLine("PASS " + name); launchChecks++; });
+    Console.WriteLine($"Backend launch plan checks passed: {launchChecks}; no Host or native processes started.");
+    return 0;
+}
 if (args is ["--log-retention-tests"])
 {
     string retentionRoot = Path.Combine(Path.GetTempPath(), "HeyMelody-log-retention-" + Guid.NewGuid().ToString("N"));
@@ -58,6 +66,7 @@ Process Child(params string[] childArgs)
 }
 try
 {
+    MacBackendLaunchChecks.Run(Check);
     var defaults = DiagnosticSettingsStore.Load();
     Check(defaults.Pending is null && defaults.SelectedComponents.SequenceEqual(DiagnosticComponents.All), "default off and all five components selected");
     Check(!Directory.Exists(DiagnosticPaths.LogRoot), "reading settings creates no log directory");

@@ -48,5 +48,7 @@ public static class Program
             RenderingMode = [Win32RenderingMode.Software],
             CompositionMode = [Win32CompositionMode.RedirectionSurface]
         })
+        // The tray is a menu-bar accessory: LSUIElement alone is overridden by Avalonia's default Dock policy.
+        .With(new MacOSPlatformOptions { ShowInDock = false })
         .UseHeyMelodyDiagnostics().UseHeyMelodyTypography().StartWithClassicDesktopLifetime(args);
 }

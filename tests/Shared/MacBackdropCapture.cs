@@ -93,13 +93,19 @@ internal static class MacBackdropCapture
                 if (effects.Count == 0) throw new InvalidOperationException("No native NSVisualEffectView was installed for the requested blur.");
                 string name = label + "-" + variant.Key!.ToString()!.ToLowerInvariant();
                 string whole = Path.Combine(directory, name + "-window.png"), crop = Path.Combine(directory, name + "-backdrop-crop.png");
+                string screen = Path.Combine(directory, name + "-screen.png");
                 await ExecuteAsync("/usr/sbin/screencapture", ["-x", "-o", "-l", number.ToString(), whole]);
                 WindowCaptures++;
+                // A window-only capture cannot show what a behind-window material samples; also record the
+                // composited screen region around the window for the bottom bar and component surfaces.
+                var frame = window.FrameSize ?? new Size(window.Width, window.Height + 28);
+                await ExecuteAsync("/usr/sbin/screencapture", ["-x", "-R",
+                    $"{window.Position.X},{window.Position.Y},{Math.Round(frame.Width)},{Math.Round(frame.Height)}", screen]);
                 await ExecuteAsync("/usr/bin/sips", ["-c", "180", "440", "--cropOffset", "120", "24", whole, "--out", crop]);
                 File.WriteAllText(Path.Combine(directory, name + ".json"), JsonSerializer.Serialize(new
                 {
                     actualTransparency = window.ActualTransparencyLevel.ToString(), effects,
-                    tint = (window.Background as ISolidColorBrush)?.Color.ToString(), crop,
+                    tint = (window.Background as ISolidColorBrush)?.Color.ToString(), crop, screen,
                     scope = "Native macOS compositor background and title/header region only; fake device catalog, no Bluetooth or audio."
                 }));
             }

@@ -26,7 +26,7 @@ internal static class NativeWindowLifetimeHarness
 
     [DllImport("kernel32.dll")] private static extern uint SetErrorMode(uint mode);
 
-    internal static int Run<TApplication>(Func<Task> tests, string component) where TApplication : Application, new()
+    internal static int Run<TApplication>(Func<Task> tests, string component, bool showInDock = true) where TApplication : Application, new()
     {
         if (!OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS())
             throw new PlatformNotSupportedException("The window lifecycle fixture needs a supported desktop.");
@@ -40,6 +40,7 @@ internal static class NativeWindowLifetimeHarness
                 RenderingMode = [Win32RenderingMode.Software],
                 CompositionMode = [Win32CompositionMode.RedirectionSurface]
             });
+        if (OperatingSystem.IsMacOS()) builder = builder.With(new MacOSPlatformOptions { ShowInDock = showInDock });
         builder.LogToTrace().StartWithClassicDesktopLifetime([], ShutdownMode.OnExplicitShutdown);
         return Errors.Count == 0 && _done ? 0 : 1;
     }
@@ -78,7 +79,7 @@ internal static class NativeWindowLifetimeHarness
         dispatch.Invoke(close, null);
     }
 
-    internal static async Task VerifyBackdropAsync(Window window)
+    internal static async Task VerifyBackdropAsync(Window window, Control? alwaysVisible = null, byte minimumTintAlpha = 1)
     {
         Check(Typography.CollectionInitializationCount == 1, "Native windows share one MiSans collection per process.");
         foreach (var weight in new[] { FontWeight.Normal, FontWeight.SemiBold, FontWeight.Bold })
@@ -99,17 +100,32 @@ internal static class NativeWindowLifetimeHarness
             await UntilAsync(() => (window.ActualTransparencyLevel == WindowTransparencyLevel.Blur || window.ActualTransparencyLevel == WindowTransparencyLevel.AcrylicBlur)
                 && window.Background is ISolidColorBrush brush && brush.Color.A < 255,
                 "macOS did not negotiate native blur with a translucent readable window background.");
+            Check((window.Background as ISolidColorBrush)?.Color.A >= minimumTintAlpha,
+                $"The macOS material tint is more transparent than expected: expected at least {minimumTintAlpha}, "
+                + $"actual {(window.Background as ISolidColorBrush)?.Color.A}.");
+            Check(alwaysVisible?.IsVisible ?? true, "The page surface was hidden while the native material applied.");
             window.TransparencyLevelHint = [WindowTransparencyLevel.None];
             await UntilAsync(() => window.ActualTransparencyLevel == WindowTransparencyLevel.None
                 && window.Background is ISolidColorBrush brush && brush.Color.A == 255,
                 "The window did not restore an opaque background when the native effect was removed.");
+            Check(alwaysVisible?.IsVisible ?? true, "The page surface was hidden in the opaque fallback.");
             window.TransparencyLevelHint = [WindowTransparencyLevel.AcrylicBlur, WindowTransparencyLevel.Blur, WindowTransparencyLevel.None];
             await UntilAsync(() => (window.ActualTransparencyLevel == WindowTransparencyLevel.Blur || window.ActualTransparencyLevel == WindowTransparencyLevel.AcrylicBlur)
                 && window.Background is ISolidColorBrush brush && brush.Color.A < 255,
                 "The native blur background did not recover after fallback.");
+            Check((window.Background as ISolidColorBrush)?.Color.A >= minimumTintAlpha,
+                "The recovered macOS material tint did not restore the expected density.");
+            Check(alwaysVisible?.IsVisible ?? true, "The page surface was hidden after the native material recovered.");
         }
         window.RequestedThemeVariant = initialTheme;
-        Pass("macOS native blur remains translucent in both themes and restores a legible opaque fallback");
+        Pass("macOS native blur keeps the expected density and page surface, then restores a legible opaque fallback");
+    }
+
+    internal static void VerifyActivationPolicy(MacActivationPolicy expected, string context)
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+        var actual = MacApplicationPolicy.Get();
+        Check(actual == expected, $"{context}: expected activation policy {expected}, actual {actual?.ToString() ?? "unavailable"}.");
     }
 
     internal static async Task UntilAsync(Func<bool> condition, string message, int milliseconds = 7000)
@@ -139,8 +155,22 @@ internal static class NativeWindowLifetimeHarness
             await Task.Delay(100);
             _done = true;
             WriteReceipt();
-            desktop.Shutdown(Errors.Count == 0 ? 0 : 1);
+            var exitCode = Errors.Count == 0 ? 0 : 1;
+            desktop.Shutdown(exitCode);
+            // macOS can keep the native loop and Dock icon alive after shutdown. Windows must still
+            // expose a stuck fixture to the outer timeout rather than force a successful process exit.
+            ExitLater(exitCode);
         }
+    }
+
+    private static void ExitLater(int exitCode)
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            Environment.Exit(exitCode);
+        });
     }
 
     private static async Task VerifyFontWindowLifetimeAsync()
@@ -221,6 +251,7 @@ internal static class NativeWindowLifetimeHarness
         _done = true;
         WriteReceipt();
         desktop.Shutdown(1);
+        ExitLater(1);
     }
 
     private static void WriteReceipt()

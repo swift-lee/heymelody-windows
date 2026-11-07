@@ -16,6 +16,7 @@
 | --- | --- |
 | [本机 ARM64 UI 卡顿调查](ui-lag-arm64-2026-10-23.md) | 预构建的默认 WARP 选卡、Adreno 单变量对照、X4 WebP 持续更新成本，以及回调节拍和真实上屏 FPS 的验证边界 |
 | [macOS RFCOMM 控制连接修复（2026-11-05）](macos-rfcomm-connectivity-2026-11-05.md) | macOS 12+ 带 UUID 过滤的 SDP 查询为空操作、缓存端点解析、5 秒超时、TCC 首次授权与 Enco X4 真机日志 |
+| [macOS 窗口材质分层与 Dock 激活策略（2026-11-05）](macos-window-material-and-dock-2026-11-05.md) | 主窗口整窗透明根因、Avalonia.Native 固定 HUDWindow 材质、组件窗口近不透明色调、Host/主应用 Accessory 策略与 Dock 幽灵图标边界 |
 | [Avalonia Adreno 规则历史](avalonia-adreno-history-2026-10-23.md) | 透明窗口故障、过滤规则引入、社区驱动修复报告、维护者保留默认限制的理由与显式选卡接口历史 |
 | [Enco Air4 Pro 控制连接核查](enco-air4-pro-control.md) | 两来源配置与原 APK SPP 路由、官方 v125 OTA 镜像、0x0114 长度与外帧兼容修复、具体失败诊断和离线验证边界 |
 | [蓝牙音频编码可行性审计](bluetooth-audio-codec.md) | 参考工具采集方式、普通权限边界与遗留实现撤回；研究结论，功能未纳入 0.9.2 |
