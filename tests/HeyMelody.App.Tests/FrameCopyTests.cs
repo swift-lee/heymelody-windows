@@ -14,11 +14,15 @@ internal static class FrameCopyTests
         Run("model frames copy straight into the locked bitmap and match the expected pixels", DirectAsync);
         Run("the managed copy still presents frames when the direct path is unavailable", FallbackAsync);
         Run("an idle model does not lock its bitmap or poll the renderer", NoRequestAsync);
+        Run("pending frames are probed without locking or consuming the bitmap", PendingFrameAsync);
+        Run("the audit baseline keeps its original no-probe copy path", ProbeDisabledAsync);
+        Run("a frame lost after probing and a later resize recover without stale presentation", ProbeRaceAsync);
+        Run("a frozen audit pose produces one observable frame and stays unchanged", FrozenPoseAsync);
         Run("artwork cleanup events share one deadline and do not create an idle loop", CleanupAsync);
         Run("settings expanders schedule cleanup without an animation gate", ExpanderAsync);
         Run("window cleanup hooks deactivate once and detach on close", WindowCleanupAsync);
         Run("GPU cleanup requests are rate limited", () => { Gate(); return Task.CompletedTask; });
-        return 7;
+        return 11;
 
         void Run(string name, Func<Task> action)
         {
@@ -27,12 +31,13 @@ internal static class FrameCopyTests
         }
     }
 
-    private static async Task<(DeviceModelView Model, Window Window, RecordingFilamentRendererFactory Factory)> OpenAsync()
+    private static async Task<(DeviceModelView Model, Window Window, RecordingFilamentRendererFactory Factory)> OpenAsync(
+        ModelRenderPolicy? renderingPolicy = null)
     {
         var factory = new RecordingFilamentRendererFactory();
         var model = new DeviceModelView(new DeviceModelVisual(new ArtworkFile(
             new Uri("avares://HeyMelody/Assets/Devices/EncoFree4Dynaudio/model.glb"), "", EncoFree4DynaudioModelView.ModelSha256),
-            DeviceVisuals.GenericProduct), factory);
+            DeviceVisuals.GenericProduct), factory) { RenderingPolicyOverride = renderingPolicy };
         var window = new Window { Content = model, Width = 280, Height = 240 };
         window.Show(); Dispatcher.UIThread.RunJobs();
         await Until(() => model.CaptureLatestFrame(out _) is not null, "The model presents its first frame.");
@@ -92,12 +97,133 @@ internal static class FrameCopyTests
             await Task.Delay(TimeSpan.FromSeconds(.4));
             for (var i = 0; i < 2; i++) await Tick();
             int locks = model.BitmapLockCount, copies = factory.Instances.Single().CopyCalls;
+            int probes = model.FrameProbeCount;
             for (var i = 0; i < 6; i++) await Tick();
-            Check(model.BitmapLockCount == locks && factory.Instances.Single().CopyCalls == copies,
+            Check(model.BitmapLockCount == locks && factory.Instances.Single().CopyCalls == copies && model.FrameProbeCount == probes,
                 "Without a requested frame the bitmap is not locked and the renderer is not polled.");
         }
         finally { window.Close(); }
     }
+
+    private static async Task PendingFrameAsync()
+    {
+        var (model, window, factory) = await OpenAsync(new(800, true));
+        try
+        {
+            model.Motion.SetActive(false);
+            var renderer = factory.Instances.Single();
+            renderer.HoldFrameCompletion = true;
+            int locks = model.BitmapLockCount, copies = renderer.CopyCalls, misses = model.FrameProbeNoFrameCount;
+            long presented = model.PresentedFrameCount;
+            var previousFrame = model.LastPresentedFrame;
+            var observed = new List<ulong>();
+            model.FrameCopiedObserver = observed.Add;
+            ChangeTheme(window);
+            await Until(() => model.FrameProbeNoFrameCount > misses, "The pending request is checked with metadata only.");
+            for (var i = 0; i < 2; i++) await Tick();
+            Check(model.BitmapLockCount == locks && renderer.CopyCalls == copies && model.PresentedFrameCount == presented,
+                "A pending frame neither locks nor copies the bitmap nor advances presentation.");
+
+            renderer.CompletePendingFrame();
+            Check(renderer.TryGetLatestFrameInfo(previousFrame.FrameId, out var first)
+                && renderer.TryGetLatestFrameInfo(previousFrame.FrameId, out var second) && first == second,
+                "Repeated metadata probes do not consume the completed frame.");
+            Check(renderer.CopyCalls == copies, "Metadata probes do not count as pixel copies.");
+            await Until(() => model.PresentedFrameCount > presented, "The completed frame is copied after its metadata probe.");
+            Check(model.BitmapLockCount == locks + 1 && renderer.CopyCalls == copies + 1,
+                "Exactly one bitmap lock and pixel copy present the completed frame.");
+            Check(observed.SequenceEqual(new[] { model.LastPresentedFrame.FrameId }),
+                "The observer receives only the successfully copied frame.");
+            Check(model.FrameProbeReadyCount > 0
+                && model.FrameProbeCount == model.FrameProbeReadyCount + model.FrameProbeNoFrameCount,
+                "Probe counters distinguish ready frames from missing frames.");
+            for (var i = 0; i < 2; i++) await Tick();
+            Check(model.BitmapLockCount == locks + 1 && renderer.CopyCalls == copies + 1 && observed.Count == 1,
+                "The same completed frame is not locked, copied or observed again.");
+        }
+        finally { model.FrameCopiedObserver = null; window.Close(); }
+    }
+
+    private static async Task ProbeDisabledAsync()
+    {
+        var (model, window, factory) = await OpenAsync(new(0, false));
+        try
+        {
+            model.Motion.SetActive(false);
+            var renderer = factory.Instances.Single();
+            renderer.HoldFrameCompletion = true;
+            int locks = model.BitmapLockCount, copies = renderer.CopyCalls;
+            ChangeTheme(window);
+            await Until(() => renderer.CopyCalls > copies, "The uncapped no-probe baseline still attempts the original direct copy.");
+            Check(model.BitmapLockCount > locks && model.FrameProbeCount == 0 && renderer.PeekCalls == 0,
+                "Disabling metadata probes retains the legacy lock-and-copy path.");
+        }
+        finally { window.Close(); }
+    }
+
+    private static async Task ProbeRaceAsync()
+    {
+        var (model, window, factory) = await OpenAsync(new(800, true));
+        try
+        {
+            model.Motion.SetActive(false);
+            var renderer = factory.Instances.Single();
+            renderer.HoldFrameCompletion = true;
+            var previousFrame = model.LastPresentedFrame;
+            long presented = model.PresentedFrameCount;
+            ChangeTheme(window);
+            renderer.CompletePendingFrame();
+            renderer.DropFrameBeforeNextCopy = true;
+            await Until(() => !renderer.DropFrameBeforeNextCopy, "The completed frame disappears between its probe and copy.");
+            Check(model.ModelReady && model.LoadError is null && model.PresentedFrameCount == presented
+                && model.LastPresentedFrame.FrameId == previousFrame.FrameId,
+                "A positive probe followed by no copy does not consume a frame or fail the renderer.");
+
+            var logicalBounds = model.Viewport.Bounds;
+            model.RenderingPolicyOverride = new(160, true);
+            Check(Math.Max(renderer.Configuration.Width, renderer.Configuration.Height) == 160,
+                "A backing resize applies the new pixel budget.");
+            Check(model.Viewport.Bounds == logicalBounds && model.LastPresentedFrame == default,
+                "A backing resize keeps the logical viewport and invalidates the previous frame metadata.");
+            renderer.CompletePendingFrame();
+            await Until(() => model.LastPresentedFrame.Width == renderer.Configuration.Width
+                && model.LastPresentedFrame.Height == renderer.Configuration.Height,
+                "The resized frame is presented through the existing fallback path.");
+            Check(model.LastPresentedFrame.Generation > previousFrame.Generation && model.LoadError is null,
+                "The replacement backing frame comes from the new generation without a renderer failure.");
+        }
+        finally { window.Close(); }
+    }
+
+    private static async Task FrozenPoseAsync()
+    {
+        var (model, window, factory) = await OpenAsync(new(800, true));
+        try
+        {
+            var observed = new List<ulong>();
+            model.FrameCopiedObserver = observed.Add;
+            model.FreezePoseForAudit(.35, .2);
+            long updates = model.CameraUpdateCount;
+            await Until(() => observed.Count > 0, "The frozen pose requests a final observable frame.");
+            var renderer = factory.Instances.Single();
+            Check(!model.Motion.IsActive && model.Motion.Yaw == .35 && model.Motion.Pitch == .2
+                && Math.Abs(renderer.Configuration.YawRadians - .35) < .000001
+                && Math.Abs(renderer.Configuration.PitchRadians - .2) < .000001,
+                "The motion and render configuration use the same exact frozen pose.");
+            long presented = model.PresentedFrameCount;
+            for (var i = 0; i < 3; i++) await Tick();
+            Check(model.CameraUpdateCount == updates && model.PresentedFrameCount == presented && observed.Count == 1,
+                "A frozen pose does not keep submitting or observing duplicate frames.");
+            model.FrameCopiedObserver = null;
+            ChangeTheme(window);
+            await Until(() => model.PresentedFrameCount > presented, "A later explicit background change still requests a frame.");
+            Check(observed.Count == 1, "Removing the audit observer stops callbacks without changing rendering.");
+        }
+        finally { model.FrameCopiedObserver = null; window.Close(); }
+    }
+
+    private static void ChangeTheme(Window window) =>
+        window.RequestedThemeVariant = window.ActualThemeVariant == ThemeVariant.Dark ? ThemeVariant.Light : ThemeVariant.Dark;
 
     private static Task CleanupAsync()
     {

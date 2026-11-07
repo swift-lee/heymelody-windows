@@ -71,13 +71,25 @@ App 也能自动启动后台；源码运行时，若输出目录没有 Host 可�
 
 设 `HEYMELODY_RENDER_DIAGNOSTICS=1` 或在窗口中按 Ctrl+Shift+F12 显示 Avalonia 的帧率、渲染与布局耗时叠加层，三维模型另显示 Filament 帧统计。验收 120 Hz 时在 120 Hz 显示器上展开／折叠设置项、拖动模型，并关注叠加层而不是空闲窗口的数值。
 
-所有产品动效已取消按失焦、空闲／非交互、滚动及展开自动降档；3D 手动帧率、不可见／最小化／卸载暂停、逐回调最多一次和原生背压继续生效。定向检查使用 App.Tests 的 `--model-loading-tests`、`--animation-tests`、`--smooth-scroll-tests`、默认 App.Tests 及 ModelPreview.Tests；`dotnet run --project tests/HeyMelody.App.Tests -c Release -- --native-demo-cli-tests` 只做 18 项离线参数检查，不打开窗口。清理 debounce 使用可控时钟，不以真实等待测试计时器精度。
+所有产品动效已取消按失焦、空闲／非交互、滚动及展开自动降档；3D 手动帧率、不可见／最小化／卸载暂停、逐回调最多一次和原生背压继续生效。定向检查使用 App.Tests 的 `--model-loading-tests`、`--animation-tests`、`--smooth-scroll-tests`、默认 App.Tests 及 ModelPreview.Tests；`dotnet run --project tests/HeyMelody.App.Tests -c Release -- --native-demo-cli-tests` 做 36 项离线参数检查（含性能审计参数），不打开窗口。清理 debounce 使用可控时钟，不以真实等待测试计时器精度。
 
 Windows-only 原生长测命令为 `dotnet run --project tests/HeyMelody.App.Tests -c Release -- --native-demo-smoke --activity-regression --backend vulkan --output-dir <新目录>`；OpenGL 复验改用 `--backend opengl` 和另一个新目录。长测固定 1280×900、同模型／DPI／实际模型后端及 Unlimited，8 段各至少 30 s，验证真实失焦且辅助窗口不遮挡，以及隐藏／最小化暂停恢复；watchdog 为 7 分钟、外层 Join 为 8 分钟。默认短测及 CI 入口不变，长测必须显式选择。JSON 的帧间隔采样是近期重叠历史而非完整阶段分布；没有最低 FPS 断言，不证明掉帧根因。详细阶段与记录要求见[模型调度回归](model-rendering.md#调度回归与实机复验)。无头／模拟通过不证明 GPU 最低帧率；x64 结果也不证明 8cx Gen 3 ARM64。
 
 所有 Windows GUI 显式选择 DXGI 枚举首适配器，绕过 Avalonia 的 ARM64 Adreno 默认过滤；不按 GPU 品牌或架构选卡，也不新增独显优先策略。应用设置的“使用 Basic Render 兼容模式”保存为 `%LOCALAPPDATA%\HeyMelody\preferences.json` 中的 `uiBasicRenderMode` 布尔值，只有 `true` 启用，缺失或无效值使用默认 GPU。各 GUI 在渲染初始化前独立读取同一设置；保存后重新打开主窗口、设备管理器及校准窗口生效，不必退出托盘后台。此选项不改变 Filament 后端、画质或动画。
 
 Basic 模式通过 DXGI `EnumWarpAdapter` 查询 WARP LUID，再匹配 Avalonia 的适配器标识，不依赖显示名称。ANGLE 固定 D3D11；WARP 查询、匹配或初始化失败时退到 Avalonia Software 并记录原因，不改回硬件。Software 与 WARP 是不同路径，不能把后备写成已启用 WARP；运行中设备丢失不承诺自动切换后端。旧体验版的 `HEYMELODY_UI_ADAPTER` 不再参与选卡。背景见[本机诊断](research/ui-lag-arm64-2026-10-23.md)和[上游历史](research/avalonia-adreno-history-2026-10-23.md)。定向策略检查使用 App.Tests 的 `--rendering-policy-tests`，设置检查使用 `--rendering-settings-tests`；原生检查使用模拟服务，不连接耳机。没有新增应急启动参数，无法显示时可手动修改上述配置字段为 `true` 后重开界面。
+
+Windows 性能审计使用独立入口，不进入默认测试集合。模型场景须先按[模型渲染说明](model-rendering.md)准备并校验完整的当前 native runtime；需要指定独立目录时，给 `dotnet run` 加 `-p:FilamentRuntimeRoot=<已校验的运行库根目录>`，不要混用历史 DLL：
+
+```powershell
+dotnet run --project tests/HeyMelody.App.Tests -c Release -- --native-performance-audit --scenario model-scroll --backend vulkan --seconds 30 --output-dir <新目录>
+```
+
+`--scenario` 支持 `static`、`static-idle`、`static-scroll`、`animated`、`model`、`model-scroll`、`model-frozen`；`--backend` 为 `vulkan` 或 `opengl`，`--seconds` 为 5–120，`--basic-render true|false` 默认 `false`。`animated` 可用 `--artwork-file <完整WebP路径>` 指定生产素材；默认两帧 fixture 不代表完整生产动画。审计使用真实 Win32 窗口和本地 Demo 假服务，不启动生产后台、蓝牙或真实设备 SET，也不写用户偏好。`scroll` 是对象级程序滚动而非真实输入；`static-idle` 不主动请求动画回调。输出中的 UI 回调与位图观测统计不是 DWM 屏显 FPS。实机矩阵、来源及验证边界见 [2026-11-07 ARM64 渲染性能审计](research/rendering-performance-arm64-2026-11-07.md)。
+
+审计专用的 `--model-max-edge <0..4096>` 默认 `800`，`0` 保留原物理像素；`--frame-ready-probe on|off` 默认 `on`。全平台产品默认也为 `800/on`，按用户接受降低 CPU 开销的补充要求放行，而非通过原定帧率门槛。同一 binary 中用 `0/off` 测基线、`800/on` 测候选，另用 `0/on`、`800/off` 分离因素；不修改用户设置或后端／帧率偏好。`--theme light|dark` 默认 `light`，冻结场景在测量前固定姿态并以尺寸／generation 屏障排除旧在途帧，再恢复目标尺寸。schema 3 的 `bitmapCopies` 及 JSONL `bitmapCopy` 记录每次成功接受新位图的时刻，支持完整窗口 P95；原 `bitmapObservation` 仍只是审计 RAF 观测，不与旧版统计混称。
+
+离线汇总使用 PowerShell 7.5+ 的 `tools/research/Compare-PerformanceAudit.ps1 -Baseline <B1目录>,<B2目录> -Candidate <C1目录>,<C2目录> -OutputPath <新JSON路径>`；检查 `allRunsValid`、各行 `issues` 和组间 warnings，而非只看进程退出码。完整同机对照见[快速优化复测](research/rendering-quick-optimization-arm64-2026-11-07.md)。
 
 ## 按改动选择验证
 

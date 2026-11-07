@@ -131,6 +131,9 @@ public interface IFilamentRenderer : IDisposable
     void LoadModel(FilamentModelData model);
     void Configure(FilamentRenderConfiguration configuration);
     void RequestFrame();
+    /// <summary>Reads newer-frame metadata without copying pixels or consuming the frame.</summary>
+    /// <remarks>A later copy can return a newer frame; its own metadata remains authoritative.</remarks>
+    bool TryGetLatestFrameInfo(ulong afterFrameId, out FilamentFrameInfo frame);
     bool TryCopyLatestFrame(ulong afterFrameId, Span<byte> destination, out FilamentFrameInfo frame);
     FilamentDiagnostics GetDiagnostics();
 }

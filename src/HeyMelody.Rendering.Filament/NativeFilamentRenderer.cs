@@ -143,6 +143,33 @@ internal sealed unsafe class NativeFilamentRenderer : IFilamentRenderer
         lock (_gate) { ThrowIfDisposed(); Check(_api.Render(_handle)); }
     }
 
+    public bool TryGetLatestFrameInfo(ulong afterFrameId, out FilamentFrameInfo frame)
+    {
+        lock (_gate)
+        {
+            ThrowIfDisposed();
+            frame = default;
+            var info = new NativeFrameInfo { StructSize = (uint)Marshal.SizeOf<NativeFrameInfo>() };
+            // ABI 2 publishes metadata before returning HM_BUFFER_TOO_SMALL for a null destination.
+            var result = _api.TryCopy(_handle, afterFrameId, 0, 0, ref info);
+            if (result == 0) return false;
+            if (result != -3)
+            {
+                Check(result);
+                throw RuntimeError("The native renderer returned an invalid frame metadata result.");
+            }
+            if (info.StructSize != (uint)Marshal.SizeOf<NativeFrameInfo>()
+                || info.Width == 0 || info.Height == 0 || info.StrideBytes < (ulong)info.Width * 4
+                || (ulong)info.StrideBytes * info.Height > int.MaxValue || info.FrameId <= afterFrameId
+                || !double.IsFinite(info.RenderMilliseconds) || info.RenderMilliseconds < 0
+                || !double.IsFinite(info.ReadbackMilliseconds) || info.ReadbackMilliseconds < 0)
+                throw RuntimeError("The native renderer returned invalid frame metadata.");
+            frame = new((int)info.Width, (int)info.Height, (int)info.StrideBytes, info.FrameId,
+                info.Generation, info.RenderMilliseconds, info.ReadbackMilliseconds);
+            return true;
+        }
+    }
+
     public bool TryCopyLatestFrame(ulong afterFrameId, Span<byte> destination, out FilamentFrameInfo frame)
     {
         lock (_gate)
@@ -274,6 +301,23 @@ internal sealed class NativeBindings
     private readonly ErrorDelegate _getError;
     // Native callbacks can outlive a renderer and must stay rooted for this module's process lifetime.
     private static readonly NativeLogDelegate NativeLogConsumer = ReceiveNativeLog;
+
+    // Delegate injection keeps managed ABI contract tests independent of a runtime or GPU.
+    internal NativeBindings(CreateDelegate create, LoadModelDelegate loadModel, ConfigureDelegate configure,
+        RenderDelegate render, TryCopyDelegate tryCopy, DiagnosticsDelegate diagnostics,
+        DestroyDelegate destroy, ErrorDelegate getError)
+    {
+        _libraryPath = string.Empty;
+        _libraryHash = string.Empty;
+        Create = create;
+        LoadModel = loadModel;
+        Configure = configure;
+        Render = render;
+        TryCopy = tryCopy;
+        GetDiagnostics = diagnostics;
+        Destroy = destroy;
+        _getError = getError;
+    }
 
     private NativeBindings()
     {

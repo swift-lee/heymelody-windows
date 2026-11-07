@@ -4,6 +4,8 @@
 
 | 入口 | 用途 |
 | --- | --- |
+| [HeyMelody.Rendering.Benchmark/](HeyMelody.Rendering.Benchmark/README.md) | Windows 原生 Filament 分辨率／MSAA／后端性能对照；高精度等待、实际请求频率与完整采样，不含 Avalonia 上传或屏幕呈现 |
+| [Compare-PerformanceAudit.ps1](Compare-PerformanceAudit.ps1) | PowerShell 7.5+ 离线对比窗口审计 B/C 目录；重算逐次成功位图复制间隔、核对计数与健康，输出到新 JSON；不运行 GPU，位图交付 Hz 不是屏显 FPS |
 | [filament-linux-build/](filament-linux-build/README.md) | Ubuntu 24.04 隔离构建、Linux Filament 失败复现与修复验收证据 |
 | [ui-text-audit/](ui-text-audit/README.md) | C#/AXAML/配置文本候选、源码追踪、场景截图关联与人工审计 Excel；保留意见并记录覆盖缺口 |
 | [earbud-artwork/scripts/](earbud-artwork/scripts/) | APK美术、Android资源、来源探测、图册与验证 |

@@ -9,12 +9,13 @@ internal static class FrameLoopTests
     internal static int Run(HeadlessUnitTestSession session, string output)
     {
         var pacingChecks = ModelFramePacingTests.Run();
+        var policyChecks = ModelRenderPolicyTests.Run();
         Run("model frame rates expose exactly 30 fps, 60 fps and unlimited", () => { Choices(); return Task.CompletedTask; });
         Run("the model frame-rate preference persists beside the theme and compatibility choices", () => { Preference(output); return Task.CompletedTask; });
         Run("the model loop advances on animation ticks and pauses while hidden, minimized or zero-sized", LoopAsync);
         Run("changing only the model frame rate retains its renderer and motion", ChangeRateAsync);
         Run("cleanup activity never changes the model's selected frame cadence", ActivityCadenceAsync);
-        return pacingChecks + 5 + FrameCopyTests.Run(session);
+        return pacingChecks + policyChecks + 5 + FrameCopyTests.Run(session);
 
         void Run(string name, Func<Task> action)
         {

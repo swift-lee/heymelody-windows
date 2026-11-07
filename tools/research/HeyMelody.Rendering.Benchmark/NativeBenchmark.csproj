@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <NativeRuntimeRid Condition="'$(NativeRuntimeRid)' == ''">win-arm64</NativeRuntimeRid>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/HeyMelody.Rendering.Filament/HeyMelody.Rendering.Filament.csproj" />
+    <Content Include="$(NativeRuntimeDirectory)/**/*" Condition="'$(NativeRuntimeDirectory)' != ''">
+      <Link>runtimes/$(NativeRuntimeRid)/native/%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <Target Name="RequireExplicitRuntime" BeforeTargets="Build">
+    <Error Condition="'$(NativeRuntimeDirectory)' == ''" Text="Supply NativeRuntimeDirectory pointing to an independently verified CURRENT runtime directory." />
+    <Error Condition="!Exists('$(NativeRuntimeDirectory)/filament-runtime.json')" Text="NativeRuntimeDirectory must directly contain filament-runtime.json." />
+  </Target>
+</Project>

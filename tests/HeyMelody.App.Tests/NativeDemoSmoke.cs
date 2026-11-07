@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -30,26 +31,17 @@ internal static partial class NativeDemoSmoke
         var thread = new Thread(() =>
         {
             var oldPath = ThemePreferences.SettingsPathOverride;
-            var oldPreference = ModelRenderingPreferences.CompatibilityMode;
-            var oldFrameRate = ModelRenderingPreferences.FrameRate;
             _state.PreferencesPath = Path.Combine(output ?? Path.GetTempPath(),
                 "unwritten-demo-preferences-" + Guid.NewGuid().ToString("N") + ".json");
             ThemePreferences.SettingsPathOverride = _state.PreferencesPath;
             try
             {
-                ModelRenderingPreferences.Reload();
-                if (activityRegression) ModelRenderingPreferences.Apply(backend == FilamentBackend.OpenGL, ModelFrameRate.Unlimited);
-                else ModelRenderingPreferences.Apply(backend == FilamentBackend.OpenGL);
-                var builder = AppBuilder.Configure<SmokeApplication>().UsePlatformDetect().UseHeyMelodyTypography().LogToTrace();
-                if (activityRegression) builder = builder.UseHeyMelodyRendering(basicRenderMode: false);
-                builder.StartWithClassicDesktopLifetime([], ShutdownMode.OnExplicitShutdown);
-                Check(!File.Exists(_state.PreferencesPath), "Native demo verification never writes user preferences.");
+                RunWithIsolatedModelPreferences(backend, activityRegression);
             }
             catch (Exception error) { _state.Failure = error.ToString(); }
             finally
             {
                 ThemePreferences.SettingsPathOverride = oldPath;
-                ModelRenderingPreferences.Apply(oldPreference, oldFrameRate);
             }
         }) { IsBackground = true, Name = "HeyMelody native demo smoke" };
         thread.SetApartmentState(ApartmentState.STA);
@@ -84,6 +76,7 @@ internal static partial class NativeDemoSmoke
             activityRegression = _state.ActivityRegression, activityPhases = _state.ActivityPhases,
             activityFocusDiagnostics = _state.ActivityFocusDiagnostics,
             startupDiagnostics = _state.StartupDiagnostics,
+            modelRendering = _state.ModelRendering,
             guiRenderingPolicy = _state.ActivityRegression
                 ? "shared default hardware compositor selection configured; actual Avalonia GPU is not observed by this receipt"
                 : "existing native smoke platform defaults",
@@ -99,6 +92,25 @@ internal static partial class NativeDemoSmoke
         if (output is not null)
             File.WriteAllText(Path.Combine(output, "native-demo-receipts.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
         return success ? 0 : 1;
+    }
+
+    // Keep beforefieldinit preference reads behind the path override, including when the JIT compiles this helper.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void RunWithIsolatedModelPreferences(FilamentBackend backend, bool activityRegression)
+    {
+        var oldPreference = ModelRenderingPreferences.CompatibilityMode;
+        var oldFrameRate = ModelRenderingPreferences.FrameRate;
+        try
+        {
+            ModelRenderingPreferences.Reload();
+            if (activityRegression) ModelRenderingPreferences.Apply(backend == FilamentBackend.OpenGL, ModelFrameRate.Unlimited);
+            else ModelRenderingPreferences.Apply(backend == FilamentBackend.OpenGL);
+            var builder = AppBuilder.Configure<SmokeApplication>().UsePlatformDetect().UseHeyMelodyTypography().LogToTrace();
+            if (activityRegression) builder = builder.UseHeyMelodyRendering(basicRenderMode: false);
+            builder.StartWithClassicDesktopLifetime([], ShutdownMode.OnExplicitShutdown);
+            Check(!File.Exists(_state.PreferencesPath), "Native demo verification never writes user preferences.");
+        }
+        finally { ModelRenderingPreferences.Apply(oldPreference, oldFrameRate); }
     }
 
     private static async Task CheckBackendSwitchingAsync(DeviceModelView model)
@@ -208,6 +220,9 @@ internal static partial class NativeDemoSmoke
                         type = model.GetType().Name,
                         model.ModelDigest, model.ModelReady, model.LoadError, model.VisibleStatus,
                         model.AnimationActive, model.AnimationCallbackCount, model.CameraUpdateCount, model.LoadTimings,
+                        renderingPolicy = model.RenderingPolicy,
+                        model.FrameProbeCount, model.FrameProbeReadyCount, model.FrameProbeNoFrameCount,
+                        model.BitmapLockCount, model.DirectFrameCopyCount, model.FallbackFrameCopyCount,
                         motion = new { model.Motion.IsActive, phase = model.Motion.Phase.ToString() },
                         control = StartupControlState(model),
                         root = StartupControlState(model.Content as Control),
@@ -259,6 +274,7 @@ internal static partial class NativeDemoSmoke
         public long FirstRenderedTriangles;
         public int FirstRenderedSceneItems;
         public object? StartupDiagnostics;
+        public object? ModelRendering;
         public object? ActivityFocusDiagnostics;
         public DemoService Service { get; } = new();
         public List<object> Screenshots { get; } = [];
@@ -402,15 +418,15 @@ internal static partial class NativeDemoSmoke
                     await UntilAsync(() =>
                     {
                         var current = model.CaptureLatestFrame(out var information);
+                        var expected = model.RenderingPolicy.GetPixelSize(model.Viewport.Bounds.Size, window.RenderScaling);
                         return current is not null
-                            && information.Width == (int)Math.Ceiling(model.Viewport.Bounds.Width * window.RenderScaling)
-                            && information.Height == (int)Math.Ceiling(model.Viewport.Bounds.Height * window.RenderScaling);
-                    }, "A resize presents the native frame at the actual physical viewport size.");
+                            && information.Width == expected.Width && information.Height == expected.Height;
+                    }, "A resize presents the native frame at the policy's DPI-aware backing size.");
                     var pixels = model.CaptureLatestFrame(out var frame) ?? throw new InvalidOperationException("No native model frame is available.");
                     var captureSize = new PixelSize(frame.Width, frame.Height);
-                    Check(frame.Width == (int)Math.Ceiling(model.Viewport.Bounds.Width * window.RenderScaling)
-                        && frame.Height == (int)Math.Ceiling(model.Viewport.Bounds.Height * window.RenderScaling),
-                        "Presented pixels follow the actual window DPI and viewport dimensions.");
+                    var expectedSize = model.RenderingPolicy.GetPixelSize(model.Viewport.Bounds.Size, window.RenderScaling);
+                    Check(captureSize == expectedSize,
+                        "Presented pixels follow the production policy's DPI-aware model backing dimensions.");
                     byte background = dark ? (byte)32 : (byte)243;
                     int foreground = 0;
                     for (int pixel = 0; pixel < pixels.Length; pixel += 4)
@@ -430,6 +446,9 @@ internal static partial class NativeDemoSmoke
                         + $"frame={frame.FrameId}, yaw={model.Motion.Yaw}, pitch={model.Motion.Pitch}, saved={path}.");
                     _state.Screenshots.Add(new { theme = dark ? "dark" : "light", requestedWidth = size.Width, requestedHeight = size.Height,
                         width = captureSize.Width, height = captureSize.Height, foregroundPixels = foreground, file = name,
+                        renderingPolicy = model.RenderingPolicy,
+                        model.FrameProbeCount, model.FrameProbeReadyCount, model.FrameProbeNoFrameCount,
+                        model.BitmapLockCount, model.DirectFrameCopyCount, model.FallbackFrameCopyCount,
                         source = "native Filament model frame; model area only",
                         sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant(),
                         model.Diagnostics.SourceTriangles, model.Diagnostics.SourceMeshes, model.Diagnostics.FrameId,
@@ -437,6 +456,18 @@ internal static partial class NativeDemoSmoke
                 }
             }
 
+            Check(model.RenderingPolicyOverride is null && model.RenderingPolicy == ModelRenderPolicy.PlatformDefault,
+                "The native demo uses the production model rendering policy without an audit override.");
+            Check(!model.RenderingPolicy.ProbeBeforeBitmapLock || model.FrameProbeReadyCount > 0,
+                "The production metadata probe observes completed frames before direct bitmap copies.");
+            _state.ModelRendering = new
+            {
+                renderingPolicy = model.RenderingPolicy, usesProductionDefault = model.RenderingPolicyOverride is null,
+                viewportWidth = model.Viewport.Bounds.Width, viewportHeight = model.Viewport.Bounds.Height, window.RenderScaling,
+                lastPresentedFrame = model.LastPresentedFrame,
+                model.FrameProbeCount, model.FrameProbeReadyCount, model.FrameProbeNoFrameCount,
+                model.BitmapLockCount, model.DirectFrameCopyCount, model.FallbackFrameCopyCount
+            };
             page.RequestFitTest = () => { _state.CalibrationLaunches++; return Task.CompletedTask; };
             page.RequestHearingSetup = () => { _state.CalibrationLaunches++; return Task.CompletedTask; };
             page.FindControl<FASettingsExpander>("HearingPanel")!.IsExpanded = true;

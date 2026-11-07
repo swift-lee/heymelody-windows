@@ -208,6 +208,7 @@ Directory.CreateDirectory(Path.GetDirectoryName(arm64Packaged)!);
 File.WriteAllBytes(arm64Packaged, [0]);
 Check(NativeRuntimeResolver.FindLibraryPath(runtimeFixture, windowsArm64) == arm64Packaged,
     "Windows ARM64 resolves its matching payload when an x64 payload is also present.");
+FrameMetadataContractChecks.Run(Check);
 NativeAbiContractChecks.Run(runtimeFixture, Check);
 await BackendProbeChecks.RunAsync(runtimeFixture, Check);
 await DiagnosticChecks.RunAsync(runtimeFixture, Check);
@@ -216,7 +217,7 @@ var portableReport = new
     success = true, passed, nativeRequested = false, nativeLibraryLoaded = false,
     output = runtimeFixture,
     rendererAssemblySha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(typeof(FilamentModelData).Assembly.Location))).ToLowerInvariant(),
-    scope = "Portable GLB integrity, exact-asset material policy, ABI/backend contracts, isolated child-process probe lifecycle, complete probe diagnostic output and copied native callback bytes; no native library, GPU, UI, Bluetooth or network."
+    scope = "Portable GLB integrity, exact-asset material policy, frame metadata/copy ABI contracts, ABI/backend contracts, isolated child-process probe lifecycle, complete probe diagnostic output and copied native callback bytes; no native library, GPU, UI, Bluetooth or network."
 };
 var portableJson = System.Text.Json.JsonSerializer.Serialize(portableReport);
 File.WriteAllText(Path.Combine(runtimeFixture, "report.json"), portableJson);

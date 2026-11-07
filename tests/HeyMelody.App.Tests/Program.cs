@@ -12,6 +12,7 @@ using FluentAvalonia.Styling;
 using HeyMelody.Rendering.Filament;
 using HeyMelodyWindows.App;
 
+if (args.FirstOrDefault() == "--native-performance-audit") return NativePerformanceAudit.Run(args);
 if (ProcessLifetimeTests.TryRunHelper(args, out var helperExit)) return helperExit;
 if (args is ["--diagnostic-settings-tests"]) return DiagnosticSettingsTests.Run();
 if (args is ["--native-exit-smoke"]) return WindowExitLifecycleTests.Run();
@@ -45,7 +46,7 @@ if (args.FirstOrDefault() == "--native-demo-cli-tests")
         Console.Error.WriteLine("Usage: --native-demo-cli-tests");
         return 2;
     }
-    int count = NativeDemoSmokeCommandLineTests.Run();
+    int count = NativeDemoSmokeCommandLineTests.Run() + NativePerformanceAuditCommandLineTests.Run();
     Console.WriteLine(JsonSerializer.Serialize(new { passed = count, success = true, windowsStarted = 0, nativeBluetoothCalls = 0 }));
     return 0;
 }
@@ -137,7 +138,7 @@ try
     }
     if (args is ["--model-loading-tests"] or ["--model-loading-tests", "--output-dir", _])
     {
-        int count = NativeDemoSmokeCommandLineTests.Run() + FrameLoopTests.Run(session, output);
+        int count = NativeDemoSmokeCommandLineTests.Run() + NativePerformanceAuditCommandLineTests.Run() + FrameLoopTests.Run(session, output);
         count += VerifiedModelCacheTests.RunAsync(output).GetAwaiter().GetResult();
         session.Dispatch<bool>(async () =>
         {
@@ -295,7 +296,7 @@ try
     passed += typographyChecks;
     var frameLoopChecks = FrameLoopTests.Run(session, output);
     passed += frameLoopChecks;
-    var nativeDemoCliChecks = NativeDemoSmokeCommandLineTests.Run();
+    var nativeDemoCliChecks = NativeDemoSmokeCommandLineTests.Run() + NativePerformanceAuditCommandLineTests.Run();
     passed += nativeDemoCliChecks;
     var gestureChecks = DeviceGestureTests.Run(session);
     passed += gestureChecks;

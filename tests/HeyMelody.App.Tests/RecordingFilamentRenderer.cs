@@ -44,6 +44,9 @@ internal sealed class RecordingFilamentRenderer(RecordingFilamentRendererFactory
     public FilamentBackend Backend => backend;
     public int FrameRequests { get; private set; }
     public int CopyCalls { get; private set; }
+    public int PeekCalls { get; private set; }
+    public bool HoldFrameCompletion { get; set; }
+    public bool DropFrameBeforeNextCopy { get; set; }
     public FilamentRenderConfiguration Configuration => _configuration;
     public void LoadModel(FilamentModelData model)
     {
@@ -61,7 +64,10 @@ internal sealed class RecordingFilamentRenderer(RecordingFilamentRendererFactory
         ObjectDisposedException.ThrowIf(Disposed, this);
         configuration.Validate();
         if (_configuration.Width != configuration.Width || _configuration.Height != configuration.Height)
+        {
             _diagnostics = _diagnostics with { Generation = _diagnostics.Generation + 1 };
+            _pixels = null;
+        }
         _configuration = configuration;
     }
     public void RequestFrame()
@@ -71,6 +77,11 @@ internal sealed class RecordingFilamentRenderer(RecordingFilamentRendererFactory
             FilamentFailureKind.RuntimeFailure, FilamentFailureStage.Rendering, backend);
         if (owner.FailFrame) throw new IOException("Deliberate worker-frame failure fixture.");
         FrameRequests++;
+        if (!HoldFrameCompletion) CompletePendingFrame();
+    }
+    public void CompletePendingFrame()
+    {
+        ObjectDisposedException.ThrowIf(Disposed, this);
         int width = _configuration.Width, height = _configuration.Height;
         _pixels = new byte[checked(width * height * 4)];
         for (int y = 0; y < height; y++)
@@ -86,10 +97,24 @@ internal sealed class RecordingFilamentRenderer(RecordingFilamentRendererFactory
         _diagnostics = _diagnostics with { Width = width, Height = height, FrameId = _diagnostics.FrameId + 1 };
         _frame = new(width, height, width * 4, _diagnostics.FrameId, _diagnostics.Generation, .1, .05);
     }
+    public bool TryGetLatestFrameInfo(ulong afterFrameId, out FilamentFrameInfo frame)
+    {
+        ObjectDisposedException.ThrowIf(Disposed, this);
+        PeekCalls++;
+        frame = default;
+        if (_pixels is null || afterFrameId >= _frame.FrameId) return false;
+        frame = _frame;
+        return true;
+    }
     public bool TryCopyLatestFrame(ulong afterFrameId, Span<byte> destination, out FilamentFrameInfo frame)
     {
         ObjectDisposedException.ThrowIf(Disposed, this);
         CopyCalls++;
+        if (DropFrameBeforeNextCopy)
+        {
+            DropFrameBeforeNextCopy = false;
+            _pixels = null;
+        }
         frame = _frame;
         if (_pixels is null || afterFrameId >= _frame.FrameId) return false;
         if (destination.Length < _pixels.Length) throw new ArgumentException("Frame destination is too small.");

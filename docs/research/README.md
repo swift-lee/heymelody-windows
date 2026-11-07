@@ -14,6 +14,8 @@
 
 | 文档入口 | 内容 |
 | --- | --- |
+| [渲染快速优化（2026-11-07）](rendering-quick-optimization-arm64-2026-11-07.md) | 全平台默认 800px 模型长边上限与空锁前 probe；本机 CPU 指标下降，原 10% 新帧交付门槛未满足，用户接受 CPU 收益放行；Windows ARM64 实测不等于其它平台已实测 |
+| [ARM64 渲染性能审计（2026-11-07）](rendering-performance-arm64-2026-11-07.md) | 同机有／无 3D、静态／动画与滚动对照，Filament 后端及离屏链路审计；区分 UI 回调、位图观测、CPU／GPU 采样与屏显验证边界 |
 | [本机 ARM64 UI 卡顿调查](ui-lag-arm64-2026-10-23.md) | 预构建的默认 WARP 选卡、Adreno 单变量对照、X4 WebP 持续更新成本，以及回调节拍和真实上屏 FPS 的验证边界 |
 | [macOS RFCOMM 控制连接修复（2026-11-05）](macos-rfcomm-connectivity-2026-11-05.md) | macOS 12+ 带 UUID 过滤的 SDP 查询为空操作、缓存端点解析、5 秒超时、TCC 首次授权与 Enco X4 真机日志 |
 | [macOS 窗口材质分层与 Dock 激活策略（2026-11-05）](macos-window-material-and-dock-2026-11-05.md) | 主窗口整窗透明根因、Avalonia.Native 固定 HUDWindow 材质、组件窗口近不透明色调、Host/主应用 Accessory 策略与 Dock 幽灵图标边界 |

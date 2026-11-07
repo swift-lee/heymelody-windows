@@ -75,7 +75,7 @@ public class DeviceModelView : UserControl
     private int _loopGeneration;
     private TimeSpan? _lastFrame;
     private readonly ModelFramePacer _framePacer = new();
-    // Locking a WriteableBitmap invalidates its Skia image (a new GPU upload) even if nothing is written, so the renderer
+    // Locking a WriteableBitmap invalidates its cached Skia image even if nothing is written, so the renderer
     // is polled only until a frame arrives after the last request. Requests can overlap (the frame copied first may predate
     // the last pose), so polling continues for a short grace after the last request instead of stopping at the first frame.
     private const double FramePollGraceSeconds = .25;
@@ -83,6 +83,19 @@ public class DeviceModelView : UserControl
     private double _frameRequestedAt;
     /// <summary>Set when the renderer's frame layout cannot go straight into the bitmap; tests set it to force the managed path.</summary>
     internal bool DirectCopyDisabled { get; set; }
+    private ModelRenderPolicy? _renderingPolicyOverride;
+    internal ModelRenderPolicy RenderingPolicy => _renderingPolicyOverride ?? ModelRenderPolicy.PlatformDefault;
+    internal ModelRenderPolicy? RenderingPolicyOverride
+    {
+        get => _renderingPolicyOverride;
+        set
+        {
+            value?.Validate();
+            if (_renderingPolicyOverride == value) return;
+            _renderingPolicyOverride = value;
+            FitCamera();
+        }
+    }
     private float _appliedYaw = float.NaN, _appliedPitch = float.NaN;
     private ulong _afterFrameId;
     private double _lastPresentedAt;
@@ -105,6 +118,7 @@ public class DeviceModelView : UserControl
     internal FilamentFrameInfo LastPresentedFrame => _lastFrameInfo;
     internal long PresentedFrameCount => _presentedFrames;
     internal double[] PresentationIntervalsMilliseconds => _presentationIntervals.ToArray();
+    internal Action<ulong>? FrameCopiedObserver { get; set; }
     public bool AnimationActive => _loopActive;
     public FilamentDiagnostics Diagnostics
     {
@@ -509,9 +523,9 @@ public class DeviceModelView : UserControl
         // An Image has no intrinsic size until its first frame. The host already has its layout allocation.
         if (size.Width <= 0 || size.Height <= 0) size = _root.Bounds.Size;
         if (_renderer is null || source is null || size.Width <= 0 || size.Height <= 0) return;
-        var scaling = source.RenderScaling;
-        var width = checked((int)Math.Ceiling(size.Width * scaling));
-        var height = checked((int)Math.Ceiling(size.Height * scaling));
+        var pixels = RenderingPolicy.GetPixelSize(size, source.RenderScaling);
+        var width = pixels.Width;
+        var height = pixels.Height;
         if (width != _configuration.Width || height != _configuration.Height) _lastFrameInfo = default;
         _configuration = _configuration with
         {
@@ -614,6 +628,21 @@ public class DeviceModelView : UserControl
     internal int BitmapLockCount { get; private set; }
     internal int DirectFrameCopyCount { get; private set; }
     internal int FallbackFrameCopyCount { get; private set; }
+    internal int FrameProbeCount { get; private set; }
+    internal int FrameProbeReadyCount { get; private set; }
+    internal int FrameProbeNoFrameCount { get; private set; }
+
+    internal void FreezePoseForAudit(double yawRadians, double pitchRadians)
+    {
+        if (!double.IsFinite(yawRadians)) throw new ArgumentOutOfRangeException(nameof(yawRadians));
+        if (!double.IsFinite(pitchRadians) || Math.Abs(pitchRadians) > ModelOrbitMotion.PitchLimit)
+            throw new ArgumentOutOfRangeException(nameof(pitchRadians));
+        ReleasePointer();
+        Motion.SetActive(true);
+        Motion.RestoreMotion(new(yawRadians, pitchRadians, 0, 0, 0, ModelOrbitPhase.Idle));
+        Motion.SetActive(false);
+        ApplyCamera(force: true);
+    }
 
     private void MarkFrameRequested() { _frameRequested = true; _frameRequestedAt = _clock.Elapsed.TotalSeconds; }
 
@@ -645,6 +674,7 @@ public class DeviceModelView : UserControl
         }
         _lastPresentedAt = now;
         ++_presentedFrames;
+        FrameCopiedObserver?.Invoke(frame.FrameId);
         if (now - _diagnosticsAt >= .5) { _diagnosticsAt = now; _lastDiagnostics = _renderer.GetDiagnostics(); UpdateDiagnostics(); }
     }
 
@@ -674,6 +704,16 @@ public class DeviceModelView : UserControl
         frame = default;
         int width = _configuration.Width, height = _configuration.Height;
         if (DirectCopyDisabled || _renderer is null || _bitmap is null || _bitmap.PixelSize.Width != width || _bitmap.PixelSize.Height != height) return DirectCopy.Unavailable;
+        if (RenderingPolicy.ProbeBeforeBitmapLock)
+        {
+            ++FrameProbeCount;
+            if (!_renderer.TryGetLatestFrameInfo(_afterFrameId, out _))
+            {
+                ++FrameProbeNoFrameCount;
+                return DirectCopy.NoFrame;
+            }
+            ++FrameProbeReadyCount;
+        }
         ++BitmapLockCount;
         using var buffer = _bitmap.Lock();
         if (buffer.RowBytes != width * 4) return DirectCopy.Unavailable;

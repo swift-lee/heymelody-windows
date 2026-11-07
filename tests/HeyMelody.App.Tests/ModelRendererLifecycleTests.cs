@@ -125,10 +125,10 @@ internal static class ModelRendererLifecycleTests
                 await UntilAsync(() =>
                 {
                     _ = cacheView.CaptureLatestFrame(out var frame);
-                    return frame.Width == (int)Math.Ceiling(cacheView.Viewport.Bounds.Width * cacheWindow.RenderScaling)
-                        && frame.Height == (int)Math.Ceiling(cacheView.Viewport.Bounds.Height * cacheWindow.RenderScaling)
+                    var expected = cacheView.RenderingPolicy.GetPixelSize(cacheView.Viewport.Bounds.Size, cacheWindow.RenderScaling);
+                    return frame.Width == expected.Width && frame.Height == expected.Height
                         && frame.Width != firstFrame.Width;
-                }, "A portrait resize presents only a frame matching the current physical dimensions.");
+                }, "A portrait resize presents only a frame matching the current policy's DPI-aware backing dimensions.");
                 Check(Math.Abs(cacheFactory.Instances.Single().Configuration.FitMargin - 1.08f) < .0001,
                     "Portrait views retain the common fit margin; native camera fitting owns the aspect ratio.");
                 cacheWindow.Content = null;

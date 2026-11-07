@@ -4,7 +4,9 @@
 
 本分支将耳机三维渲染迁移至 Google Filament，界面继续使用 Avalonia 12.1.4 和 FluentAvalonia。两份本地官方样本（欢律 17.6.5、ColorOS 无线耳机 17.6.3）都通过 OPLUS VFX ModelViewer 1.3.8 的 Android 封装调用 Filament/gltfio；1.3.8 是封装版本，不是已确认的 Filament 上游版本。本项目使用固定上游源码自行构建 Windows 原生桥，不分发 Android SDK 或 JNI 二进制。
 
-三维模型默认使用 Vulkan，在应用设置的“3D模型渲染API”下拉框选择 OpenGL；说明为“若存在渲染问题，请尝试切换到 OpenGL”。两种模式均保留原始模型、完整 PBR 贴图、拖动、惯性、自转和隐藏／最小化暂停，按控件实际尺寸与系统 DPI 渲染。“3D模型渲染帧率”使用 30帧、60帧、无限制三档吸附滑块，默认无限制；保存后立即应用，取消不改变设置。旧跟随显示器和试验版 120 帧设置对应无限制，原有 30、60 帧选择保留。30、60 帧限帧按真实时间累计并保留余量；无限制档不设额外上限，每个 Avalonia 动画回调最多请求一帧，停顿后不追赶补帧。实际帧率还受窗口回调频率和渲染耗时限制。切换后端保留已验证字节与相机运动状态，单独改变帧率不重建 Engine。
+Windows 下三维模型默认使用 Vulkan，在应用设置的“3D模型渲染API”下拉框选择 OpenGL；说明为“若存在渲染问题，请尝试切换到 OpenGL”。两种模式均保留原始模型、完整 PBR 贴图、拖动、惯性、自转和隐藏／最小化暂停；macOS 仍固定使用 Metal。全平台按控件实际尺寸与系统 DPI 计算物理像素后，统一比例限制模型位图长边为 800 像素；较小视口不放大、不降级，普通 UI 和文字仍使用原分辨率。此预算降低像素读回与搬运开销，高 DPI／大视口中的模型可能略软，不改变模型布局、相机和手势速度。实测只覆盖 Windows ARM64，不据此承诺其它平台的性能收益。
+
+“3D模型渲染帧率”使用 30帧、60帧、无限制三档吸附滑块，默认无限制；保存后立即应用，取消不改变设置。旧跟随显示器和试验版 120 帧设置对应无限制，原有 30、60 帧选择保留。30、60 帧限帧按真实时间累计并保留余量；无限制档不设额外上限，每个 Avalonia 动画回调最多请求一帧，停顿后不追赶补帧。实际帧率还受窗口回调频率和渲染耗时限制。切换后端保留已验证字节与相机运动状态，单独改变帧率不重建 Engine。MSAA4、材质与后处理不随像素预算改变。
 
 Vulkan 不可用时显示静态 detail 外观并提示手动选择 OpenGL，不自动选择 OpenGL 或修改偏好；OpenGL 不可用时显示普通不可用提示。没有同款图片的内置演示使用通用耳机图标。损坏资源和缺失组件单独归类，不提示无效的后端切换。
 
@@ -12,9 +14,9 @@ Vulkan 不可用时显示静态 detail 外观并提示手动选择 OpenGL，不�
 
 2026-10-25 的 Radeon 680M／驱动 31.0.22013.1007 [本地用户日志](../research/rdna2-novulkan-logs/)来自版本 `0cabb0b`：Vulkan 已识别 AMD 设备并报告 feature level 3，随后原先硬编码的 `DEPTH24`（Filament 格式编号 22）被拒绝，三次 probe 均以 `0xC0000409` 结束；同周期 OpenGL probe 和模型加载成功。此次修改针对这个深度格式能力差异；新产物在该显卡与驱动上的实机回测仍待用户确认。
 
-当前运行验收范围为 Windows x64 的 Vulkan、OpenGL；ARM64 为交叉构建和静态校验。macOS Metal、Linux Vulkan／EGLHeadless 的构建准备、ABI 2、探测程序及验证边界见 [Filament 构建与接口](filament-renderer.md)。完整截图留在本地，只检查本轮变更的模型和设置区域。
+早期运行验收覆盖 Windows x64 的 Vulkan、OpenGL；2026-11-07 补充了 Windows ARM64／8cx Gen 3 的真实窗口性能审计与快速优化复测，见本文对应章节。macOS Metal、Linux Vulkan／EGLHeadless 的构建准备、ABI 2、探测程序及验证边界见 [Filament 构建与接口](filament-renderer.md)；全平台启用托管策略不代表这些后端已完成实机验收。完整截图留在本地，只检查对应轮次的模型和设置区域。
 
-帧复制：`PresentLatestFrame` 从 `ApplyCamera` 等请求新帧（`_frameRequested`）起轮询渲染器，直到已取到帧且距最后一次请求满 0.25 s 才停止，因为锁定 `WriteableBitmap` 即使不写入也会使 Skia 快照失效并触发一次纹理上传；连续请求可能重叠，先取到的帧未必是最后姿态，宽限期保证停止转动时最后一帧仍会呈现；位图尺寸与配置相同且 `RowBytes == 宽×4` 时，渲染器直接写入已锁定的位图，托管 `_frameBuffer` 逐行复制只作为步幅或尺寸不符、渲染器拒绝较小目标缓冲时的回退（`DirectCopyDisabled`）。
+帧复制：`PresentLatestFrame` 从 `ApplyCamera` 等请求新帧（`_frameRequested`）起轮询渲染器，直到已取到帧且距最后一次请求满 0.25 s 才停止；连续请求可能重叠，先取到的帧未必是最后姿态，因此保留最终帧宽限。全平台直接复制路径先用 `TryGetLatestFrameInfo` 查询当前新 READY 帧，再锁定 `WriteableBitmap`；无新帧不加锁。查询复用 ABI 2 的 null／0 参数，不复制或消费帧；查询与复制间可发生换代或新帧发布，实际复制的结果、尺寸和 FrameId 仍为权威。锁定位图即使不写入也会更新版本并使 Skia 快照失效，但不能据此断言每次空锁都会立即上传 GPU。位图尺寸与配置相同且 `RowBytes == 宽×4` 时直接复制；托管 `_frameBuffer` 逐行复制只作为步幅或尺寸不符、目标缓冲不足时的回退（`DirectCopyDisabled`），该路径本就先取像素再锁位图，不重复查询。
 
 动画调度不再按窗口焦点、空闲／非交互、设置展开或滚动自动降档。原全局 `AnimationYield` 及其 hold／pulse 状态已移除：3D 自转、拖动和惯性统一使用用户选择的 30／60／无限制 `ModelFramePacer`，`Motion.Step` 仍按真实时间积分；`.65 s` 自转等待、隐藏／最小化／祖先不可见／卸载暂停不变。Lottie 不再接收外部 30 fps 消息；WebP 原有资源帧时长、循环次数、Lottie 末帧静态缓存不变，循环动画不因此新增整段缓存。恢复可见后仍逐动画回调推进，不建立后台忙循环或追赶补帧。无限制不保证固定实测 FPS，也不绕过原生渲染背压、请求合并、像素复制和最终帧宽限。
 
@@ -42,6 +44,12 @@ Windows offline profile 最终收尾重跑的 22 个入口全部通过，其中 
 本机为 Windows x64、NVIDIA RTX 2060，WMI 报告刷新率 144 Hz、驱动版本 `32.0.16.1742`；OpenGL 原生日志为 `4.5 NVIDIA 617.42`。本次 Vulkan 路径实际为 Mesa Dozen 26.3 over D3D12，不能描述为原生 NVIDIA Vulkan 驱动验证或与之等同的性能测试。选定的 ABI 2 原生输入 DLL 摘要前缀为 `db1b10aa...`，已通过 `RequireCurrent`；完整摘要、真实导出核对和本机验证记录索引位于 `artifacts/hero-throttle-removal-20261104/`（含 `native-input-review.json`），仅本机保存、不随普通 clone 提供。
 
 Vulkan 长测只有自转及拖动后惯性／自转恢复两段各至少 30 s 通过。辅助窗口安全命中／真实前台门未满足，独立前台诊断确认是 Windows `LockApp`；该次 `InputSent=false`，没有向锁屏或第三方窗口发送输入，也未绕过锁屏。不能据此宣称 8 段长测通过。OpenGL 长测未执行；剩余长测场景及 8cx Gen 3 的匹配架构实机验证仍待用户解锁后另行复验，随机帧率波动的硬件根因仍未证明。
+
+### ARM64 性能审计（2026-11-07）
+
+同机有／无 3D、静态／动画美术及滚动对照的入口、证据和验证边界见 [ARM64 渲染性能审计](research/rendering-performance-arm64-2026-11-07.md)；专用 `--native-performance-audit` 参数见[开发指南](development.md#界面渲染与字体)。UI 回调与位图观测不等于真实屏显 FPS；此次审计独立于上述 2026-11-04 调度长测，不改写其完成范围。
+
+后续[快速优化复测](research/rendering-quick-optimization-arm64-2026-11-07.md)实现并测试了 800 像素长边预算与无新帧不锁位图：本机模型像素量减少约 42%，Vulkan 自转／滚动位图交付率只提高约 5.9%／2.1%，未达到原定 10% 门槛；CPU 单核当量分别下降约 19.3%／9.9%。用户明确接受以降低 CPU 开销放行，并要求全平台默认启用；这不表示帧率问题已经解决。审计入口保留独立因素覆盖；没有改动或重编 native DLL、Filament、Avalonia、FluentAvalonia。
 
 ## 模型加载、预读与计时
 
