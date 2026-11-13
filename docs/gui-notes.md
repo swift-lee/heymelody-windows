@@ -96,6 +96,28 @@ macOS 背景使用原生 NSVisualEffectView Blur，按窗口实际协商的透�
 
 “连接或同一设备身份无法核实”包括：后台进程崩溃、超时或返回损坏/不匹配的 RPC 记录，导致客户端没有完整回执；重新读取时无法取得有效型号、能力或连接状态；返回的设备身份与当前选择/连接会话不一致；后台重启后丢失原地址到随机身份的映射。此时设置可能已经到达耳机，不能把旧请求转移到另一副同名耳机。程序提示并只读刷新，身份映射丢失时要求重新选择并连接。手机修改某个设置本身不属于身份无法核实，也不能仅凭一次 GET 超时断言蓝牙已断开。
 
+## 应用设置过渡与性能边界
+
+应用设置继续使用 FluentAvaloniaUI 3.1.0 的 `FAContentDialog`（Avalonia 12.1.4）。仅在该对话框实例的 `TemplateApplied` 中，按模板 NameScope 取得 `Container`，将其 `RenderTransform` 设为 `TransformOperations.Identity`，停止整个设置面板的缩放；保留默认透明度过渡、阴影、烟幕及关闭等待。其他确认、错误和退出对话框沿用原模板。模板部件缺失时记录警告并继续显示默认对话框，升级依赖时由回归检查发现不兼容。
+
+2026-11-14 的 Windows 原生 A/B 基线中，预热后打开阶段的最大 RAF 回调间隔为 174–267 ms，关闭阶段为 42–192 ms；仅去掉阴影未消除反复开关时的长间隔。修复后三轮正式原生检查各通过 62 项，覆盖浅深主题主轮和美术 fixture；整个对话框生命周期的 `nonIdentitySamples` 均为 0。打开过渡按与基线相同的 Loaded 后 300 ms 观察，关闭从 Closing 观察到 Closed。下表每格的两个热数据来自该轮的两主题复测：
+
+| 本机正式收据 | 热打开过渡最大 RAF 间隔（ms） | 热关闭最大 RAF 间隔（ms） | 从操作开始观察 300 ms 的热打开最大 RAF 间隔（ms） | 冷首开到 Loaded（ms） |
+| --- | --- | --- | --- | --- |
+| [第 03 轮](../artifacts/settings-fix-native-20261114-03/native-model-settings-receipt.json) | 46.198／30.182 | 40.179／39.448 | 82.310／63.443 | 687.547 |
+| [第 04 轮](../artifacts/settings-fix-native-20261114-04/native-model-settings-receipt.json) | 13.863／27.347 | 34.048／28.231 | 71.975／54.477 | 738.115 |
+| [第 05 轮](../artifacts/settings-fix-native-20261114-05/native-model-settings-receipt.json) | 13.716／29.633 | 40.985／35.611 | 82.751／77.964 | 788.327 |
+
+相同过渡窗口的热打开和关闭最大间隔均低于本轮 50 ms 目标；从操作开始的原始窗口与冷首开延迟另行保留，不能把不同观察起点混为同一改善数字。Release 构建、8 组设置呈现检查和 61 项 CLI 检查通过；完整无头检查仍在既有 `FrameCopyTests.PendingFrameAsync` 失败，见优化待办 BUG-15。
+
+上述 RAF 间隔衡量窗口动画回调节拍，不是 DWM 实际上屏 FPS。这里的三轮使用隔离偏好、模拟后台和录制 renderer，不连接耳机，不证明真实 Filament、所有 GPU／驱动或硬件上的结果；首次打开的文本冷路径仍另列待办。完整机器产物留在本机 `artifacts/`，不承诺随普通 clone 提供。后续复验沿用开发指南中的 `--native-model-settings-smoke`；真实美术另用性能审计的可选 `--verify-settings` 检查。
+
+完整 X4 动画另以生产原件复验，输入为 6,508,910 bytes，SHA256 为 `269c63cccf729ea819a38cc010f6c7f6ed86fefa00bc680e84f1e4863f3d4736`。[浅色报告](../artifacts/settings-real-x4-light-20261114-01/settings-verification.json)和[深色报告](../artifacts/settings-real-x4-dark-20261114-01/settings-verification.json)均通过：各执行三次设置打开／取消，动画绘制计数分别从 315 增至 522、321 增至 529；两次热打开过渡的最大 RAF 间隔分别为 33.096／30.246 ms、35.120／30.676 ms，热关闭为 7.927／8.675 ms、8.617／7.651 ms。两轮均未写入隔离偏好或诊断配置，未调用禁止的后台接口；基线采样与设置复验分别记录。
+
+真实 Free4 丹拿 Filament 的首轮浅色审计因旧缓存 payload 缺少当前要求的 `hm_set_log_callback` 出口和 manifest 字段，未进入设置复验阶段；[失败摘要](../artifacts/settings-real-model-light-20261114-01/summary.json)与[未开始的设置复验收据](../artifacts/settings-real-model-light-20261114-01/settings-verification.json)继续保留。[旧 payload 副本](../artifacts/settings-filament-runtime-before-20261114-01/)共 20 文件、4,678,134 bytes，逐文件 SHA 校验一致。随后使用已有依赖缓存执行 `Build-FilamentNative.ps1 -SkipSmoke`，约 21.2 s 完成增量构建；当前 manifest 静态校验覆盖 19 文件，[ABI 检查](../artifacts/settings-filament-abi-current-20261114-01/native-abi-report.json)通过全部 11 个要求出口。此过程刷新本机构建产物，没有修改 renderer 源码；ABI 检查本身不创建 GPU，引擎表现由后续审计单独确认。
+
+刷新产物后，真实 Vulkan Free4 丹拿模型的[浅色报告](../artifacts/settings-real-model-light-20261114-02/settings-verification.json)与[深色报告](../artifacts/settings-real-model-dark-20261114-02/settings-verification.json)均通过。模型 SHA256 为 `7f85c66d397ee45163246ff745c37e52a70059e739be0af2283a30bfb689c2f6`；呈现帧数分别从 1362 增至 1610、1338 增至 1584，热打开过渡最大 RAF 间隔为 16.765／9.730 ms、7.719／8.948 ms，热关闭为 7.551／7.861 ms、7.897／8.670 ms。两轮均未写入隔离偏好或诊断配置，未调用禁止的后台接口。该结果覆盖本机已运行的 Vulkan 后端，不代表 OpenGL、其它硬件或真实耳机验证。
+
 ## 平滑滚动
 
 主窗口设置区 `ControlScroll`、底部设备栏 `DeviceBarScroll`、设备管理器 `DeviceScroll` 和校准向导 `PageScroll` 使用 SmoothScroll.Avalonia 12.0.0.14 的局部滚动主题，输入子包固定为仓库携带的 `SmoothScroll.Avalonia.Interaction 12.0.0.15-heymelody.2`。设备栏的整数与小数纵向输入都交由库映射为横向滚动，嵌套列表等控件保留原有 FluentAvalonia 模板。启用平滑主题时，滚动到目标（`BringIntoView`）使用 500 ms 动画；启动时若系统关闭动画，则保留原主题及即时滚动。许可原文见 [SmoothScroll.Avalonia MIT 许可](licenses/SmoothScroll.Avalonia-LICENSE.txt)，局部补丁、来源与手动重建见 [vendor 说明](../vendor/smooth-scroll/README.md)。

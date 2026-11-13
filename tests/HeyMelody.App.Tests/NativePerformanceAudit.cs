@@ -8,17 +8,19 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Controls.Templates;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
+using HeyMelody.Diagnostics;
 using HeyMelody.Rendering.Filament;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Ui;
 
 /// <summary>Opt-in real-window measurements; never constructs a production backend.</summary>
-internal static class NativePerformanceAudit
+internal static partial class NativePerformanceAudit
 {
     internal const string Usage = "--native-performance-audit --scenario <static|static-idle|static-scroll|animated|model|model-scroll|model-frozen> "
         + "--backend <vulkan|opengl> --seconds <5..120> --output-dir <new-directory> "
         + "[--artwork-file <animated-webp>] [--basic-render <true|false>] "
-        + "[--model-max-edge <0..4096>] [--frame-ready-probe <on|off>] [--theme <light|dark>]";
+        + "[--model-max-edge <0..4096>] [--frame-ready-probe <on|off>] [--theme <light|dark>] "
+        + "[--verify-settings <true|false> (animated|model only)]";
     private static AuditState _state = null!;
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
@@ -38,11 +40,13 @@ internal static class NativePerformanceAudit
             options.GetValueOrDefault("--artwork-file"), options.GetValueOrDefault("--basic-render") == "true",
             new(int.Parse(options.GetValueOrDefault("--model-max-edge", "800")),
                 options.GetValueOrDefault("--frame-ready-probe", "on") == "on"),
-            options.GetValueOrDefault("--theme", "light"));
+            options.GetValueOrDefault("--theme", "light"), options.GetValueOrDefault("--verify-settings") == "true");
         var thread = new Thread(() =>
         {
             var oldPath = ThemePreferences.SettingsPathOverride;
+            var oldDiagnosticRoot = DiagnosticPaths.DataRootOverride;
             ThemePreferences.SettingsPathOverride = Path.Combine(output, "unwritten-preferences.json");
+            if (_state.VerifySettings) DiagnosticPaths.DataRootOverride = Path.Combine(output, "isolated-diagnostics");
             try
             {
                 ModelRenderingPreferences.Reload();
@@ -57,16 +61,27 @@ internal static class NativePerformanceAudit
             finally
             {
                 ThemePreferences.SettingsPathOverride = oldPath;
+                DiagnosticPaths.DataRootOverride = oldDiagnosticRoot;
             }
         }) { IsBackground = true, Name = "HeyMelody performance audit" };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         if (!thread.Join(TimeSpan.FromSeconds(seconds + 90)))
         {
+            if (_state.VerifySettings)
+                WriteNew(Path.Combine(output, "settings-verification.json"), JsonSerializer.Serialize(new
+                { success = false, timedOut = true, failure = "UI thread join watchdog expired." }, Json));
             WriteNew(Path.Combine(output, "summary.json"), JsonSerializer.Serialize(new
             { success = false, timedOut = true, scenario, seconds, failure = "UI thread join watchdog expired." }, Json));
             return 1;
         }
+        if (_state.VerifySettings)
+            WriteNew(Path.Combine(output, "settings-verification.json"),
+                JsonSerializer.Serialize(_state.SettingsVerification ?? new
+                {
+                    success = false, settingsVerificationStarted = false, failure = _state.Failure,
+                    scope = "Settings verification was requested but the baseline audit did not reach it."
+                }, Json));
         using (var raw = new StreamWriter(new FileStream(Path.Combine(output, "samples.jsonl"), FileMode.CreateNew)))
         {
             foreach (var callback in _state.Callbacks) raw.WriteLine(JsonSerializer.Serialize(new { kind = "uiCallback", callback }));
@@ -156,6 +171,11 @@ internal static class NativePerformanceAudit
             animatedArtworkAtStart = first?.AnimatedArtwork, animatedArtworkAtEnd = last?.AnimatedArtwork,
             animatedArtworkDrawCountDelta = _state.AnimatedDrawsAtEnd - _state.AnimatedDrawsAtStart,
             artwork = _state.ArtworkDescription, scroll = _state.ScrollDescription,
+            settingsVerification = _state.VerifySettings ? new
+            {
+                completed = _state.SettingsVerificationCompleted, receiptFile = "settings-verification.json",
+                scope = "Separate post-measurement interactions; excluded from baseline samples and counters."
+            } : null,
             nativeBluetoothCalls = 0, productionBackendStarted = false, forbiddenServiceCalls = _state.Service.ForbiddenCalls,
             isolatedPreferencesWritten = File.Exists(Path.Combine(output, "unwritten-preferences.json")),
             modelTimingScope = "Model render/readback values are last native CPU wall-clock statistics, not GPU timestamp timings; recent presentation intervals overlap.",
@@ -186,7 +206,8 @@ internal static class NativePerformanceAudit
             if (i + 1 == args.Length || !args[i].StartsWith("--", StringComparison.Ordinal)
                 || !options.TryAdd(args[i], args[i + 1])) return false;
         return !options.Keys.Any(key => key is not ("--scenario" or "--backend" or "--seconds" or "--output-dir"
-                or "--artwork-file" or "--basic-render" or "--model-max-edge" or "--frame-ready-probe" or "--theme"))
+                or "--artwork-file" or "--basic-render" or "--model-max-edge" or "--frame-ready-probe" or "--theme"
+                or "--verify-settings"))
             && options.TryGetValue("--scenario", out var scenario)
             && scenario is ("static" or "static-idle" or "static-scroll" or "animated" or "model" or "model-scroll" or "model-frozen")
             && options.TryGetValue("--backend", out var backend) && backend is ("vulkan" or "opengl")
@@ -197,11 +218,13 @@ internal static class NativePerformanceAudit
             && (!options.TryGetValue("--model-max-edge", out var edgeText)
                 || int.TryParse(edgeText, out var edge) && edge is >= 0 and <= 4096)
             && (!options.TryGetValue("--frame-ready-probe", out var probe) || probe is ("on" or "off"))
-            && (!options.TryGetValue("--theme", out var theme) || theme is ("light" or "dark"));
+            && (!options.TryGetValue("--theme", out var theme) || theme is ("light" or "dark"))
+            && (!options.TryGetValue("--verify-settings", out var verifySettings)
+                || verifySettings is ("true" or "false") && scenario is ("animated" or "model"));
     }
 
     private sealed class AuditState(string scenario, FilamentBackend backend, int seconds, string output, string? artwork,
-        bool basicRenderMode, ModelRenderPolicy modelRenderPolicy, string theme)
+        bool basicRenderMode, ModelRenderPolicy modelRenderPolicy, string theme, bool verifySettings)
     {
         public string Scenario { get; } = scenario;
         public FilamentBackend Backend { get; } = backend;
@@ -211,13 +234,14 @@ internal static class NativePerformanceAudit
         public bool BasicRenderMode { get; } = basicRenderMode;
         public ModelRenderPolicy ModelRenderPolicy { get; } = modelRenderPolicy;
         public string Theme { get; } = theme;
+        public bool VerifySettings { get; } = verifySettings;
         public AuditService Service { get; } = new();
         public NativeRenderingProbe? Probe;
         public List<CallbackSample> Callbacks { get; } = [];
         public List<ProcessSample> Samples { get; } = [];
         public List<FrameCopySample> FrameCopies { get; } = new((seconds + 1) * 256);
-        public object? Geometry, ArtworkDescription, ScrollDescription, Desktop, Screenshot, FixedPose;
-        public bool Completed, Closed;
+        public object? Geometry, ArtworkDescription, ScrollDescription, Desktop, Screenshot, FixedPose, SettingsVerification;
+        public bool Completed, Closed, SettingsVerificationCompleted;
         public double MeasurementSeconds;
         public DateTime? MeasurementStartedUtc, MeasurementEndedUtc;
         public long? ModelPresentedAtStart, ModelPresentedAtEnd;
@@ -297,8 +321,13 @@ internal static class NativePerformanceAudit
             DeviceAnimatedWebpView? animatedArtwork = null;
             if (_state.Scenario.StartsWith("model", StringComparison.Ordinal))
             {
-                await UntilAsync(() => page.GetVisualDescendants().OfType<DeviceModelView>()
-                    .Any(view => view.ModelReady && view.LastPresentedFrame.FrameId > 0), "Native model did not render.");
+                await UntilAsync(() =>
+                {
+                    var views = page.GetVisualDescendants().OfType<DeviceModelView>().ToArray();
+                    if (views.FirstOrDefault(view => view.LoadError is not null) is { } failed)
+                        throw new InvalidOperationException("Native model failed to load: " + failed.LoadError);
+                    return views.Any(view => view.ModelReady && view.LastPresentedFrame.FrameId > 0);
+                }, "Native model did not render.");
                 model = page.GetVisualDescendants().OfType<DeviceModelView>().Single();
                 observedModel = model;
                 model.RenderingPolicyOverride = _state.ModelRenderPolicy;
@@ -410,6 +439,8 @@ internal static class NativePerformanceAudit
                 if (_state.AnimatedDrawsAtEnd <= _state.AnimatedDrawsAtStart)
                     throw new InvalidOperationException("Animated artwork did not draw during measurement.");
             }
+            if (_state.VerifySettings)
+                await VerifySettingsAfterMeasurementAsync(window, page, model, animatedArtwork);
             _state.Completed = true;
 
             void CaptureMeasurementEnd(double seconds)

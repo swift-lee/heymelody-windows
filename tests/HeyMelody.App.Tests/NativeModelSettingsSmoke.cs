@@ -8,13 +8,14 @@ using Avalonia.Media.Imaging;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
 using FluentAvalonia.UI.Controls;
+using HeyMelody.Diagnostics;
 using HeyMelody.Rendering.Filament;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Ui;
 using SkiaSharp;
 
 /// <summary>Focused Win32 settings checks with an isolated preference file and a managed recording renderer.</summary>
-internal static class NativeModelSettingsSmoke
+internal static partial class NativeModelSettingsSmoke
 {
     private static State _state = new();
 
@@ -30,12 +31,14 @@ internal static class NativeModelSettingsSmoke
             var oldBackend = ModelRenderingPreferences.CompatibilityMode;
             var oldRate = ModelRenderingPreferences.FrameRate;
             var oldFactory = DeviceModelView.DefaultFactoryOverride;
+            var oldDiagnosticRoot = DiagnosticPaths.DataRootOverride;
             try
             {
                 ThemePreferences.SettingsPathOverride = Path.Combine(output, "preferences-" + Guid.NewGuid().ToString("N") + ".json");
                 File.WriteAllText(ThemePreferences.SettingsPathOverride,
                     "{\"theme\":\"system\",\"modelFrameRate\":\"display\",\"unrelated\":17}");
                 DeviceModelView.DefaultFactoryOverride = _state.Factory;
+                DiagnosticPaths.DataRootOverride = Path.Combine(output, "isolated-diagnostics");
                 ModelRenderingPreferences.Reload();
                 Check(ModelRenderingPreferences.Backend == FilamentBackend.Vulkan
                     && ModelRenderingPreferences.FrameRate == ModelFrameRate.Unlimited, "Isolated preferences default to Vulkan and unlimited.");
@@ -48,6 +51,7 @@ internal static class NativeModelSettingsSmoke
                 ThemePreferences.SettingsPathOverride = oldPath;
                 ModelRenderingPreferences.Apply(oldBackend, oldRate);
                 DeviceModelView.DefaultFactoryOverride = oldFactory;
+                DiagnosticPaths.DataRootOverride = oldDiagnosticRoot;
             }
         }) { IsBackground = true, Name = "HeyMelody native model settings" };
         thread.SetApartmentState(ApartmentState.STA); thread.Start();
@@ -60,6 +64,8 @@ internal static class NativeModelSettingsSmoke
             systemSettingsLaunches = 0, nativeRendererLoads = 0, recordingRendererCreations = _state.Factory.CreateCalls,
             scope = "focused real Win32 settings UI, native mouse/keyboard messages, themes, saved preferences and earbud glyph; managed recording renderer only; DWM attributes are observations, not assertions",
             captureScope = "real Win32 window and input; Avalonia scene pixels at the window's actual render scaling",
+            timingScope = "Fixed 300 ms opening windows and Closing-to-Closed windows; first-in-process and same-theme warm opens are separate. Managed model renderer, isolated preferences and diagnostic paths; not displayed FPS.",
+            timing = _state.Timing, timingLifecycles = _state.TimingLifecycles, artworkChecks = _state.ArtworkReceipts,
             states = _state.Receipts, failure = _state.Failure
         };
         var json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
@@ -74,6 +80,7 @@ internal static class NativeModelSettingsSmoke
         internal readonly GuardService Service = new();
         internal readonly RecordingFilamentRendererFactory Factory = new();
         internal readonly List<object> Receipts = [];
+        internal readonly List<object> Timing = [], TimingLifecycles = [], ArtworkReceipts = [];
         internal int Checks;
         internal bool Completed, Closed;
         internal string? Failure;
@@ -98,6 +105,7 @@ internal static class NativeModelSettingsSmoke
     {
         var page = window.FindControl<MainView>("Page")!;
         var vm = (MainViewModel)page.DataContext!;
+        using var timing = new NativeSettingsTimingProbe(window);
         try
         {
             await UntilAsync(() => vm.IsDemoSelected && vm.HasVerifiedSnapshot, "The local demo initializes without a backend.");
@@ -118,8 +126,9 @@ internal static class NativeModelSettingsSmoke
                 var initialRate = ModelRenderingPreferences.FrameRate;
                 var initialBackend = ModelRenderingPreferences.CompatibilityMode;
                 var initialFile = File.ReadAllText(ThemePreferences.SettingsPathOverride!);
+                var opening = timing.BeginOpen(theme, "free4-dynaudio-managed", "first-in-theme");
                 var operation = page.OpenSettingsDialogAsync();
-                var dialog = await SettingsAsync(window);
+                var dialog = await SettingsAsync(window, opening);
                 var panel = (AppSettingsPanel)dialog.Content!;
                 var slider = panel.FindControl<Slider>("ModelFrameRateSlider")!;
                 CheckRows(panel);
@@ -139,7 +148,8 @@ internal static class NativeModelSettingsSmoke
                 Check(ModelRenderingPreferences.FrameRate == initialRate && ModelRenderingPreferences.CompatibilityMode == initialBackend
                     && File.ReadAllText(ThemePreferences.SettingsPathOverride!) == initialFile, "Cancel preserves running and persisted preferences.");
 
-                operation = page.OpenSettingsDialogAsync(); dialog = await SettingsAsync(window);
+                opening = timing.BeginOpen(theme, "free4-dynaudio-managed", "warm-in-theme");
+                operation = page.OpenSettingsDialogAsync(); dialog = await SettingsAsync(window, opening);
                 panel = (AppSettingsPanel)dialog.Content!;
                 slider = panel.FindControl<Slider>("ModelFrameRateSlider")!;
                 slider.Value = dark ? 2 : 1;
@@ -160,6 +170,9 @@ internal static class NativeModelSettingsSmoke
                     framesPerSecond = ModelRenderingPreferences.FrameRate == ModelFrameRate.Unlimited ? (int?)null
                         : (int)ModelRenderingPreferences.FrameRate });
             }
+            await VerifyArtworkSettingsAsync(window, page, timing);
+            timing.AssertIdentitySamples();
+            Check(true, "Every sampled native settings transform stays identity while opening and closing.");
             Check(_state.Service.SetSubmissions == 0 && _state.Service.ForbiddenCalls == 0,
                 "The focused UI check starts no real backend, protocol write or system-settings action.");
             _state.Completed = true;
@@ -168,6 +181,8 @@ internal static class NativeModelSettingsSmoke
         finally
         {
             await page.DismissSettingsDialogAsync(); window.Close();
+            _state.Timing.AddRange(timing.Receipts);
+            _state.TimingLifecycles.AddRange(timing.LifecycleReceipts);
             await Task.Delay(100); desktop.Shutdown(_state.Failure is null ? 0 : 1);
         }
     }
@@ -233,11 +248,12 @@ internal static class NativeModelSettingsSmoke
         await Task.Delay(60);
     }
 
-    private static async Task<FAContentDialog> SettingsAsync(Window window)
+    private static async Task<FAContentDialog> SettingsAsync(Window window, Task opening)
     {
         await UntilAsync(() => window.GetVisualDescendants().OfType<FAContentDialog>().Any(dialog => Equals(dialog.Title, "应用设置")),
             "The real settings dialog opens.");
-        await Task.Delay(300);
+        // BeginOpen covers both the operation-start window and the Loaded-start transition window.
+        await opening.WaitAsync(TimeSpan.FromSeconds(3));
         return window.GetVisualDescendants().OfType<FAContentDialog>().Single(dialog => Equals(dialog.Title, "应用设置"));
     }
 

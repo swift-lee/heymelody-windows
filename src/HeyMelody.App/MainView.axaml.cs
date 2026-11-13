@@ -9,7 +9,9 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using Avalonia.Controls.Primitives;
 using Avalonia.LogicalTree;
+using Avalonia.Media.Transformation;
 using Avalonia.VisualTree;
+using HeyMelody.Diagnostics;
 using HeyMelodyWindows.Ui;
 using HeyMelody.Platform;
 
@@ -415,6 +417,7 @@ public partial class MainView : UserControl
             () => { _manageDevicesRequested = true; dialog?.Hide(); });
         panel.ThemePreviewChanged += theme => (Application.Current as App)?.ApplyTheme(theme);
         dialog = new FAContentDialog { Title = "应用设置", Content = panel, PrimaryButtonText = "保存", CloseButtonText = "取消", DefaultButton = FAContentDialogButton.Primary };
+        KeepSettingsDialogUnscaled(dialog);
         var result = await ShowSettingsDialogAsync(dialog, owner, token);
         if (result != FAContentDialogResult.Primary || _closingWindow || token.IsCancellationRequested)
         {
@@ -443,6 +446,23 @@ public partial class MainView : UserControl
                 Content = "请关闭并重新打开所有界面后生效：主界面、设备管理器、贴合度测试和黄金听感。无需退出托盘后台，后台连接可继续运行。",
                 CloseButtonText = "确定" }, owner, token);
 
+    }
+
+    private static void KeepSettingsDialogUnscaled(FAContentDialog dialog)
+    {
+        var warned = false;
+        dialog.TemplateApplied += (_, args) =>
+        {
+            // TransformOperations bypasses the default ScaleTransform animation while preserving the template's fade and shadow.
+            if (args.NameScope.Find<Border>("Container") is { } container)
+                container.RenderTransform = TransformOperations.Identity;
+            else if (!warned)
+            {
+                warned = true;
+                DiagnosticLog.Warning("Settings", "dialog.templateIncompatible",
+                    "The application settings dialog template has no Container; using its default presentation.");
+            }
+        };
     }
 
     private async Task<FAContentDialogResult> ShowSettingsDialogAsync(FAContentDialog dialog, TopLevel owner, CancellationToken token)

@@ -89,6 +89,15 @@ dotnet run --project tests/HeyMelody.App.Tests -c Release -- --native-performanc
 
 审计专用的 `--model-max-edge <0..4096>` 默认 `800`，`0` 保留原物理像素；`--frame-ready-probe on|off` 默认 `on`。全平台产品默认也为 `800/on`，按用户接受降低 CPU 开销的补充要求放行，而非通过原定帧率门槛。同一 binary 中用 `0/off` 测基线、`800/on` 测候选，另用 `0/on`、`800/off` 分离因素；不修改用户设置或后端／帧率偏好。`--theme light|dark` 默认 `light`，冻结场景在测量前固定姿态并以尺寸／generation 屏障排除旧在途帧，再恢复目标尺寸。schema 3 的 `bitmapCopies` 及 JSONL `bitmapCopy` 记录每次成功接受新位图的时刻，支持完整窗口 P95；原 `bitmapObservation` 仍只是审计 RAF 观测，不与旧版统计混称。
 
+应用设置的真实美术复验可加 `--verify-settings true|false`，默认关闭；该选项仅接受 `animated`／`model` 场景。开启后先完成原基线测量，再独立执行三次设置打开／取消，输出 `settings-verification.json`；设置交互不计入基线 RAF、进程采样与位图复制数组。报告记录输入 SHA256、设置生命周期和时序、隔离配置是否被写入以及失败信息。`animated` 应显式传入完整 X4 原件，不能把默认两帧 fixture 或任意本地 WebP 当成生产 X4 验收；`model` 默认使用内置 Free4 丹拿模型和真实 Filament。分别以 `--theme light`、`--theme dark` 和新输出目录复测，例如：
+
+```powershell
+dotnet run --project tests/HeyMelody.App.Tests -c Release -- --native-performance-audit --scenario animated --backend vulkan --seconds 5 --artwork-file <完整X4动画.webp> --theme light --verify-settings true --output-dir <新目录>
+dotnet run --project tests/HeyMelody.App.Tests -c Release -- --native-performance-audit --scenario model --backend vulkan --seconds 5 --theme dark --verify-settings true --output-dir <另一新目录>
+```
+
+这些检查使用假后台与隔离偏好，不连接耳机；真实 Filament 只覆盖已运行的后端和本机 runtime。RAF、合成批次完成时间仍不是 DWM 上屏 FPS 或 GPU 时间。完整原件和机器产物留在本地，不在公共命令中写入私有绝对路径。
+
 离线汇总使用 PowerShell 7.5+ 的 `tools/research/Compare-PerformanceAudit.ps1 -Baseline <B1目录>,<B2目录> -Candidate <C1目录>,<C2目录> -OutputPath <新JSON路径>`；检查 `allRunsValid`、各行 `issues` 和组间 warnings，而非只看进程退出码。完整同机对照见[快速优化复测](research/rendering-quick-optimization-arm64-2026-11-07.md)。
 
 ## 按改动选择验证
@@ -145,6 +154,12 @@ Windows profile 在原有默认集合中补入 Platform、MacOS 托管检查、M
 欢律单源改造的 UI 检查限于资源设置区、变更的电量／标题图标和校准步骤，其他默认 runner 照常执行。测试生成的完整 PNG 保留本地，不向会话载入整套截图；局部原生窗口检查可使用 App.Tests 的 `--native-smoke`，该模式不连接耳机或打开系统设置。
 
 应用设置的字体推荐横幅由 App.Tests 的 `--rendering-settings-tests` 和 `--ui-asset-tests` 覆盖独立保存、失败重试、字体选择与布局。Windows 原生检查使用 `dotnet run --project tests/HeyMelody.App.Tests -c Release -- --native-font-notice-smoke --output-dir <新目录>`，在隔离偏好文件和模拟字体缺失的条件下检查浅深主题、窄窗口、键盘隐藏及取消后重开，并保存窗口截图；不修改系统字体或真实用户偏好，不连接耳机。模拟重启检查为重新初始化前端并从磁盘回读，不代表另一个操作系统进程的启动。
+
+应用设置过渡的原生复验沿用 `dotnet run --project tests/HeyMelody.App.Tests -c Release -- --native-model-settings-smoke --output-dir <新目录>`。该入口在隔离偏好、模拟后台与录制 renderer 下，检查设置保存／取消、主题预览和渲染偏好，输出 `native-model-settings-receipt.json`。时序同时保留从操作开始的 300 ms 原始 RAF、Loaded 后 300 ms 打开过渡 RAF、Closing 到 Closed 的关闭 RAF，以及完整生命周期和冷 Loaded 延迟；截图在过渡观察结束后取得，避免混入该窗口。时序只用于本机前后对照，不等于 DWM 上屏 FPS，也不覆盖真实 Filament 或耳机。完整产物保留本地 `artifacts/`，不保证普通 clone 自带。
+
+2026-11-14 的设置修复通过 Release 构建、`--rendering-settings-tests` 8 组、`--native-demo-cli-tests` 61 项与三轮原生 smoke 各 62 项；相同过渡窗口热打开最大 RAF 间隔为 13.716–46.198 ms，关闭为 28.231–40.985 ms，全生命周期非 Identity 采样为 0。三轮冷首开 Loaded 为 687.547–788.327 ms，未混入热过渡结论；逐轮收据见[界面说明](gui-notes.md#应用设置过渡与性能边界)。完整无头运行仍在既有 `FrameCopyTests.PendingFrameAsync:124` 失败，已补充优化待办 BUG-15，未记为完整套件通过。
+
+完整生产 X4 原件的浅深性能审计均通过，核验了动画在设置复验前后继续绘制、隔离配置不落盘且无禁止后台调用。真实 Free4 丹拿 Filament 首轮因本机旧缓存 payload 缺少当前日志出口／manifest 字段而未进入设置阶段，原失败仍保留；旧产物逐文件 SHA 保全后，仅用现有依赖缓存约 21.2 s 增量构建，当前 manifest 的 19 文件静态检查与 11 出口 ABI 检查通过。刷新产物后的真实 Vulkan 模型浅深审计均通过，同样无隔离配置落盘或禁止后台调用；未修改 renderer 源码，不外推 OpenGL。原件／模型 SHA、时序和成功／失败收据见同一界面说明。独立 `--model-tests` 约 40.6 s 再次复现 BUG-15，确认该失败不依赖 MainView 或设置弹窗；本轮不改该方向。
 
 验证记录须说明对应层级与条件：
 

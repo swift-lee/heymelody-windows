@@ -8,7 +8,7 @@ using Avalonia.VisualTree;
 using FluentAvalonia.UI.Controls;
 using HeyMelodyWindows.App;
 
-internal static class RenderingSettingsTests
+internal static partial class RenderingSettingsTests
 {
     internal static int Run(HeadlessUnitTestSession session, string output)
     {
@@ -21,10 +21,12 @@ internal static class RenderingSettingsTests
         session.Dispatch<bool>(async () =>
         {
             await SettingsAsync(Path.Combine(directory, "dialog.json"));
+            await DialogPresentationAsync(Path.Combine(directory, "presentation.json"));
             return true;
         }, CancellationToken.None).GetAwaiter().GetResult();
         Console.WriteLine("PASS ordinary UI rendering drafts, save notices and failure recovery do not submit device settings");
-        return 3 + FontNoticeTests.RunSettings(session, output);
+        Console.WriteLine("PASS application settings stays unscaled through themes, retemplating, Escape and close; ordinary dialogs keep their animation");
+        return 4 + FontNoticeTests.RunSettings(session, output);
     }
 
     private static void ReadPreferences(string path)
