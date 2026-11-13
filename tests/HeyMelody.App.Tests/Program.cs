@@ -31,6 +31,11 @@ if (args.FirstOrDefault() == "--native-rendering-policy-smoke")
 
 if (args is ["--native-smoke"]) return NativeSmoke.Run();
 if (args is ["--native-settings-smoke"]) return NativeSmoke.Run(openSettings: true);
+if (args is ["--native-font-notice-smoke"]) return NativeFontNoticeSmoke.Run();
+if (args is ["--native-font-notice-smoke", "--output-dir", var fontNoticeOutput])
+    return NativeFontNoticeSmoke.Run(Path.GetFullPath(fontNoticeOutput));
+if (args.FirstOrDefault() == "--native-font-notice-smoke")
+{ Console.Error.WriteLine("Usage: --native-font-notice-smoke [--output-dir path]"); return 2; }
 if (args is ["--native-model-settings-smoke"]) return NativeModelSettingsSmoke.Run();
 if (args is ["--native-model-settings-smoke", "--output-dir", var nativeSettingsOutput])
     return NativeModelSettingsSmoke.Run(Path.GetFullPath(nativeSettingsOutput));
@@ -114,7 +119,8 @@ try
     }
     if (args is ["--ui-asset-tests"])
     {
-        int count = TypographyTests.Run(session) + IconTests.Run(session) + DefaultIconThemeTests.Run(session);
+        int count = TypographyTests.Run(session) + IconTests.Run(session) + DefaultIconThemeTests.Run(session)
+            + FontNoticeTests.RunAssets(session, output);
         Console.WriteLine(JsonSerializer.Serialize(new { passed = count, success = true, nativeBluetoothCalls = 0, screenshots = 0, output }));
         return 0;
     }
@@ -288,12 +294,14 @@ try
     passed += layoutChecks;
     var startupChecks = StartupTests.Run(session);
     var settingsManagementChecks = SettingsManagementTests.Run(session);
-    passed += RenderingSettingsTests.Run(session, output);
+    var renderingSettingsChecks = RenderingSettingsTests.Run(session, output);
+    passed += renderingSettingsChecks;
     passed += startupChecks + settingsManagementChecks;
     var typographyChecks = TypographyTests.Run(session);
     var iconChecks = IconTests.Run(session);
     var defaultIconChecks = DefaultIconThemeTests.Run(session);
-    passed += iconChecks + defaultIconChecks;
+    var fontNoticeAssetChecks = FontNoticeTests.RunAssets(session, output);
+    passed += iconChecks + defaultIconChecks + fontNoticeAssetChecks;
     passed += typographyChecks;
     var frameLoopChecks = FrameLoopTests.Run(session, output);
     passed += frameLoopChecks;
@@ -304,11 +312,11 @@ try
     var backdropChecks = DesktopBackdropTests.Run();
     passed += backdropChecks;
     // Fixed layout/interaction/artwork cases plus counts returned by the visual and feature runners.
-    int expected = (5 * 2 * 2) + 1 + 9 + deviceVisualChecks + 10 + 3
+    int expected = (5 * 2 * 2) + 1 + 9 + deviceVisualChecks + 10 + renderingSettingsChecks
         + (HeyMelody.Platform.DesktopCapabilities.SupportsHeadsetControl ? 9 : 7)
         + startupChecks + settingsManagementChecks
         + demoChecks + renderingChecks + animationChecks + layoutChecks + selectionChecks
-        + gameAudioChecks + typographyChecks + iconChecks + defaultIconChecks
+        + gameAudioChecks + typographyChecks + iconChecks + defaultIconChecks + fontNoticeAssetChecks
         + frameLoopChecks + nativeDemoCliChecks + gestureChecks + ancFeatureChecks + layoutHelperChecks + backdropChecks;
     Check(passed == expected, $"Every UI scenario and interaction case must finish: passed={passed}, expected={expected}, "
         + $"startupChecks={startupChecks}, settingsManagementChecks={settingsManagementChecks}");

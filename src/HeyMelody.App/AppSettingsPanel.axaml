@@ -18,6 +18,13 @@
     </Style>
   </UserControl.Styles>
   <StackPanel x:Name="SettingsRoot" MinWidth="460" Spacing="0">
+    <fa:FAInfoBar x:Name="SegoeFluentIconsNotice" Severity="Informational" Title="推荐操作"
+                  Message="您可以从Windows中获取“Segoe Fluent Icons”字体并安装到当前系统，以获取最佳的视觉体验。"
+                  IsOpen="False" IsVisible="False" IsClosable="False" Margin="0,0,0,12">
+      <fa:FAInfoBar.ActionButton>
+        <Button x:Name="HideSegoeFluentIconsNoticeButton" Content="不再提醒" />
+      </fa:FAInfoBar.ActionButton>
+    </fa:FAInfoBar>
     <TextBlock Classes="settings-group" Text="外观" Margin="1,0,0,6" />
     <fa:FASettingsExpanderItem Content="应用主题" Description="选择界面的颜色模式，选择后立即预览" IconSource="{icons:AppIcon DarkTheme}">
       <fa:FASettingsExpanderItem.Footer>

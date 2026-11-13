@@ -10,6 +10,7 @@ using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using FluentAvalonia.UI.Controls;
+using HeyMelody.Diagnostics;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Ui;
 using HeyMelodyWindows.Resources;
@@ -20,12 +21,13 @@ using HeyMelodyWindows.Artwork;
 /// Only --native-settings-smoke launches Windows settings. A true launcher result confirms
 /// that Windows accepted the URI request, not that a particular settings page was displayed.
 /// </summary>
-internal static class NativeSmoke
+internal static partial class NativeSmoke
 {
     private static SmokeState _state = new();
 
     public static int Run(bool openSettings = false, bool useRenderingSetup = false,
-        bool? basicRenderMode = null, string? outputDirectory = null, string? renderingFailure = null)
+        bool? basicRenderMode = null, string? outputDirectory = null, string? renderingFailure = null,
+        bool verifyFontNotice = false)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -35,8 +37,9 @@ internal static class NativeSmoke
         if (renderingFailure is not (null or "software-fallback" or "warp-missing"))
             throw new ArgumentException("Unknown rendering failure injection.", nameof(renderingFailure));
         _state = new() { OpenSettings = openSettings, BasicRenderMode = basicRenderMode, RenderingFailure = renderingFailure,
-            Output = outputDirectory is null ? null : Path.GetFullPath(outputDirectory) };
+            Output = outputDirectory is null ? null : Path.GetFullPath(outputDirectory), VerifyFontNotice = verifyFontNotice };
         var originalPreferencesPath = ThemePreferences.SettingsPathOverride;
+        var originalDiagnosticRoot = DiagnosticPaths.DataRootOverride;
         if (basicRenderMode is not null)
         {
             _state.Output ??= Path.GetFullPath(Path.Combine("artifacts", "ui-render-policy-native-" + Guid.NewGuid().ToString("N")));
@@ -48,6 +51,8 @@ internal static class NativeSmoke
         {
             try
             {
+                if (_state.VerifyFontNotice)
+                    DiagnosticPaths.DataRootOverride = Path.Combine(_state.Output!, "isolated-diagnostics");
                 var builder = AppBuilder.Configure<SmokeApplication>().UsePlatformDetect().UseHeyMelodyTypography();
                 if (useRenderingSetup)
                 {
@@ -61,21 +66,34 @@ internal static class NativeSmoke
                     .StartWithClassicDesktopLifetime([], ShutdownMode.OnExplicitShutdown);
             }
             catch (Exception error) { _state.Failure = error.ToString(); }
+            finally
+            {
+                if (_state.VerifyFontNotice)
+                {
+                    DiagnosticPaths.DataRootOverride = originalDiagnosticRoot;
+                    ThemePreferences.SettingsPathOverride = originalPreferencesPath;
+                }
+            }
         }) { IsBackground = true, Name = "HeyMelody native smoke UI" };
         uiThread.SetApartmentState(ApartmentState.STA);
         uiThread.Start();
-        if (!uiThread.Join(TimeSpan.FromSeconds(basicRenderMode is null ? 20 : 40)))
+        var uiThreadStopped = uiThread.Join(TimeSpan.FromSeconds(verifyFontNotice ? 55 : basicRenderMode is null ? 20 : 40));
+        if (!uiThreadStopped)
             _state.Failure ??= "Native UI thread did not stop within its time limit.";
-        ThemePreferences.SettingsPathOverride = originalPreferencesPath;
+        // A timed-out font-notice UI keeps its isolated paths until its own finally runs.
+        if (!verifyFontNotice || uiThreadStopped) ThemePreferences.SettingsPathOverride = originalPreferencesPath;
         var success = _state.Failure is null && _state.Closed && _state.Service.Disposals == 1
             && _state.Service.Submissions == 0 && _state.Checks > 0
-            && (!_state.OpenSettings || _state.SystemSettingsLaunchAccepted == true);
+            && (!_state.OpenSettings || _state.SystemSettingsLaunchAccepted == true)
+            && (!_state.VerifyFontNotice || _state.FontNoticeCompleted);
         var report = JsonSerializer.Serialize(new
         {
             schemaVersion = 1, success, passed = _state.Checks, nativeBluetoothCalls = 0,
             applicationSetSubmissions = _state.Service.Submissions,
             serviceDisposals = _state.Service.Disposals, windowClosed = _state.Closed,
             settingsDialogCompleted = _state.SettingsDialogCompleted,
+            fontNoticeCompleted = _state.FontNoticeCompleted,
+            fontNoticeDiagnosticRoot = verifyFontNotice ? Path.Combine(_state.Output!, "isolated-diagnostics") : null,
             failureDialogsCompleted = _state.FailureDialogsCompleted,
             systemSettingsLaunchRequested = _state.OpenSettings,
             systemSettingsLaunchAccepted = _state.SystemSettingsLaunchAccepted,
@@ -103,6 +121,8 @@ internal static class NativeSmoke
         public bool SettingsDialogCompleted { get; set; }
         public bool FailureDialogsCompleted { get; set; }
         public bool OpenSettings { get; init; }
+        public bool VerifyFontNotice { get; init; }
+        public bool FontNoticeCompleted { get; set; }
         public bool? BasicRenderMode { get; init; }
         public string? RenderingFailure { get; init; }
         public string? Output { get; set; }
@@ -119,6 +139,12 @@ internal static class NativeSmoke
     // App's framework completion override, which would create the live backend.
     public sealed class SmokeApplication : App
     {
+        public override void Initialize()
+        {
+            base.Initialize();
+            if (_state.VerifyFontNotice) AppIcons.Initialize(() => null);
+        }
+
         public override void OnFrameworkInitializationCompleted()
         {
             var desktop = ApplicationLifetime as IClassicDesktopStyleApplicationLifetime
@@ -293,10 +319,13 @@ internal static class NativeSmoke
                 _state.Screenshots.Add(NativeRenderingProbe.Capture(window, Path.Combine(_state.Output, "settings-popup.png")));
                 Check(true, "The visible settings popup compositor screenshot was saved for manual review.");
             }
+            if (_state.VerifyFontNotice)
+                await VerifyFontNoticeAsync(window, page, settingsDialog, settingsTask);
         }
         catch (Exception error) { _state.Failure = error.ToString(); }
         finally
         {
+            if (_state.VerifyFontNotice) AppIcons.Initialize();
             window.Close();
             try { await _state.ClosedSignal.Task.WaitAsync(TimeSpan.FromSeconds(5)); }
             catch (TimeoutException) { _state.Failure ??= "Native window did not close in five seconds."; }
@@ -350,9 +379,10 @@ internal static class NativeSmoke
 
     private static async Task StopOnTimeoutAsync(MainWindow window, IClassicDesktopStyleApplicationLifetime desktop)
     {
-        await Task.Delay(TimeSpan.FromSeconds(_state.BasicRenderMode is null ? 12 : 30));
+        await Task.Delay(TimeSpan.FromSeconds(_state.VerifyFontNotice ? 45 : _state.BasicRenderMode is null ? 12 : 30));
         if (_state.Closed) return;
-        _state.Failure ??= "Native smoke exceeded twelve seconds.";
+        _state.Failure ??= _state.VerifyFontNotice ? "Native font-notice smoke exceeded forty-five seconds."
+            : "Native smoke exceeded twelve seconds.";
         window.Close();
         desktop.Shutdown(1);
     }

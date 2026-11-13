@@ -10,7 +10,8 @@ namespace HeyMelodyWindows.App;
 
 /// <summary>
 /// Settings-card content of the application settings dialog. Edits stay local until the dialog's
-/// Save button. Re-downloading acts on saved resource preferences.
+/// Save button. Dismissing the font recommendation is saved immediately.
+/// Re-downloading acts on saved resource preferences.
 /// </summary>
 public partial class AppSettingsPanel : UserControl
 {
@@ -21,6 +22,16 @@ public partial class AppSettingsPanel : UserControl
     public AppSettingsPanel()
     {
         InitializeComponent();
+        SegoeFluentIconsNotice.IsVisible = SegoeFluentIconsNotice.IsOpen =
+            !AppIcons.UsesSegoeFluentIcons && !ThemePreferences.LoadHideSegoeFluentIconsNotice();
+        var fontNoticeMessage = SegoeFluentIconsNotice.Message;
+        HideSegoeFluentIconsNoticeButton.Click += (_, _) =>
+        {
+            if (ThemePreferences.SaveHideSegoeFluentIconsNotice(true))
+                SegoeFluentIconsNotice.IsVisible = SegoeFluentIconsNotice.IsOpen = false;
+            else
+                SegoeFluentIconsNotice.Message = fontNoticeMessage + "\n未能保存‘不再提醒’，请重试。";
+        };
         InitializeDiagnosticSettings();
         UiBasicRenderCard.IsVisible = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS();
         UiBasicRenderSwitch.IsChecked = ThemePreferences.LoadUiBasicRenderMode();

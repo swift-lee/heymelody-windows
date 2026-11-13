@@ -144,6 +144,8 @@ Windows profile 在原有默认集合中补入 Platform、MacOS 托管检查、M
 
 欢律单源改造的 UI 检查限于资源设置区、变更的电量／标题图标和校准步骤，其他默认 runner 照常执行。测试生成的完整 PNG 保留本地，不向会话载入整套截图；局部原生窗口检查可使用 App.Tests 的 `--native-smoke`，该模式不连接耳机或打开系统设置。
 
+应用设置的字体推荐横幅由 App.Tests 的 `--rendering-settings-tests` 和 `--ui-asset-tests` 覆盖独立保存、失败重试、字体选择与布局。Windows 原生检查使用 `dotnet run --project tests/HeyMelody.App.Tests -c Release -- --native-font-notice-smoke --output-dir <新目录>`，在隔离偏好文件和模拟字体缺失的条件下检查浅深主题、窄窗口、键盘隐藏及取消后重开，并保存窗口截图；不修改系统字体或真实用户偏好，不连接耳机。模拟重启检查为重新初始化前端并从磁盘回读，不代表另一个操作系统进程的启动。
+
 验证记录须说明对应层级与条件：
 
 - 协议模拟、资源解析和无头 UI 检查证明对应代码或布局行为。

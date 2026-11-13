@@ -21,6 +21,12 @@ internal static class ThemePreferences
 
     internal static bool LoadUiBasicRenderMode() => UiRenderingPreferenceReader.Load(SettingsPath);
 
+    internal static bool LoadHideSegoeFluentIconsNotice() =>
+        Read()["hideSegoeFluentIconsNotice"]?.GetValueKind() == JsonValueKind.True;
+
+    internal static bool SaveHideSegoeFluentIconsNotice(bool hide) =>
+        Update(preferences => preferences["hideSegoeFluentIconsNotice"] = hide);
+
     internal static ModelFrameRate LoadModelFrameRate() => ParseModelFrameRate(Read()["modelFrameRate"]);
 
     // The former "display" and "120" choices, missing values and malformed values use the unlimited default.
@@ -42,17 +48,23 @@ internal static class ThemePreferences
     };
 
     public static bool Save(string theme, bool? modelCompatibilityMode = null, ModelFrameRate? modelFrameRate = null,
-        bool? uiBasicRenderMode = null)
-    {
-        string? temporary = null;
-        try
+        bool? uiBasicRenderMode = null) =>
+        Update(preferences =>
         {
-            var preferences = Read();
             preferences["theme"] = theme;
             preferences.Remove("modelGpuAcceleration");
             if (modelCompatibilityMode is { } enabled) preferences["modelCompatibilityMode"] = enabled;
             if (uiBasicRenderMode is { } basicRender) preferences[UiRenderingPreferenceReader.PreferenceName] = basicRender;
             preferences["modelFrameRate"] = Serialize(modelFrameRate ?? ParseModelFrameRate(preferences["modelFrameRate"]));
+        });
+
+    private static bool Update(Action<JsonObject> update)
+    {
+        string? temporary = null;
+        try
+        {
+            var preferences = Read();
+            update(preferences);
             Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
             temporary = SettingsPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
             File.WriteAllText(temporary, preferences.ToJsonString());

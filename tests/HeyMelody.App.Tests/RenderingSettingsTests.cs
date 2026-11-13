@@ -24,7 +24,7 @@ internal static class RenderingSettingsTests
             return true;
         }, CancellationToken.None).GetAwaiter().GetResult();
         Console.WriteLine("PASS ordinary UI rendering drafts, save notices and failure recovery do not submit device settings");
-        return 3;
+        return 3 + FontNoticeTests.RunSettings(session, output);
     }
 
     private static void ReadPreferences(string path)
