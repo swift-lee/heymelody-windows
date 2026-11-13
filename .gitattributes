@@ -14,9 +14,7 @@ src/HeyMelody.Devices/Assets/oppo-enco-x4.json -text
 # Catalog and artwork hashes require the original bytes on every checkout.
 src/HeyMelody.Resources/Bundles/** -text
 *.otf binary
-# Preserve the exact upstream UI bytes verified by the font/icon source manifests.
-src/HeyMelody.Desktop/Assets/Icons/*.svg -text
-packaging/licenses/Fluent-System-Icons-MIT.txt -text
+# Preserve the exact bundled font agreement verified by the source manifest.
 packaging/licenses/MiSans-Font-License.pdf binary
 # Preserve the official Inno Setup license and translation byte for byte.
 packaging/inno/LICENSE.txt -text whitespace=cr-at-eol

@@ -1,12 +1,8 @@
-using System.Security.Cryptography;
-using System.Text.Json;
-using System.Xml.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Platform;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -15,116 +11,171 @@ using HeyMelodyWindows.App;
 
 internal static class IconTests
 {
-    private const string AssetRoot = "avares://HeyMelody.Desktop/Assets/Icons/";
-    private const string Revision = "9bfae3d782fda4c8764f2128cec4d0dda160b283";
-
     internal static int Run(HeadlessUnitTestSession session)
     {
-        Run("Fluent icon catalogue covers every supplied icon and preserves pinned source hashes", Catalogue);
-        Run("all icon sizes preserve their viewport and create independent vector sources", Sources);
-        Run("Fluent icons inherit foreground in both light and dark themes", Foreground);
-        return 3;
+        Run("startup selects only a successfully loaded Segoe family, once per initialization", Selection);
+        Run("system font selection agrees with the actual platform loader", SystemFont);
+        Run("Segoe and bundled symbols retain independent fixed role mappings", Mappings);
+        Run("all roles preserve icon sizes and create independent sources in both modes", Sources);
+        Run("font icons inherit foreground in both light and dark themes", Foreground);
+        return 5;
 
         void Run(string name, Action action)
         {
-            session.Dispatch<bool>(() => { action(); return Task.FromResult(true); }, CancellationToken.None).GetAwaiter().GetResult();
+            session.Dispatch<bool>(() =>
+            {
+                try { action(); return Task.FromResult(true); }
+                finally { AppIcons.Initialize(); }
+            }, CancellationToken.None).GetAwaiter().GetResult();
             Console.WriteLine("PASS " + name);
         }
     }
 
     internal static bool Matches(FAIconSource? source, AppIcon role, double size = 20)
     {
+        var expected = AppIcons.Source(role, size);
+        if (source is FAFontIconSource font && expected is FAFontIconSource expectedFont)
+            return font.FontFamily.Equals(expectedFont.FontFamily)
+                && font.Glyph == expectedFont.Glyph && font.FontSize == expectedFont.FontSize;
+        if (source is FASymbolIconSource symbol && expected is FASymbolIconSource expectedSymbol)
+            return symbol.Symbol == expectedSymbol.Symbol && symbol.FontSize == expectedSymbol.FontSize;
         if (source is not FAPathIconSource { Data: { } actual }
-            || AppIcons.Source(role, size) is not FAPathIconSource { Data: { } expected }
-            || actual.Bounds != expected.Bounds)
+            || expected is not FAPathIconSource { Data: { } expectedData }
+            || actual.Bounds != expectedData.Bounds)
             return false;
         for (var row = 0; row < 24; row++)
         for (var column = 0; column < 24; column++)
         {
             var point = new Point((column + 0.5) * size / 24, (row + 0.5) * size / 24);
-            if (actual.FillContains(point) != expected.FillContains(point))
+            if (actual.FillContains(point) != expectedData.FillContains(point))
                 return false;
         }
         return true;
     }
 
-    private static void Catalogue()
+    private static void Selection()
     {
-        using var stream = AssetLoader.Open(new Uri(AssetRoot + "fluent-icons.json"));
-        using var document = JsonDocument.Parse(stream);
-        var root = document.RootElement;
-        Check(root.GetProperty("revision").GetString() == Revision && root.GetProperty("style").GetString() == "regular",
-            "The icon subset pins the reviewed upstream revision and Regular style.");
-        var roles = root.GetProperty("roles");
-        var expectedRoles = Enum.GetValues<AppIcon>().Where(role =>
-            role is not (AppIcon.BatteryLeft or AppIcon.BatteryRight or AppIcon.BatteryCase)).ToArray();
-        Check(roles.EnumerateObject().Count() == expectedRoles.Length
-            && expectedRoles.All(role => roles.TryGetProperty(role.ToString(), out _)),
-            "Every supplied icon has an explicit mapping; original HeyMelody device shapes stay outside the catalogue.");
-        foreach (var (role, slug) in new[]
+        foreach (var (family, expected) in new (string?, bool)[]
         {
-            (AppIcon.NoiseControl, "sound_wave_circle"), (AppIcon.Hearing, "headphones_sound_wave"),
-            (AppIcon.FitTest, "surface_earbuds"), (AppIcon.Equalizer, "options"), (AppIcon.SelectAll, "select_all_on")
+            ("Segoe Fluent Icons", true), ("segoe fluent icons", true),
+            (null, false), ("MiSans", false), ("Segoe UI", false)
         })
-            Check(roles.GetProperty(role.ToString()).GetString() == slug, role + " retains its reviewed semantic mapping.");
-        var assets = root.GetProperty("assets").EnumerateArray().ToArray();
-        foreach (var asset in assets)
         {
-            var file = asset.GetProperty("file").GetString()!;
-            using var svg = AssetLoader.Open(new Uri(AssetRoot + file));
-            var hash = Convert.ToHexStringLower(SHA256.HashData(svg));
-            Check(hash == asset.GetProperty("sha256").GetString(),
-                file + " is byte-for-byte identical to the recorded upstream source.");
-            Check(asset.GetProperty("upstreamPath").GetString()!.EndsWith("/ic_fluent_" + file, StringComparison.Ordinal),
-                file + " keeps its exact upstream path.");
-            using var original = AssetLoader.Open(new Uri(AssetRoot + file));
-            var svgRoot = XDocument.Load(original).Root!;
-            var path = svgRoot.Elements(svgRoot.Name.Namespace + "path").Single();
-            var evenOdd = (path.Attribute("fill-rule") ?? svgRoot.Attribute("fill-rule"))?.Value == "evenodd";
-            var expected = Geometry.Parse((evenOdd ? "F0 " : "F1 ") + path.Attribute("d")!.Value);
-            var size = asset.GetProperty("size").GetInt32();
-            var slug = file[..file.LastIndexOf($"_{size}_regular.svg", StringComparison.Ordinal)];
-            var role = Enum.Parse<AppIcon>(roles.EnumerateObject().First(item => item.Value.GetString() == slug).Name);
-            var actual = ((FAPathIconSource)AppIcons.Source(role, size)).Data!;
-            for (var row = 0; row < 32; row++)
-            for (var column = 0; column < 32; column++)
+            var loads = 0;
+            AppIcons.Initialize(() => { loads++; return family; });
+            Check(AppIcons.UsesSegoeFluentIcons == expected,
+                $"Only the loaded Segoe family counts as usable: {family ?? "(missing)"}.");
+            foreach (var role in Enum.GetValues<AppIcon>())
+                AppIcons.Source(role);
+            Check(loads == 1, "Creating icons never reloads the font or probes individual glyphs.");
+        }
+
+        AppIcons.Initialize(() => "Segoe Fluent Icons");
+        AppIcons.Initialize(() => throw new InvalidOperationException("simulated font load failure"));
+        Check(!AppIcons.UsesSegoeFluentIcons, "A font load exception resets a previous successful selection.");
+        AppIcons.Initialize(() => "Segoe Fluent Icons");
+        Check(AppIcons.UsesSegoeFluentIcons, "A new application initialization replaces the previous selection.");
+    }
+
+    private static void SystemFont()
+    {
+        string? loadedFamily = null;
+        try
+        {
+            if (FontManager.Current.SystemFonts.TryGetGlyphTypeface("Segoe Fluent Icons",
+                FontStyle.Normal, FontWeight.Normal, FontStretch.Normal, out var face))
+                loadedFamily = face.FamilyName;
+        }
+        catch { }
+        AppIcons.Initialize();
+        Check(AppIcons.UsesSegoeFluentIcons == string.Equals(loadedFamily, "Segoe Fluent Icons",
+            StringComparison.OrdinalIgnoreCase), "Startup follows the actual system font loader on this platform.");
+        Console.WriteLine("INFO actual Segoe family: " + (loadedFamily ?? "(unavailable)"));
+    }
+
+    private static void Mappings()
+    {
+        var original = new (AppIcon Role, int Segoe, FASymbol BuiltIn)[]
+        {
+            (AppIcon.Settings, 0xE713, (FASymbol)0xE713),
+            (AppIcon.Refresh, 0xE72C, (FASymbol)0xE72C),
+            (AppIcon.Copy, 0xE8C8, (FASymbol)0xE8C8),
+            (AppIcon.Charging, 0xE945, (FASymbol)0xE945),
+            (AppIcon.NoiseControl, 0xF61F, FASymbol.Audio),
+            (AppIcon.Equalizer, 0xE9E9, (FASymbol)0xE9E9),
+            (AppIcon.Sound, 0xE995, (FASymbol)0xE995),
+            (AppIcon.Earbuds, 0xF4C0, (FASymbol)0xF4C0),
+            (AppIcon.Gestures, 0xE815, (FASymbol)0xE815),
+            (AppIcon.Hearing, 0xF270, FASymbol.Audio),
+            (AppIcon.FitTest, 0xF27C, FASymbol.Audio),
+            (AppIcon.Info, 0xE946, (FASymbol)0xE946),
+            (AppIcon.History, 0xE81C, (FASymbol)0xE81C),
+            (AppIcon.Battery, 0xE850, (FASymbol)0xE850)
+        };
+        var extended = new (AppIcon Role, int Segoe, FASymbol BuiltIn)[]
+        {
+            (AppIcon.Sync, 0xE895, FASymbol.Sync),
+            (AppIcon.Rotate, 0xE7AD, FASymbol.Rotate),
+            (AppIcon.Globe, 0xE774, FASymbol.Globe),
+            (AppIcon.Permissions, 0xE8D7, FASymbol.Permissions),
+            (AppIcon.DarkTheme, 0xE708, FASymbol.DarkTheme),
+            (AppIcon.Subtract, 0xE738, FASymbol.Remove),
+            (AppIcon.Warning, 0xE7BA, FASymbol.Important),
+            (AppIcon.Error, 0xEA39, FASymbol.Cancel),
+            (AppIcon.Success, 0xE930, FASymbol.Accept)
+        };
+        foreach (var useSegoe in new[] { false, true })
+        {
+            AppIcons.Initialize(() => useSegoe ? "Segoe Fluent Icons" : null);
+            foreach (var (role, segoe, builtIn) in original.Concat(extended))
             {
-                var point = new Point((column + 0.5) * size / 32, (row + 0.5) * size / 32);
-                Check(actual.FillContains(point) == expected.FillContains(point),
-                    file + " preserves the original fill; its viewport contours never add painted pixels.");
+                var source = AppIcons.Source(role);
+                Check(useSegoe
+                    ? source is FAFontIconSource font && font.FontFamily.Name == "Segoe Fluent Icons"
+                        && font.Glyph == char.ConvertFromUtf32(segoe)
+                    : source is FASymbolIconSource symbol && symbol.Symbol == builtIn,
+                    $"{role} retains its fixed {(useSegoe ? "Segoe" : "built-in")} mapping.");
             }
         }
-        Check(roles.EnumerateObject().All(role => assets.Any(asset =>
-            asset.GetProperty("file").GetString() == role.Value.GetString() + "_20_regular.svg")),
-            "Every role has its normal 20-unit resource; missing 16-unit variants never cause font fallback.");
     }
 
     private static void Sources()
     {
-        foreach (var role in Enum.GetValues<AppIcon>())
-        foreach (var size in new double[] { 12, 16, 20, 24, 96 })
+        Check(Enum.GetValues<AppIcon>().Length == 48, "All existing icon roles remain available.");
+        foreach (var useSegoe in new[] { false, true })
         {
-            var first = AppIcons.Source(role, size);
-            var second = AppIcons.Source(role, size);
-            Check(first is FAPathIconSource { Data: { } } && second is FAPathIconSource { Data: { } },
-                role + " uses a bundled vector, not a platform symbol font.");
-            var data = ((FAPathIconSource)first).Data!;
-            Check(!ReferenceEquals(first, second) && !ReferenceEquals(data, ((FAPathIconSource)second).Data),
-                role + " sources and mutable geometries are independent.");
-            if (role is not (AppIcon.BatteryLeft or AppIcon.BatteryRight or AppIcon.BatteryCase))
+            AppIcons.Initialize(() => useSegoe ? "Segoe Fluent Icons" : null);
+            foreach (var role in Enum.GetValues<AppIcon>())
+            foreach (var size in new double[] { 12, 16, 20, 24, 96 })
             {
-                var bounds = data.Bounds;
-                Check(Math.Abs(bounds.X) < 0.001 && Math.Abs(bounds.Y) < 0.001
-                    && Math.Abs(bounds.Width - size) < 0.001 && Math.Abs(bounds.Height - size) < 0.001,
-                    $"{role} preserves its original SVG canvas at {size}: {bounds}.");
+                var first = AppIcons.Source(role, size);
+                var second = AppIcons.Source(role, size);
+                Check(!ReferenceEquals(first, second), role + " sources are independent.");
+                if (role is AppIcon.BatteryLeft or AppIcon.BatteryRight or AppIcon.BatteryCase)
+                {
+                    Check(first is FAPathIconSource { Data: { } }
+                        && second is FAPathIconSource { Data: { } }
+                        && !ReferenceEquals(((FAPathIconSource)first).Data, ((FAPathIconSource)second).Data),
+                        role + " retains an independent manufacturer vector in both font modes.");
+                }
+                else
+                    Check(useSegoe
+                        ? first is FAFontIconSource font && font.FontSize == size
+                        : first is FASymbolIconSource symbol && symbol.FontSize == size,
+                        role + " retains its requested font size and startup selection.");
+                var element = AppIcons.Element(role, size);
+                Check(element.Width == size && element.Height == size && Matches(element.IconSource, role, size),
+                    role + " retains the element size contract.");
             }
         }
     }
 
     private static void Foreground()
     {
+        foreach (var useSegoe in new[] { false, true })
         foreach (var theme in new[] { ThemeVariant.Light, ThemeVariant.Dark })
         {
+            AppIcons.Initialize(() => useSegoe ? "Segoe Fluent Icons" : null);
             var expected = Colors.OrangeRed;
             var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Margin = new Thickness(12) };
             foreach (var (role, size) in new[] { (AppIcon.Settings, 12), (AppIcon.Equalizer, 20), (AppIcon.Audio, 96) })
@@ -142,11 +193,12 @@ internal static class IconTests
             {
                 window.Show();
                 Dispatcher.UIThread.RunJobs();
-                var paths = window.GetVisualDescendants().OfType<FAPathIcon>().ToArray();
-                Check(paths.Length == 3 && paths.All(path =>
-                    path.Foreground is ISolidColorBrush brush && brush.Color == expected
-                    && path.Bounds.Width > 0 && path.Bounds.Height > 0),
-                    theme + " preserves inherited foreground and nonzero layout at small, normal and product-fallback sizes.");
+                var icons = window.GetVisualDescendants().OfType<FAIconElement>()
+                    .Where(icon => icon is FAFontIcon or FASymbolIcon).ToArray();
+                Check(icons.Length == 3 && icons.All(icon =>
+                    icon.Foreground is ISolidColorBrush brush && brush.Color == expected
+                    && icon.Bounds.Width > 0 && icon.Bounds.Height > 0),
+                    $"{theme}/{useSegoe} preserves foreground and nonzero layout at small, normal and product-fallback sizes.");
             }
             finally
             {

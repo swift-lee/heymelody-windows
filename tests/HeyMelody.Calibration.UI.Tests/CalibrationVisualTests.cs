@@ -5,6 +5,7 @@ using Ellipse = Avalonia.Controls.Shapes.Ellipse;
 using Avalonia.Headless;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.Threading;
@@ -217,9 +218,11 @@ internal static class CalibrationVisualTests
                 window.Show(); Dispatcher.UIThread.RunJobs();
                 CheckActionBar(view, "开始");
                 Check(!Visible(view, "耳道扫描"), "The fit test has no hearing stepper.");
-                Check(view.GetVisualDescendants().OfType<Border>().Single(control => control.Name == "HeroCore").Child
-                    is FAIconSourceElement { Width: 40, Height: 40, IconSource: FAPathIconSource },
-                    "The decorative fit hero uses one provided earbud-pair icon, not two mirrored pairs.");
+                var pair = view.GetVisualDescendants().OfType<Border>().Single(control => control.Name == "HeroCore").Child as StackPanel;
+                Check(pair is { Orientation: Orientation.Horizontal, Spacing: 2 } && pair.Children.Count == 2
+                    && pair.Children[0] is FAIconSourceElement { Width: 28, Height: 28 }
+                    && pair.Children[1] is FAIconSourceElement { Width: 28, Height: 28, RenderTransform: ScaleTransform { ScaleX: -1, ScaleY: 1 } },
+                    "The fit hero shows separate left and mirrored right earbud icons.");
                 Capture(window, "fit-ready");
                 service.FailNextStart = true;
                 view.GetVisualDescendants().OfType<Button>().Single(x => Equals(x.Content, "开始")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -352,6 +355,7 @@ public sealed class CalibrationTestApplication : Application
 {
     public override void Initialize()
     {
+        AppIcons.Initialize();
         RequestedThemeVariant = ThemeVariant.Light;
         Styles.Add(new FluentAvaloniaTheme { CustomAccentColor = Color.FromRgb(0, 120, 212) });
         Styles.Add(SharedTheme.Create());

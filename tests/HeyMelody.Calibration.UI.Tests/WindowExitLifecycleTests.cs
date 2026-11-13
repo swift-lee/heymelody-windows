@@ -17,6 +17,7 @@ internal static class WindowExitLifecycleTests
     {
         public override void Initialize()
         {
+            AppIcons.Initialize();
             Styles.Add(new FluentAvaloniaTheme()); Styles.Add(SharedTheme.Create());
             Typography.ApplyThemeResources(this);
         }

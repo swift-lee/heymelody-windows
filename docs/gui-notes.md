@@ -126,11 +126,11 @@ macOS 背景使用原生 NSVisualEffectView Blur，按窗口实际协商的透�
 
 ## 系统图标与资源边界
 
-仅将 Segoe 和 Avalonia／FluentAvalonia 提供的图标迁移到 Microsoft Fluent System Icons 的固定提交 `9bfae3d782fda4c8764f2128cec4d0dda160b283`，使用保留 viewBox 留白与填充规则的 Regular 矢量子集，不依赖系统图标字体。清单记录每个角色、上游路径、可用源尺寸及 SHA-256；不存在的尺寸明确缩放已有源图，不拼凑文件名。
+主界面、设备管理器和校准界面在各自进程的 `Application.Initialize` 开头共用一次图标字体检查：系统存在且可以加载 `Segoe Fluent Icons` 时，项目通用语义图标优先使用该字体；否则 Windows、macOS 和 Linux 都使用 FluentAvalonia 内置图标。检查只确认字体族及加载结果，不逐字形探测；已加载字体缺少个别符号时，不另外切换图标来源。此选择与正文 MiSans 字体独立，Segoe 字体由操作系统或用户提供。
 
-欢律及既有 ColorOS 资源、官方 ANC 图片与听感引导 Lottie、左右耳／盒子电量路径、项目自绘波形与设备图形、品牌标识全部保持原样，不恢复已退出来源。功能区内的原始资源与页头系统字形分别处理：仅旧系统字形缺少精确对应时，降噪采用 `sound_wave_circle`、听感采用 `headphones_sound_wave`、贴合度采用 `surface_earbuds`，均衡器采用 `options`；不新绘专用图形。资源加载失败时只迁移旧 FA 兜底图标，原优先链不变。
+欢律及无线耳机组件原有资源、官方 ANC 图片与听感引导 Lottie、左右耳／盒子电量路径、项目自绘波形与设备图形、品牌标识全部保持原样；历史 ColorOS 来源记录与当前单源规则也保持各自边界，不恢复已退出来源。功能区内的原始资源与页头通用字形分别处理，资源加载失败时的通用替代图标才经过 `AppIcons`，原资源优先链不变。
 
-默认 ComboBox、CheckBox 和设置展开器仅替换必要图标模板；InfoBar 与编辑菜单替换图标来源，不改命令、权限和交互。RadioButton 圆点、开关滑块等结构几何，以及原生窗口装饰不替换。MiSans 协议、Fluent MIT 许可和字体摘要随包保留，应用设置包含使用声明；具体来源见[打包来源说明](../packaging/SOURCE-NOTES.md)。
+ComboBox、CheckBox、设置展开器、InfoBar 与文本编辑菜单恢复 Avalonia／FluentAvalonia 默认模板和图标；这些框架内部图标遵循依赖本身的默认行为。设备管理器的自绘勾选、RadioButton 圆点、开关滑块等结构几何，以及原生窗口装饰保持原样。随包保留 MiSans 协议、字体摘要及 Avalonia／FluentAvalonia 依赖许可，应用设置保留 MiSans 使用声明；具体来源见[打包来源说明](../packaging/SOURCE-NOTES.md)。
 
 ## 构建与界面验证
 

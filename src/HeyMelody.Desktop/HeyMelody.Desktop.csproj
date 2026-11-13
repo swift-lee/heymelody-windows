@@ -9,7 +9,6 @@
     <!-- Unmodified static MiSans is shared by every GUI and the Host, including standalone builds. -->
     <Content Include="Fonts/*.otf" Link="fonts/%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <AvaloniaResource Include="Assets/Icons/**/*" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia.Desktop" Version="12.1.4" />

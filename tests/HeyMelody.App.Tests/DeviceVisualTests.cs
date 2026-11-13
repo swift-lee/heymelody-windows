@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using HeyMelodyWindows.App;
@@ -20,11 +21,12 @@ internal static class DeviceVisualTests
         Run("backend replacement rejects old artwork requests and releases their leases", BackendAsync);
         Run("colour changes cancel stale requests and resolve the replacement artwork", ColorAsync);
         var preparationTests = RunSelectedModelPreparation(session);
+        Run("manufacturer ANC and product artwork stay ahead of either system icon selection", ManufacturerArtworkAsync);
         Run("X4 product PNG uses independent presentation controls and shared bitmap data", PngAsync);
         Run("active renderer leases outlive catalog replacement and release exactly once", LeaseAsync);
         var animationTests = RunAnimations(session);
         Run("the product area shows a progress ring instead of text while artwork resolves or decodes", LoadingRingAsync);
-        return 6 + preparationTests + animationTests;
+        return 7 + preparationTests + animationTests;
         void Run(string label, Func<Task> test)
         { session.Dispatch<bool>(async () => { await test(); return true; }, CancellationToken.None).GetAwaiter().GetResult(); Console.WriteLine("PASS " + label); }
     }
@@ -51,7 +53,8 @@ internal static class DeviceVisualTests
         Run("artwork requires actual PID and does not infer models from Bluetooth names", IdentityAsync);
         Run("backend replacement rejects old artwork requests and releases their leases", BackendAsync);
         Run("colour changes cancel stale requests and resolve the replacement artwork", ColorAsync);
-        return 3 + RunSelectedModelPreparation(session);
+        Run("manufacturer ANC and product artwork stay ahead of either system icon selection", ManufacturerArtworkAsync);
+        return 4 + RunSelectedModelPreparation(session);
         void Run(string label, Func<Task> test)
         { session.Dispatch<bool>(async () => { await test(); return true; }, CancellationToken.None).GetAwaiter().GetResult(); Console.WriteLine("PASS " + label); }
     }
@@ -92,6 +95,46 @@ internal static class DeviceVisualTests
         Check(catalog.ProductFor(device) is FileBitmapVisual && replacement.Requests.Count == 1,
             "The current backend's hero replaces the placeholder.");
     }
+    private static Task ManufacturerArtworkAsync()
+    {
+        var bundled = new BundledResourceStore();
+        var guide = bundled.FindNamedAsset("melody_ui_gold_hearing_detecting_guide")
+            ?? throw new InvalidOperationException("Original hearing Lottie is missing from the installed resource bundle.");
+        var guidePath = bundled.FullPath(guide);
+        var animation = new LottieVisual(new ArtworkFile(new Uri(guidePath), Path.GetDirectoryName(guidePath)!, guide.Sha256),
+            DeviceVisuals.GenericProduct);
+        var masks = new Dictionary<string, Bitmap>();
+        Bitmap? productBitmap = null;
+        try
+        {
+            foreach (var useSegoe in new[] { false, true })
+            {
+                AppIcons.Initialize(() => useSegoe ? "Segoe Fluent Icons" : null);
+                foreach (var key in new[] { "off", "transparency", "adaptive", "smart", "weak", "strong" })
+                {
+                    var glyph = DeviceVisuals.CreateAncGlyph(key, "TextFillColorPrimaryBrush") as Border;
+                    Check(glyph is { Width: 26, Height: 26, OpacityMask: ImageBrush { Source: Bitmap } },
+                        $"ANC {key} keeps its manufacturer bitmap mask when Segoe selection is {useSegoe}.");
+                    var bitmap = (Bitmap)((ImageBrush)glyph!.OpacityMask!).Source!;
+                    Check(bitmap.PixelSize.Width > 0 && bitmap.PixelSize.Height > 0, "The manufacturer ANC mask contains image pixels.");
+                    if (masks.TryGetValue(key, out var previous))
+                        Check(ReferenceEquals(previous, bitmap), "Changing the system icon font does not replace a manufacturer ANC bitmap.");
+                    else masks.Add(key, bitmap);
+                }
+                var product = DeviceVisuals.DefaultTemplate.Build(DeviceVisuals.X4Product) as Image;
+                Check(product is { Source: Bitmap, Stretch: Stretch.Uniform },
+                    "Known product artwork remains an image instead of a generic font icon.");
+                if (productBitmap is not null)
+                    Check(ReferenceEquals(productBitmap, product!.Source), "The selected font leaves the original product bitmap unchanged.");
+                productBitmap = (Bitmap)product!.Source!;
+                Check(DeviceVisuals.DefaultTemplate.Build(animation) is DeviceLottieView,
+                    "The original hearing animation keeps its artwork renderer instead of a generic font icon.");
+            }
+        }
+        finally { AppIcons.Initialize(); }
+        return Task.CompletedTask;
+    }
+
     private static Task PngAsync()
     {
         var hero = new ProductArtwork { Visual = DeviceVisuals.X4Product, Width = 240, Height = 180 };

@@ -1,11 +1,6 @@
-using System.Collections.Concurrent;
-using System.Globalization;
-using System.Text.Json;
-using System.Xml.Linq;
 using Avalonia;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
-using Avalonia.Platform;
 using FluentAvalonia.UI.Controls;
 
 namespace HeyMelodyWindows.App;
@@ -19,12 +14,31 @@ public enum AppIcon
     ChevronDown, Subtract, Warning, Error, Success, Dismiss, Cut, Paste, Undo, Redo, SelectAll
 }
 
-/// <summary>Resolves bundled Fluent System Icons and the original HeyMelody battery device shapes.</summary>
+/// <summary>Resolves system or FluentAvalonia icons and the original HeyMelody battery device shapes.</summary>
 public static class AppIcons
 {
-    private const string AssetRoot = "avares://HeyMelody.Desktop/Assets/Icons/";
-    private static readonly Lazy<IconCatalog> Catalog = new(LoadCatalog);
-    private static readonly ConcurrentDictionary<string, SvgPath> Paths = new();
+    private const string SegoeFluentName = "Segoe Fluent Icons";
+    private static readonly FontFamily SegoeFluent = new(SegoeFluentName);
+    internal static bool UsesSegoeFluentIcons { get; private set; }
+
+    /// <summary>Selects the icon font once at the start of each GUI application initialization.</summary>
+    internal static void Initialize(Func<string?>? loadSegoeFont = null)
+    {
+        try
+        {
+            UsesSegoeFluentIcons = string.Equals((loadSegoeFont ?? LoadSegoeFont)(),
+                SegoeFluentName, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            UsesSegoeFluentIcons = false;
+        }
+    }
+
+    private static string? LoadSegoeFont() =>
+        FontManager.Current.SystemFonts.TryGetGlyphTypeface(SegoeFluentName,
+            FontStyle.Normal, FontWeight.Normal, FontStretch.Normal, out var face)
+            ? face.FamilyName : null;
 
     // Exact pathData from HeyMelody 17.6.5 battery device vectors; see docs/research/battery-device-icons.md.
     // F0 preserves evenOdd letter/indicator cutouts; the desktop inherits its themed foreground.
@@ -55,49 +69,115 @@ public static class AppIcons
             return new FAPathIconSource { Data = battery, Stretch = Stretch.None };
         }
 
-        if (!Catalog.Value.Roles.TryGetValue(icon, out var slug))
-            throw new ArgumentOutOfRangeException(nameof(icon));
-        var file = $"{slug}_{(size <= 16 && Catalog.Value.Files.Contains($"{slug}_16_regular.svg") ? 16 : 20)}_regular.svg";
-        var svg = Paths.GetOrAdd(file, LoadPath);
-        // Opposite closed contours cancel their fill but retain the SVG canvas in Skia's path bounds.
-        var viewport = FormattableString.Invariant(
-            $"M0 0 H{svg.Viewport} V{svg.Viewport} H0 Z M0 0 V{svg.Viewport} H{svg.Viewport} V0 Z");
-        var geometry = Geometry.Parse((svg.FillRule == FillRule.EvenOdd ? "F0 " : "F1 ") + svg.Data + " " + viewport);
-        geometry.Transform = new ScaleTransform(size / svg.Viewport, size / svg.Viewport);
-        return new FAPathIconSource { Data = geometry, Stretch = Stretch.None };
+        return UsesSegoeFluentIcons
+            ? new FAFontIconSource
+            {
+                FontFamily = SegoeFluent, Glyph = char.ConvertFromUtf32(SegoeGlyph(icon)), FontSize = size
+            }
+            : new FASymbolIconSource { Symbol = BuiltInSymbol(icon), FontSize = size };
     }
 
     public static FAIconSourceElement Element(AppIcon icon, double size = 16) =>
         new() { IconSource = Source(icon, size), Width = size, Height = size };
 
-    private static IconCatalog LoadCatalog()
+    // Segoe's Windows code points are independent of FluentAvalonia's extended/legacy enum values.
+    private static int SegoeGlyph(AppIcon icon) => icon switch
     {
-        using var stream = AssetLoader.Open(new Uri(AssetRoot + "fluent-icons.json"));
-        using var document = JsonDocument.Parse(stream);
-        var roles = document.RootElement.GetProperty("roles").EnumerateObject()
-            .ToDictionary(x => Enum.Parse<AppIcon>(x.Name), x => x.Value.GetString()!);
-        var files = document.RootElement.GetProperty("assets").EnumerateArray()
-            .Select(x => x.GetProperty("file").GetString()!).ToHashSet(StringComparer.Ordinal);
-        return new IconCatalog(roles, files);
-    }
+        AppIcon.Settings => 0xE713,
+        AppIcon.Refresh => 0xE72C,
+        AppIcon.Copy => 0xE8C8,
+        AppIcon.Charging => 0xE945,
+        AppIcon.NoiseControl => 0xF61F,
+        AppIcon.Equalizer => 0xE9E9,
+        AppIcon.Sound => 0xE995,
+        AppIcon.Earbuds => 0xF4C0,
+        AppIcon.Gestures => 0xE815,
+        AppIcon.Hearing => 0xF270,
+        AppIcon.FitTest => 0xF27C,
+        AppIcon.Info => 0xE946,
+        AppIcon.History => 0xE81C,
+        AppIcon.Battery => 0xE850,
+        AppIcon.Add => 0xE710,
+        AppIcon.DarkTheme => 0xE708,
+        AppIcon.Sync => 0xE895,
+        AppIcon.Rotate => 0xE7AD,
+        AppIcon.Globe => 0xE774,
+        AppIcon.Permissions => 0xE8D7,
+        AppIcon.CloudDownload => 0xEBD3,
+        AppIcon.SpeakerBluetooth => 0xE702,
+        AppIcon.Repair => 0xE90F,
+        AppIcon.OpenFolder => 0xE838,
+        AppIcon.Help => 0xE897,
+        AppIcon.Play => 0xE768,
+        AppIcon.Pause => 0xE769,
+        AppIcon.Speaker0 => 0xE992,
+        AppIcon.Speaker2 => 0xE994,
+        AppIcon.SpeakerMute => 0xEA85,
+        AppIcon.Rename => 0xE8AC,
+        AppIcon.Checkmark => 0xE73E,
+        AppIcon.Audio => 0xE8D6,
+        AppIcon.Cancel => 0xE711,
+        AppIcon.ChevronDown => 0xE70D,
+        AppIcon.Subtract => 0xE738,
+        AppIcon.Warning => 0xE7BA,
+        AppIcon.Error => 0xEA39,
+        AppIcon.Success => 0xE930,
+        AppIcon.Dismiss => 0xE711,
+        AppIcon.Cut => 0xE8C6,
+        AppIcon.Paste => 0xE77F,
+        AppIcon.Undo => 0xE7A7,
+        AppIcon.Redo => 0xE7A6,
+        AppIcon.SelectAll => 0xE8B3,
+        _ => throw new ArgumentOutOfRangeException(nameof(icon))
+    };
 
-    private static SvgPath LoadPath(string file)
+    private static FASymbol BuiltInSymbol(AppIcon icon) => icon switch
     {
-        using var stream = AssetLoader.Open(new Uri(AssetRoot + file));
-        var root = XDocument.Load(stream).Root ?? throw new InvalidDataException("The bundled Fluent SVG has no root.");
-        var viewport = root.Attribute("viewBox")!.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Select(x => double.Parse(x, CultureInfo.InvariantCulture)).ToArray();
-        var path = root.Elements(root.Name.Namespace + "path").Single();
-        if (viewport.Length != 4 || viewport[0] != 0 || viewport[1] != 0 || viewport[2] <= 0
-            || viewport[2] != viewport[3] || path.Attribute("transform") is not null)
-            throw new InvalidDataException("The bundled Fluent SVG does not use the curated square path format.");
-        var fillRule = (path.Attribute("fill-rule") ?? root.Attribute("fill-rule"))?.Value == "evenodd"
-            ? FillRule.EvenOdd : FillRule.NonZero;
-        return new SvgPath(path.Attribute("d")!.Value, viewport[2], fillRule);
-    }
-
-    private sealed record IconCatalog(IReadOnlyDictionary<AppIcon, string> Roles, IReadOnlySet<string> Files);
-    private sealed record SvgPath(string Data, double Viewport, FillRule FillRule);
+        // These original code points are present in the bundled Symbols font.
+        AppIcon.Settings => (FASymbol)0xE713,
+        AppIcon.Refresh => (FASymbol)0xE72C,
+        AppIcon.Copy => (FASymbol)0xE8C8,
+        AppIcon.Charging => (FASymbol)0xE945,
+        AppIcon.Equalizer => (FASymbol)0xE9E9,
+        AppIcon.Sound => (FASymbol)0xE995,
+        AppIcon.Earbuds => (FASymbol)0xF4C0,
+        AppIcon.Gestures => (FASymbol)0xE815,
+        AppIcon.Info => (FASymbol)0xE946,
+        AppIcon.History => (FASymbol)0xE81C,
+        AppIcon.Battery => (FASymbol)0xE850,
+        AppIcon.NoiseControl or AppIcon.Hearing or AppIcon.FitTest => FASymbol.Audio,
+        AppIcon.Add => FASymbol.Add,
+        AppIcon.DarkTheme => FASymbol.DarkTheme,
+        AppIcon.Sync => FASymbol.Sync,
+        AppIcon.Rotate => FASymbol.Rotate,
+        AppIcon.Globe => FASymbol.Globe,
+        AppIcon.Permissions => FASymbol.Permissions,
+        AppIcon.CloudDownload => FASymbol.CloudDownload,
+        AppIcon.SpeakerBluetooth => FASymbol.SpeakerBluetooth,
+        AppIcon.Repair => FASymbol.Repair,
+        AppIcon.OpenFolder => FASymbol.OpenFolder,
+        AppIcon.Help => FASymbol.Help,
+        AppIcon.Play => FASymbol.Play,
+        AppIcon.Pause => FASymbol.Pause,
+        AppIcon.Speaker0 => FASymbol.Speaker0,
+        AppIcon.Speaker2 => FASymbol.Speaker2,
+        AppIcon.SpeakerMute => FASymbol.SpeakerMute,
+        AppIcon.Rename => FASymbol.Rename,
+        AppIcon.Checkmark => FASymbol.Checkmark,
+        AppIcon.Audio => FASymbol.Audio,
+        AppIcon.Cancel or AppIcon.Dismiss => FASymbol.Cancel,
+        AppIcon.ChevronDown => FASymbol.ChevronDown,
+        AppIcon.Subtract => FASymbol.Remove,
+        AppIcon.Warning => FASymbol.Important,
+        AppIcon.Error => FASymbol.Cancel,
+        AppIcon.Success => FASymbol.Accept,
+        AppIcon.Cut => FASymbol.Cut,
+        AppIcon.Paste => FASymbol.Paste,
+        AppIcon.Undo => FASymbol.Undo,
+        AppIcon.Redo => FASymbol.Redo,
+        AppIcon.SelectAll => FASymbol.SelectAll,
+        _ => throw new ArgumentOutOfRangeException(nameof(icon))
+    };
 }
 
 /// <summary>XAML access to <see cref="AppIcons"/>, for example <c>{local:AppIcon Equalizer}</c>.</summary>

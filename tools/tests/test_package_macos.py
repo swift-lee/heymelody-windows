@@ -296,7 +296,7 @@ class StagingTests(unittest.TestCase):
             self.assertEqual(source_probe.stat().st_mode, source_mode)
             self.assertEqual({path.relative_to(native): path.read_bytes() for path in native.rglob("*") if path.is_file()}, source_bytes)
             manifest = json.loads((bundle / "Contents/Resources/manifest.json").read_text(encoding="utf-8"))
-            self.assertEqual(manifest["uiAssets"], "misans-4.009-fluent-system-icons-v1")
+            self.assertEqual(manifest["uiAssets"], "misans-4.009-v1")
             self.assertEqual(manifest["filamentSourceManifestSha256"], source_hash)
             staged_native = bundle / "Contents/MacOS"
             for entry in json.loads((staged_native / "filament-runtime.json").read_text(encoding="utf-8"))["files"]:

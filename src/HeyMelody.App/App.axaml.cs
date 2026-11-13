@@ -11,6 +11,7 @@ public partial class App : Application
 {
     public override void Initialize()
     {
+        AppIcons.Initialize();
         AvaloniaXamlLoader.Load(this);
         Typography.ApplyThemeResources(this);
     }

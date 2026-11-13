@@ -13,6 +13,7 @@ public partial class DeviceManagerApp : Application
     internal static bool Preview { get; set; }
     public override void Initialize()
     {
+        AppIcons.Initialize();
         AvaloniaXamlLoader.Load(this);
         Typography.ApplyThemeResources(this);
     }

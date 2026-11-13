@@ -71,7 +71,7 @@ internal static class MainLayoutTests
                             Console.WriteLine($"Battery charging {view.ActualThemeVariant}: source={charging.IconSource?.GetType().Name}, "
                                 + $"bounds={(charging.IconSource as FAPathIconSource)?.Data?.Bounds}, foreground={charging.Foreground}");
                             Check(IconTests.Matches(charging.IconSource, AppIcon.Charging, 18),
-                                "The charging marker uses the bundled Fluent battery-charge vector.");
+                                "The charging marker keeps its charging symbol and eighteen-pixel size.");
                             var expected = view.FindResource(view.ActualThemeVariant, "SystemFillColorSuccessBrush");
                             Check(charging.Foreground is ISolidColorBrush actual && expected is ISolidColorBrush success
                                 && actual.Color == success.Color,

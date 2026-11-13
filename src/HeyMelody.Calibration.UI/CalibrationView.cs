@@ -731,7 +731,8 @@ public sealed class CalibrationView : UserControl
     }
     private static Control Check() => Symbol(AppIcon.Checkmark, 30, OnAccent);
     private static Control Ring() => new FAProgressRing { IsActive = true, IsIndeterminate = true, Width = 48, Height = 48 };
-    private static Control EarbudPair() => Icon(AppIcon.FitTest, 40, OnAccent);
+    private static Control EarbudPair() => new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2,
+        Children = { Icon(AppIcon.FitTest, 28, OnAccent), Icon(AppIcon.FitTest, 28, OnAccent, mirrored: true) } };
     private static Style SegmentStyle(string part, double? height = null)
     {
         var style = new Style(x => x.OfType<ProgressBar>().Class("segment").Template().OfType<Border>().Name(part))

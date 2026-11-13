@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "capability": "misans-4.009-fluent-system-icons-v1",
+  "capability": "misans-4.009-v1",
   "fontFamily": "MiSans",
   "fontVersion": "4.009",
   "fontArchive": "https://hyperos.mi.com/font-download/MiSans.zip",
@@ -28,16 +28,10 @@
       "sha256": "575d0481f579785fab27754a337ad77118a17ba3353210ed84c8af4e96e86247"
     }
   ],
-  "fluentSystemIconsCommit": "9bfae3d782fda4c8764f2128cec4d0dda160b283",
-  "fluentSystemIconsSource": "https://github.com/microsoft/fluentui-system-icons",
   "licenses": [
     {
       "path": "MiSans-Font-License.pdf",
       "sha256": "4a93a27cd2bd81b3b5ecfd0a853144a876fa26938a93a68443c67d74172fcb86"
-    },
-    {
-      "path": "Fluent-System-Icons-MIT.txt",
-      "sha256": "69bc45dc42b9acb96a69823adbc6ae538374e3c0bde169b855b32c48eaaef52f"
     }
   ]
 }

@@ -60,6 +60,7 @@ internal static class NativeCalibrationSmoke
     {
         public override void Initialize()
         {
+            AppIcons.Initialize();
             RequestedThemeVariant = ThemeVariant.Light; Styles.Add(new FluentAvaloniaTheme { PreferSystemTheme = false });
             Styles.Add(SharedTheme.Create());
             Typography.ApplyThemeResources(this);
@@ -76,7 +77,10 @@ internal static class NativeCalibrationSmoke
             {
                 try
                 {
-                    await model.InitializeAsync(); await Task.Delay(200);
+                    await model.InitializeAsync();
+                    // The view batches model notifications; flush its initial rebuild before inspecting native children.
+                    Dispatcher.UIThread.RunJobs();
+                    await Until(() => view.GetVisualDescendants().OfType<Slider>().Any());
                     if (_probe is { } probe)
                     {
                         for (int attempt = 0; !probe.Queried && attempt < 80; attempt++) await Task.Delay(50);
@@ -87,7 +91,10 @@ internal static class NativeCalibrationSmoke
                     }
                     var handle = window.TryGetPlatformHandle();
                     Check(handle is not null && handle.Handle != IntPtr.Zero && view.Bounds.Width > 0, "A real Win32 wizard window is laid out.");
-                    var slider = view.GetVisualDescendants().OfType<Slider>().Single();
+                    var slider = view.GetVisualDescendants().OfType<Slider>().SingleOrDefault()
+                        ?? throw new InvalidOperationException($"Native V2 slider is missing: stage={model.State.Stage}, " +
+                            $"version={model.State.HearingVersion}, error={model.Error}, onUiThread={Dispatcher.UIThread.CheckAccess()}, " +
+                            $"visuals={view.GetVisualDescendants().Count()}.");
                     Check(slider.Value == 5 && model.State.Decibels == -19, "Factory middle level is the initial native slider value.");
                     slider.Focus(); PressKey(slider, Key.Right);
                     await service.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
@@ -262,9 +269,13 @@ internal static class NativeCalibrationSmoke
             Check(service.ExitApprovals is [("exit-failed", false)] && window.IsVisible && !service.Disposed,
                 "A native failed STOP acknowledges the exit request as false.");
             service.Push(new BackendEvent { Kind = "requestExit", ExitRequestId = "exit-retry" });
+            await Until(() => service.ExitApprovals.Count == 2);
+            Check(service.ExitApprovals is [("exit-failed", false), ("exit-retry", true)] && window.IsVisible && !service.Disposed,
+                "A native confirmed retry remains open after voting yes while another window can still veto.");
+            service.Push(new BackendEvent { Kind = "stopping" });
             await Until(() => !window.IsVisible);
             Check(service.ExitApprovals is [("exit-failed", false), ("exit-retry", true)] && service.Cancels == 2 && service.Disposed,
-                "A native confirmed retry acknowledges exit as true before closing.");
+                "The native confirmed retry closes after the backend commits to stopping.");
         }
         finally { if (window.IsVisible) { service.StopFailuresRemaining = 0; window.Close(); await Until(() => !window.IsVisible); } }
 

@@ -138,6 +138,6 @@
     <fa:FASettingsExpanderItem x:Name="AboutCard" Description="社区客户端 · 通过蓝牙管理已配对的耳机" IconSource="{icons:AppIcon Help}">
     </fa:FASettingsExpanderItem>
     <TextBlock x:Name="UiAssetCredits" Classes="caption" TextWrapping="Wrap" Margin="2,8,2,0"
-               Text="界面字体使用 MiSans；通用系统图标使用 Fluent System Icons（MIT）。" />
+               Text="界面字体使用 MiSans；通用图标优先使用已安装的 Segoe Fluent Icons，无法加载时使用 FluentAvalonia 内置图标。" />
   </StackPanel>
 </UserControl>

@@ -273,7 +273,8 @@ try
     var selectionChecks = SelectionRefreshTests.Run(session, output, receipts);
     passed += selectionChecks;
     passed += DeviceBarTests.Run(session);
-    passed += DeviceVisualTests.Run(session);
+    var deviceVisualChecks = DeviceVisualTests.Run(session);
+    passed += deviceVisualChecks;
     passed += ArtworkPersistenceTests.Run(session, output, receipts);
     var renderingChecks = CompatibilityRenderingTests.Run(session, output);
     passed += renderingChecks;
@@ -302,8 +303,8 @@ try
     passed += gestureChecks;
     var backdropChecks = DesktopBackdropTests.Run();
     passed += backdropChecks;
-    // 55 = 21 layout/bound-control + 9 interaction + 12 visual + 10 artwork + 3 rendering-preference cases.
-    int expected = (5 * 2 * 2) + 1 + 9 + 12 + 10 + 3
+    // Fixed layout/interaction/artwork cases plus counts returned by the visual and feature runners.
+    int expected = (5 * 2 * 2) + 1 + 9 + deviceVisualChecks + 10 + 3
         + (HeyMelody.Platform.DesktopCapabilities.SupportsHeadsetControl ? 9 : 7)
         + startupChecks + settingsManagementChecks
         + demoChecks + renderingChecks + animationChecks + layoutChecks + selectionChecks

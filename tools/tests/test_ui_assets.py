@@ -20,7 +20,7 @@ def ui_fixture():
         contract = {"schemaVersion": 1, "capability": "fixture-v1", "fontFamily": "MiSans", "fontVersion": "fixture",
                     "fonts": [], "licenses": []}
         for key, base, names in (("fonts", app, ("Regular", "Semibold", "Bold")),
-                                 ("licenses", notices, ("MiSans", "Fluent"))):
+                                 ("licenses", notices, ("MiSans",))):
             for name in names:
                 relative = f"fonts/{name}.otf" if key == "fonts" else name + ".txt"
                 path = base / relative
@@ -96,6 +96,7 @@ class UiAssetsTests(unittest.TestCase):
     def test_repository_font_and_license_sources_match_the_contract(self):
         repo = Path(__file__).resolve().parents[2]
         contract = json.loads(verification.CONTRACT.read_text(encoding="utf-8"))
+        self.assertEqual(contract["capability"], "misans-4.009-v1")
         self.assertEqual(contract["fontVersion"], "4.009")
         for entry in contract["fonts"]:
             source = entry | {"path": entry["path"].replace("fonts/", "Fonts/", 1)}

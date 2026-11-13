@@ -37,6 +37,7 @@ public sealed class CalibrationApplication : Application
     }
     public override void Initialize()
     {
+        AppIcons.Initialize();
         Styles.Add(new FluentAvaloniaTheme { PreferSystemTheme = true, PreferUserAccentColor = true });
         Styles.Add(SharedTheme.Create());
         Typography.ApplyThemeResources(this);
