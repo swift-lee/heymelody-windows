@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Headless;
 using Avalonia.Input;
+using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -64,17 +65,51 @@ internal static partial class RenderingSettingsTests
             {
                 Title = "普通对话框动画对照", Content = "Only application settings changes its presentation.", CloseButtonText = "关闭"
             };
-            var ordinaryOperation = ordinary.ShowAsync(window);
-            await DialogAsync(window, "普通对话框动画对照");
             var sawScale = false;
-            for (var sample = 0; sample < 8; sample++)
+            Matrix? initialScale = null, intermediateScale = null;
+            IMutableTransform? ordinaryTransform = null;
+            EventHandler? ordinaryScaleChanged = null;
+            // Observe before ShowAsync: a slow runner can finish the animation while discovering the dialog.
+            ordinary.TemplateApplied += (_, args) =>
             {
-                TickDialogAnimation();
-                sawScale |= !(DialogPart<Border>(ordinary, "Container").RenderTransform?.Value ?? Matrix.Identity).IsIdentity;
-                await Task.Delay(15);
+                if (args.NameScope.Find<Border>("Container")?.RenderTransform is not IMutableTransform transform)
+                    throw new InvalidOperationException("The ordinary dialog must retain the library's mutable scale transform.");
+                ordinaryTransform = transform;
+                var initial = transform.Value;
+                initialScale = initial;
+                var previous = initial;
+                double? startX = initial.M11 == 1 ? null : initial.M11;
+                double? startY = initial.M22 == 1 ? null : initial.M22;
+                static bool IsIntermediate(double value, double? start) => start is { } first
+                    && value > Math.Min(first, 1) && value < Math.Max(first, 1);
+                ordinaryScaleChanged = (_, _) =>
+                {
+                    var current = transform.Value;
+                    sawScale |= (current.M11 != previous.M11 || current.M22 != previous.M22)
+                        && !current.IsIdentity && !current.Equals(initial)
+                        && (IsIntermediate(current.M11, startX) || IsIntermediate(current.M22, startY));
+                    if (sawScale && intermediateScale is null) intermediateScale = current;
+                    if (current.M11 != 1) startX ??= current.M11;
+                    if (current.M22 != 1) startY ??= current.M22;
+                    previous = current;
+                };
+                transform.Changed += ordinaryScaleChanged;
+            };
+            var ordinaryOperation = ordinary.ShowAsync(window);
+            try
+            {
+                await DialogAsync(window, "普通对话框动画对照");
+                await ModelRendererLifecycleTests.UntilAsync(() => sawScale,
+                    "An ordinary dialog still performs the library's actual scale animation.");
+                await ModelRendererLifecycleTests.UntilAsync(() => ordinaryTransform?.Value.IsIdentity == true,
+                    "The ordinary dialog finishes its scale animation at the default size.");
+                Console.WriteLine($"PASS ordinary dialog animation moves from {initialScale} through {intermediateScale} to identity");
             }
-            Check(sawScale, "An ordinary dialog still performs the library's actual scale animation.");
-            ordinary.Hide(); await ordinaryOperation.WaitAsync(TimeSpan.FromSeconds(3));
+            finally
+            {
+                if (ordinaryTransform is not null) ordinaryTransform.Changed -= ordinaryScaleChanged;
+                ordinary.Hide(); await ordinaryOperation.WaitAsync(TimeSpan.FromSeconds(3));
+            }
 
             var original = File.ReadAllText(path);
             var closingOperation = view.OpenSettingsDialogAsync();

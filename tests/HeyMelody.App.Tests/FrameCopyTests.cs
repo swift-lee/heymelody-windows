@@ -112,6 +112,9 @@ internal static class FrameCopyTests
         {
             model.Motion.SetActive(false);
             var renderer = factory.Instances.Single();
+            await Until(() => model.LastPresentedFrame.FrameId == renderer.GetDiagnostics().FrameId,
+                "Completed startup frames are presented before holding the next request.");
+            var readyBeforeHold = renderer.GetDiagnostics().FrameId;
             renderer.HoldFrameCompletion = true;
             int locks = model.BitmapLockCount, copies = renderer.CopyCalls, misses = model.FrameProbeNoFrameCount;
             long presented = model.PresentedFrameCount;
@@ -122,7 +125,10 @@ internal static class FrameCopyTests
             await Until(() => model.FrameProbeNoFrameCount > misses, "The pending request is checked with metadata only.");
             for (var i = 0; i < 2; i++) await Tick();
             Check(model.BitmapLockCount == locks && renderer.CopyCalls == copies && model.PresentedFrameCount == presented,
-                "A pending frame neither locks nor copies the bitmap nor advances presentation.");
+                $"A pending frame neither locks nor copies the bitmap nor advances presentation. " +
+                $"Locks {locks}->{model.BitmapLockCount}; copies {copies}->{renderer.CopyCalls}; " +
+                $"presentations {presented}->{model.PresentedFrameCount}; " +
+                $"frame {previousFrame.FrameId}->{model.LastPresentedFrame.FrameId}; already ready {readyBeforeHold}.");
 
             renderer.CompletePendingFrame();
             Check(renderer.TryGetLatestFrameInfo(previousFrame.FrameId, out var first)

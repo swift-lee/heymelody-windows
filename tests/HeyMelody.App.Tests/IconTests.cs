@@ -117,6 +117,7 @@ internal static class IconTests
             (AppIcon.Sync, 0xE895, FASymbol.Sync),
             (AppIcon.Rotate, 0xE7AD, FASymbol.Rotate),
             (AppIcon.Globe, 0xE774, FASymbol.Globe),
+            (AppIcon.Location, 0xE707, FASymbol.MapPin),
             (AppIcon.Permissions, 0xE8D7, FASymbol.Permissions),
             (AppIcon.DarkTheme, 0xE708, FASymbol.DarkTheme),
             (AppIcon.Subtract, 0xE738, FASymbol.Remove),
@@ -141,7 +142,7 @@ internal static class IconTests
 
     private static void Sources()
     {
-        Check(Enum.GetValues<AppIcon>().Length == 48, "All existing icon roles remain available.");
+        Check(Enum.GetValues<AppIcon>().Length == 49, "All existing icon roles, including location, remain available.");
         foreach (var useSegoe in new[] { false, true })
         {
             AppIcons.Initialize(() => useSegoe ? "Segoe Fluent Icons" : null);
