@@ -9,7 +9,7 @@ public enum AppIcon
 {
     Settings, Refresh, Copy, Charging, NoiseControl, Equalizer, Sound, Earbuds, Gestures,
     Hearing, FitTest, Info, History, Battery, BatteryLeft, BatteryRight, BatteryCase,
-    Add, DarkTheme, Sync, Rotate, Globe, Permissions, CloudDownload, SpeakerBluetooth, Repair, OpenFolder, Help,
+    Add, DarkTheme, Sync, Rotate, Globe, Location, Permissions, CloudDownload, SpeakerBluetooth, Repair, OpenFolder, Help,
     Play, Pause, Speaker0, Speaker2, SpeakerMute, Rename, Checkmark, Audio, Cancel,
     ChevronDown, Subtract, Warning, Error, Success, Dismiss, Cut, Paste, Undo, Redo, SelectAll
 }
@@ -102,6 +102,7 @@ public static class AppIcons
         AppIcon.Sync => 0xE895,
         AppIcon.Rotate => 0xE7AD,
         AppIcon.Globe => 0xE774,
+        AppIcon.Location => 0xE707,
         AppIcon.Permissions => 0xE8D7,
         AppIcon.CloudDownload => 0xEBD3,
         AppIcon.SpeakerBluetooth => 0xE702,
@@ -151,6 +152,7 @@ public static class AppIcons
         AppIcon.Sync => FASymbol.Sync,
         AppIcon.Rotate => FASymbol.Rotate,
         AppIcon.Globe => FASymbol.Globe,
+        AppIcon.Location => FASymbol.MapPin,
         AppIcon.Permissions => FASymbol.Permissions,
         AppIcon.CloudDownload => FASymbol.CloudDownload,
         AppIcon.SpeakerBluetooth => FASymbol.SpeakerBluetooth,

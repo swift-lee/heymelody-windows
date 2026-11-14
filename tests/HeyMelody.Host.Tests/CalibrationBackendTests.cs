@@ -171,7 +171,7 @@ internal static class CalibrationBackendTests
             fixture.Backend.ClientDetached("component"); await Until(() => worker.Cancels == 1);
             Check(fixture.Backend.Select(snapshot.Identity).ControlReady, "Component EOF did not release lease");
         });
-        await test("calibration pipe EOF stops operation and schema 3 is rejected without losing schema 4 connection", async () =>
+        await test("calibration pipe EOF stops operation and schema 4 is rejected without losing schema 5 connection", async () =>
         {
             await using var fixture = await Fixture.Create(scratch);
             var snapshot = fixture.Snapshots()[0]; var ready = await fixture.Backend.CreateCalibrationAsync("launcher", snapshot.Identity, snapshot.DeviceGeneration, "fit", default);
@@ -180,11 +180,11 @@ internal static class CalibrationBackendTests
             await using (var client = await PipeClient.Connect(name))
             {
                 var baseline = await client.Request(new() { Id = 1, Operation = "subscribe", Role = "calibration" });
-                Check(baseline.Success && baseline.SchemaVersion == 4, "Calibration component did not subscribe using schema 4");
-                var mismatch = await client.Request(new() { SchemaVersion = 3, Id = 2, Operation = "enumerate" });
+                Check(baseline.Success && baseline.SchemaVersion == 5, "Calibration component did not subscribe using schema 5");
+                var mismatch = await client.Request(new() { SchemaVersion = 4, Id = 2, Operation = "enumerate" });
                 Check(mismatch.ErrorCode == "versionMismatch", "Old schema silently accepted");
                 var claimed = await client.Request(new() { Id = 3, Operation = "getCalibration", CalibrationHandle = ready.Handle });
-                Check(claimed.Success, "Valid schema 4 operation failed after version rejection");
+                Check(claimed.Success, "Valid schema 5 operation failed after version rejection");
             }
             await Until(() => fixture.Workers[0].Cancels == 1 && fixture.Backend.Select(snapshot.Identity).ControlReady);
             Check(fixture.Workers[0].State.Stage == "Cancelled", "EOF did not stop the owned operation");

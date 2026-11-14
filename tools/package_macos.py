@@ -165,7 +165,7 @@ def export_notices(repo: Path, resources: Path) -> None:
 
 def bundle_info(component: str, version: str) -> dict:
     suffix = "" if component == "HeyMelody" else "." + component.removeprefix("HeyMelody.").lower()
-    return {"CFBundleName": "HeyMelody", "CFBundleDisplayName": "HeyMelody",
+    info = {"CFBundleName": "HeyMelody", "CFBundleDisplayName": "HeyMelody",
             "CFBundleIdentifier": "io.github.cberyellowstone.heymelody" + suffix,
             "CFBundleExecutable": component, "CFBundlePackageType": "APPL",
             "CFBundleShortVersionString": version, "CFBundleVersion": version,
@@ -174,6 +174,9 @@ def bundle_info(component: str, version: str) -> dict:
             "LSUIElement": component != "HeyMelody", "NSHighResolutionCapable": True,
             "NSPrincipalClass": "NSApplication",
             "NSBluetoothAlwaysUsageDescription": "HeyMelody 需要访问蓝牙以连接和控制您已配对的 OPPO、OnePlus 或 realme 耳机。"}
+    if component == "HeyMelody.Host":
+        info["NSLocationUsageDescription"] = "HeyMelody 需要使用这台电脑的系统位置，在您启用记录后保存耳机断开连接时的位置。"
+    return info
 
 
 def copy_validation(bundle: Path, receipts: list[Path]) -> None:

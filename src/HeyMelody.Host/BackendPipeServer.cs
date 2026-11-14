@@ -115,7 +115,7 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
     {
         using var operation = DiagnosticLog.BeginOperation(request.DiagnosticCorrelationId);
         DiagnosticLog.Info("host.ipc", "request", "Dispatching client RPC", new { client.Key, request });
-        if (request.SchemaVersion != 4)
+        if (request.SchemaVersion != 5)
         { client.Reply(request.Id, null, "versionMismatch", "前后端版本不一致，请重启软件或重新安装。"); return; }
         if (request.Operation.Length is 0 or > 32)
         { client.Reply(request.Id, null, "invalidRequest", "请求无效。"); return; }
@@ -148,6 +148,13 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
                     await supervisor.RefreshCatalogForClientAsync(client.Lifetime.Token); data = supervisor.Catalog(); break;
                 case "saveWhitelist":
                     data = await supervisor.SaveWhitelistAsync(request.DeviceIdentities ?? throw new InvalidDataException(), client.Lifetime.Token); break;
+                case "findHeadphones": data = await supervisor.GetFindHeadphonesAsync(client.Lifetime.Token); break;
+                case "locationPermission": data = await supervisor.RequestLocationPermissionAsync(client.Lifetime.Token); break;
+                case "setFindHeadphones":
+                    data = await supervisor.SetFindHeadphonesEnabledAsync(FindHeadphonesEnabled(), client.Lifetime.Token); break;
+                case "setDeviceLocationRecording":
+                    GenerationCheck();
+                    data = await supervisor.SetDeviceLocationRecordingAsync(Identity(), FindHeadphonesEnabled(), client.Lifetime.Token); break;
                 case "select": case "connect": data = supervisor.Select(Identity(), rememberSelection: client.Role == "main"); break;
                 case "pause": data = supervisor.Pause(Identity()); break;
                 case "resume": data = supervisor.Resume(Identity()); break;
@@ -209,6 +216,8 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
             client.Reply(request.Id, null, "operationFailed", message);
         }
         string Identity() => request.Identity ?? throw new InvalidDataException();
+        bool FindHeadphonesEnabled() => Arg("enabled") is { ValueKind: JsonValueKind.True or JsonValueKind.False } enabled
+            ? enabled.GetBoolean() : throw new InvalidDataException();
         string Handle() => request.CalibrationHandle is { Length: 32 } handle ? handle : throw new InvalidDataException();
         // RpcWire omits null members (WhenWritingNull), so a missing optional argument means null; a missing required one is invalid.
         JsonElement? Arg(string property) => request.Action.ValueKind == JsonValueKind.Object
@@ -285,7 +294,7 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
         {
             Flushed = flushed;
             _message = new BackendMessage { Kind = "event", Event = value };
-            if (value.Kind is "snapshot" or "catalog" or "health" or "calibration" or "resources" or "calibrationSpectrum")
+            if (value.Kind is "snapshot" or "catalog" or "health" or "calibration" or "resources" or "calibrationSpectrum" or "findHeadphones")
                 CoalesceKey = value.Kind + ":" + (value.CalibrationSpectrum?.Handle ?? value.Calibration?.Handle ?? value.Snapshot?.Identity);
         }
         // Null for critical messages; otherwise a later message with the same key replaces an unsent one.

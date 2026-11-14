@@ -87,6 +87,23 @@
     <fa:FAInfoBar x:Name="RedownloadResult" IsClosable="True" IsOpen="False" IsVisible="False" Margin="0,0,0,4" />
     <TextBlock x:Name="ResourceStatusText" Classes="caption" TextWrapping="Wrap" Margin="2,2,0,0" />
 
+    <TextBlock Classes="settings-group" Text="查找耳机" />
+    <fa:FASettingsExpanderItem x:Name="FindHeadphonesSettingsCard" Content="记录耳机断开连接的位置"
+                               Description="通过系统定位记录此电脑的位置；还需为每个设备单独开启。" IconSource="{icons:AppIcon Location}">
+      <fa:FASettingsExpanderItem.Footer>
+        <StackPanel Orientation="Horizontal" Spacing="12">
+          <fa:FAProgressRing x:Name="LocationPermissionProgress" Width="20" Height="20" IsVisible="False"
+                             IsIndeterminate="True" VerticalAlignment="Center" AutomationProperties.Name="正在检查定位权限" />
+          <ToggleSwitch x:Name="FindHeadphonesSwitch" OnContent="开" OffContent="关"
+                        AutomationProperties.Name="记录耳机断开连接的位置" />
+        </StackPanel>
+      </fa:FASettingsExpanderItem.Footer>
+    </fa:FASettingsExpanderItem>
+    <fa:FAInfoBar x:Name="LocationPermissionResult" Severity="Warning" IsClosable="False"
+                  IsOpen="False" IsVisible="False" Margin="0,0,0,4" />
+    <Button x:Name="LocationSystemSettingsButton" Content="打开系统定位设置" IsVisible="False"
+            HorizontalAlignment="Left" Margin="0,0,0,6" Click="LocationSystemSettings_Click" />
+
     <TextBlock Classes="settings-group" Text="设备" />
     <fa:FASettingsExpanderItem Content="耳机列表" Description="选择由 HeyMelody 控制的已配对耳机" IconSource="{icons:AppIcon SpeakerBluetooth}">
       <fa:FASettingsExpanderItem.Footer>

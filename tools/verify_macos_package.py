@@ -56,6 +56,15 @@ def check_native_dependencies(path: Path) -> None:
             raise ValueError(f"Non-system absolute native dependency in {path.name}: {dependency}")
 
 
+def check_location_purpose(info: dict, component: str) -> None:
+    purpose = info.get("NSLocationUsageDescription")
+    if component == "HeyMelody.Host":
+        if not isinstance(purpose, str) or not purpose.strip():
+            raise ValueError("Absent macOS location purpose: HeyMelody.Host")
+    elif purpose is not None:
+        raise ValueError(f"Location permission must belong only to the Host: {component}")
+
+
 def check_bundle(bundle: Path, version: str | None = None) -> dict:
     bundle = bundle.resolve()
     manifest = json.loads((bundle / "Contents/Resources/manifest.json").read_text(encoding="utf-8"))
@@ -80,6 +89,7 @@ def check_bundle(bundle: Path, version: str | None = None) -> dict:
             raise ValueError(f"Wrong minimum system or agent policy: {component}")
         if info["CFBundleIdentifier"] in identifiers or not info.get("NSBluetoothAlwaysUsageDescription"):
             raise ValueError(f"Duplicate identity or absent Bluetooth purpose: {component}")
+        check_location_purpose(info, component)
         identifiers.add(info["CFBundleIdentifier"])
         binary = application / "Contents/MacOS" / component
         if not binary.is_file() or not os.access(binary, os.X_OK) or not is_macho(binary):

@@ -57,7 +57,8 @@ public partial class MainView
             _addDeviceGestureWindow = null;
         };
 
-        _fixedExpanders = [("anc", AncPanel), ("eq", EqualizerPanel), ("hearing", HearingPanel), ("information", DeviceInfoPanel), ("log", OperationLogPanel)];
+        _fixedExpanders = [("anc", AncPanel), ("eq", EqualizerPanel), ("hearing", HearingPanel),
+            ("findHeadphones", FindHeadphonesPanel), ("information", DeviceInfoPanel), ("log", OperationLogPanel)];
         foreach (var (id, expander) in _fixedExpanders)
             expander.PropertyChanged += (_, e) =>
             {

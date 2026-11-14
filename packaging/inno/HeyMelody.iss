@@ -71,8 +71,7 @@ var
   SetupHelper, UninstallHelper, PendingInnoCleanup: String;
   DesktopChoice, DesktopChoiceApplied, Installed, FinishShown: Boolean;
   UninstallDesktopOwned: Boolean;
-  DesktopCheckbox: TNewCheckBox;
-  DesktopHint: TNewStaticText;
+  DesktopCheckbox: TNewCheckListBox;
   AdditionalExitCode: Integer;
 
 function CreateOperationMutex(Attributes: LongWord; InitialOwner: Boolean;
@@ -356,7 +355,7 @@ var
 begin
   if DesktopChoiceApplied or not Installed or not FinishShown or WizardSilent then Exit;
   DesktopChoiceApplied := True;
-  DesktopChoice := DesktopCheckbox.Checked;
+  DesktopChoice := DesktopCheckbox.Checked[0];
   if DesktopChoice then Value := 'true' else Value := 'false';
   if not RunHelper(SetupHelper, 'desktop-preference write ' + Value,
       ExitCode, Details) or (ExitCode <> 0) then begin
@@ -369,15 +368,20 @@ end;
 
 procedure InitializeWizard;
 begin
-  DesktopCheckbox := TNewCheckBox.Create(WizardForm);
+  DesktopCheckbox := TNewCheckListBox.Create(WizardForm);
   DesktopCheckbox.Parent := WizardForm.FinishedPage;
-  DesktopCheckbox.Caption := '创建桌面快捷方式';
-  DesktopCheckbox.Checked := DesktopChoice;
+  { Use the same item renderer as RunList so glyph and caption insets match at every DPI. }
+  DesktopCheckbox.BorderStyle := WizardForm.RunList.BorderStyle;
+  DesktopCheckbox.Color := WizardForm.RunList.Color;
+  DesktopCheckbox.ParentColor := WizardForm.RunList.ParentColor;
+  DesktopCheckbox.Font := WizardForm.RunList.Font;
+  DesktopCheckbox.Flat := WizardForm.RunList.Flat;
+  DesktopCheckbox.ShowLines := WizardForm.RunList.ShowLines;
+  DesktopCheckbox.MinItemHeight := WizardForm.RunList.MinItemHeight;
+  DesktopCheckbox.WantTabs := WizardForm.RunList.WantTabs;
+  DesktopCheckbox.AddCheckBox('创建桌面快捷方式', '', 0,
+    DesktopChoice, True, False, False, nil);
   DesktopCheckbox.Anchors := [akLeft, akTop, akRight];
-  DesktopHint := TNewStaticText.Create(WizardForm);
-  DesktopHint.Parent := WizardForm.FinishedPage;
-  DesktopHint.Caption := '将记住你的选择';
-  DesktopHint.Anchors := [akLeft, akTop, akRight];
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
@@ -386,8 +390,8 @@ var
 begin
   if (CurPageID = wpFinished) and not FinishShown then begin
     Top := WizardForm.RunList.Top;
-    if Top + ScaleY(82) > WizardForm.FinishedPage.ClientHeight then
-      Top := WizardForm.FinishedPage.ClientHeight - ScaleY(82);
+    if Top + ScaleY(58) > WizardForm.FinishedPage.ClientHeight then
+      Top := WizardForm.FinishedPage.ClientHeight - ScaleY(58);
     if WizardForm.FinishedLabel.Top + WizardForm.FinishedLabel.Height +
         ScaleY(8) > Top then begin
       WizardForm.FinishedLabel.AutoSize := False;
@@ -395,12 +399,10 @@ begin
     end;
     DesktopCheckbox.SetBounds(WizardForm.RunList.Left, Top,
       WizardForm.RunList.Width, ScaleY(23));
-    DesktopHint.SetBounds(DesktopCheckbox.Left + ScaleX(18), Top + ScaleY(24),
-      DesktopCheckbox.Width - ScaleX(18), ScaleY(18));
-    WizardForm.RunList.Top := Top + ScaleY(49);
+    WizardForm.RunList.Top := Top + ScaleY(30);
     Remaining := WizardForm.FinishedPage.ClientHeight - WizardForm.RunList.Top - ScaleY(4);
     WizardForm.RunList.Height := Remaining;
-    DesktopCheckbox.Checked := DesktopChoice;
+    DesktopCheckbox.Checked[0] := DesktopChoice;
     FinishShown := True;
   end;
 end;

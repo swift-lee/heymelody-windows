@@ -46,6 +46,7 @@ public partial class AppSettingsPanel : UserControl
     internal AppSettingsPanel(MainViewModel viewModel, string theme, bool canManageDevices, Action manageDevices) : this()
     {
         _viewModel = viewModel;
+        InitializeFindHeadphonesSettings();
         ThemeChoice.ItemsSource = new[] { "跟随系统", "浅色", "深色" };
         ThemeChoice.SelectedIndex = theme switch { "light" => 1, "dark" => 2, _ => 0 };
         // The theme previews at once; the owner restores the saved theme when the dialog is cancelled.
@@ -121,6 +122,8 @@ public partial class AppSettingsPanel : UserControl
 
     private void ViewModelChanged(object? sender, PropertyChangedEventArgs change)
     {
+        if (change.PropertyName is null or nameof(MainViewModel.FindHeadphonesServiceAvailable) or nameof(MainViewModel.Closing))
+            PresentFindHeadphonesSettings();
         if (change.PropertyName is null or nameof(MainViewModel.IsRedownloadingResources) or nameof(MainViewModel.CanRedownloadResources)
             or nameof(MainViewModel.RedownloadMessage) or nameof(MainViewModel.ResourceStatus)
             or nameof(MainViewModel.OnlineResourcesConfigured) or nameof(MainViewModel.CanManageDevices))

@@ -18,7 +18,8 @@ internal static class WireCompatTests
         typeof(UiResourceRedownloadResult), typeof(UiDeviceCatalog), typeof(UiWhitelistSaveResult), typeof(UiArtwork),
         typeof(bool), typeof(UiDevice[]), typeof(List<UiDevice>), typeof(UiHearingProfile[]), typeof(List<UiHearingProfile>),
         typeof(HearingSelectionArgs), typeof(CalibrationCreateArgs), typeof(ArtworkAcquireArgs), typeof(ArtworkReleaseArgs),
-        typeof(ArtworkLeaseReply)
+        typeof(ArtworkLeaseReply), typeof(UiLocationPermission), typeof(UiRecordedLocation),
+        typeof(UiFindHeadphonesDeviceState), typeof(UiFindHeadphonesState), typeof(FindHeadphonesEnabledArgs)
     ];
 
     // Sparse or legacy inputs per root; "{}" is always added. Names are case-sensitive on the wire.
@@ -30,8 +31,15 @@ internal static class WireCompatTests
         [typeof(RpcRequest)] = ["{\"id\":1,\"operation\":\"x\",\"action\":null}"],
         [typeof(RpcResponse)] = ["{\"data\":null}", "{\"id\":3,\"success\":true,\"data\":{\"a\":1}}"],
         [typeof(BackendRequest)] = ["{\"id\":1,\"operation\":\"x\",\"action\":null,\"role\":\"main\"}", "{\"schemaVersion\":4,\"refreshScope\":2}"],
-        [typeof(BackendMessage)] = ["{\"kind\":\"event\",\"event\":{\"kind\":\"snapshot\"},\"data\":null}"],
-        [typeof(BackendSubscription)] = ["{\"devices\":null,\"snapshots\":[{}]}"],
+        [typeof(BackendMessage)] = ["{\"kind\":\"event\",\"event\":{\"kind\":\"snapshot\"},\"data\":null}",
+            "{\"schemaVersion\":5,\"kind\":\"event\",\"event\":{\"kind\":\"findHeadphones\",\"findHeadphones\":{\"enabled\":false,\"devices\":[],\"revision\":2}}}"],
+        [typeof(BackendSubscription)] = ["{\"devices\":null,\"snapshots\":[{}]}",
+            "{\"findHeadphones\":{\"enabled\":true,\"permission\":{\"status\":\"allowed\",\"message\":\"\"},\"devices\":[{\"identity\":\"offline\",\"enabled\":true,\"location\":null,\"status\":\"idle\",\"message\":\"\"}],\"revision\":9}}"],
+        [typeof(UiRecordedLocation)] = ["{\"latitude\":22.3,\"longitude\":114.2,\"accuracyMeters\":80,\"disconnectedAt\":\"2026-11-14T01:02:03+00:00\",\"positionTimestamp\":\"2026-11-14T01:02:02+00:00\"}"],
+        [typeof(UiFindHeadphonesDeviceState)] = ["{\"identity\":\"offline\",\"enabled\":false,\"location\":null,\"status\":\"idle\",\"message\":\"\"}"],
+        [typeof(UiFindHeadphonesState)] = ["{\"enabled\":false,\"permission\":null,\"devices\":[],\"revision\":0}"],
+        [typeof(UiLocationPermission)] = ["{\"status\":\"systemDisabled\",\"message\":\"定位已关闭\"}"],
+        [typeof(FindHeadphonesEnabledArgs)] = ["{\"enabled\":true}"],
         [typeof(UiAction)] = ["{\"kind\":\"Anc\",\"value\":5}"],
         [typeof(HearingSelectionArgs)] = ["{\"uid\":null}", "{\"Uid\":3}"],
         [typeof(CalibrationCreateArgs)] = ["{\"Kind\":\"hearing\"}", "{\"kind\":\"hearing\"}"],

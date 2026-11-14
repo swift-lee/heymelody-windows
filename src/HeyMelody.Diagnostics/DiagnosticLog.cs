@@ -113,7 +113,7 @@ public static class DiagnosticLog
         _writing = true;
         try
         {
-            writer.Enqueue(new(DateTimeOffset.UtcNow, level, source, eventName, message, CurrentCorrelationId,
+            writer.Enqueue(new(DateTimeOffset.UtcNow, level, source, eventName, DiagnosticRedaction.RedactLocationText(message), CurrentCorrelationId,
                 Environment.CurrentManagedThreadId, Capture(data), Describe(exception)));
         }
         catch (Exception error)
@@ -146,8 +146,8 @@ public static class DiagnosticLog
     private static string? Describe(Exception? exception)
     {
         if (exception is null) return null;
-        try { return exception.ToString(); }
-        catch (Exception error) { return exception.GetType().FullName + ": <ToString failed: " + error.Message + ">"; }
+        try { return DiagnosticRedaction.RedactLocationText(exception.ToString()); }
+        catch (Exception error) { return exception.GetType().FullName + ": <ToString failed: " + DiagnosticRedaction.RedactLocationText(error.Message) + ">"; }
     }
 
     private static DateTimeOffset? StartTimeUtc()

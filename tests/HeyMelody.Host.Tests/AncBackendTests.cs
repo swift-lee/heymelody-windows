@@ -11,7 +11,7 @@ internal static class AncBackendTests
 {
     internal static async Task RunAsync(Func<string, Func<Task>, Task> test, string scratch)
     {
-        await test("schema 4 ANC additions default safely and retain legacy packed actions", () =>
+        await test("schema 5 ANC additions default safely and retain legacy packed actions", () =>
         {
             var legacy = JsonSerializer.Deserialize<UiSnapshot>("{\"anc\":2829,\"canSetAnc\":true}", RpcWire.Json)!;
             Check(legacy is { Anc: 0x0B0D, CanSetAnc: true, AncPrimary: null, CanSetAncMode: false },
@@ -21,14 +21,14 @@ internal static class AncBackendTests
                 Data = JsonSerializer.SerializeToElement(new UiSnapshot { AncPrimary = 11, CanSetAncMode = true }, RpcWire.Json)
             };
             var roundtrip = JsonSerializer.Deserialize<BackendMessage>(JsonSerializer.Serialize(message, RpcWire.Json), RpcWire.Json)!;
-            Check(roundtrip.SchemaVersion == 4
+            Check(roundtrip.SchemaVersion == 5
                 && roundtrip.Data!.Value.Deserialize<UiSnapshot>(RpcWire.Json) is { AncPrimary: 11, Anc: null, CanSetAncMode: true },
                 "New parent state did not roundtrip in the existing schema");
             foreach (var action in new[] { new UiAction("AncMode", 11), new UiAction("Anc", 0x0B0D) })
             {
                 var request = new BackendRequest { Action = JsonSerializer.SerializeToElement(action, RpcWire.Json) };
                 var decoded = JsonSerializer.Deserialize<BackendRequest>(JsonSerializer.Serialize(request, RpcWire.Json), RpcWire.Json)!;
-                Check(decoded.SchemaVersion == 4 && decoded.Action.Deserialize<UiAction>(RpcWire.Json) == action,
+                Check(decoded.SchemaVersion == 5 && decoded.Action.Deserialize<UiAction>(RpcWire.Json) == action,
                     "The new action changed the schema or reinterpreted a legacy adjustment");
             }
             return Task.CompletedTask;

@@ -8,6 +8,16 @@ TestProcessErrorMode.SuppressWindowsErrorDialogs();
 
 if (args is ["--fake-peer"]) return await BackendTests.FakePeerMainAsync();
 if (args is ["--diagnostic-fake-peer", var capture]) return await DiagnosticIntegrationTests.FakePeerMainAsync(capture);
+if (args is ["--native-location-permission-status"])
+{
+#if WINDOWS
+    Console.WriteLine(JsonSerializer.Serialize(await HeyMelodyWindows.Windows.WindowsLocationProvider.InspectNativePermissionAsync(default)));
+    return 0;
+#else
+    Console.WriteLine("{\"unsupported\":true}");
+    return 1;
+#endif
+}
 
 int passed = 0;
 bool efficiencyOnly = args is ["--efficiency-tests"];
@@ -43,6 +53,13 @@ try
     {
         await ExitProtocolTests.RunAsync(Test, scratch);
         await BridgeExitIntegrationTests.RunAsync(Test, scratch);
+        Console.WriteLine(JsonSerializer.Serialize(new { passed, success = true, nativeBluetoothCalls = 0 }));
+        return 0;
+    }
+    if (args is ["--find-headphones-tests"])
+    {
+        await FindHeadphonesTests.RunAsync(Test, scratch);
+        await WindowsLocationPermissionTests.RunAsync(Test);
         Console.WriteLine(JsonSerializer.Serialize(new { passed, success = true, nativeBluetoothCalls = 0 }));
         return 0;
     }
@@ -207,6 +224,8 @@ try
     });
     await HostWireTests.RunAsync(Test);
     await BackendTests.RunAsync(Test, scratch);
+    await FindHeadphonesTests.RunAsync(Test, scratch);
+    await WindowsLocationPermissionTests.RunAsync(Test);
     await ExitProtocolTests.RunAsync(Test, scratch);
     await BridgeExitIntegrationTests.RunAsync(Test, scratch);
     await SupervisorDiagnosticsTests.RunAsync(Test, scratch);

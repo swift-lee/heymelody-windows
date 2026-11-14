@@ -54,6 +54,7 @@ public partial class MainView : UserControl
         ArtworkCleanupTriggers.AttachScroll(ControlScroll);
         InitializeDeviceBar();
         InitializeDemoDeviceInteraction();
+        InitializeFindHeadphones();
         UpdateConnectionIndicator();
         VisualCatalog.PropertyChanged += (_, _) => UpdateHeroVisual();
         UserInputCommit.Combo(HearingProfileCombo, async () =>
@@ -83,6 +84,7 @@ public partial class MainView : UserControl
             UpdateConnectionIndicator();
             UpdateHeaderWarnings();
             ResetDeviceInfoCopyFeedback();
+            ResetLocationActions();
             SyncFeatureSections();
             RequestDeviceSelectionSync();
             RequestDeviceCenter();
@@ -92,6 +94,9 @@ public partial class MainView : UserControl
 
     private void ViewModelPropertyChanged(object? sender, PropertyChangedEventArgs change)
     {
+        if (string.IsNullOrEmpty(change.PropertyName) || change.PropertyName is nameof(MainViewModel.SelectedDevice)
+            or nameof(MainViewModel.RecordedLocation) or nameof(MainViewModel.Closing))
+            ResetLocationActions();
         if (string.IsNullOrEmpty(change.PropertyName) || change.PropertyName is nameof(MainViewModel.ProductId) or nameof(MainViewModel.HasVerifiedSnapshot)
             or nameof(MainViewModel.SelectedDevice) or nameof(MainViewModel.Devices)
             or nameof(MainViewModel.ArtworkEpoch) or nameof(MainViewModel.DeviceColor)) UpdateArtwork();
@@ -356,7 +361,8 @@ public partial class MainView : UserControl
 
     internal async Task OpenSettingsDialogAsync()
     {
-        if (_closingWindow || _settingsOperation is not null || _savingResourcePreferences || ViewModel is not { Closing: false } vm) return;
+        if (_closingWindow || _settingsOperation is not null || _mapOperation is not null
+            || _savingResourcePreferences || ViewModel is not { Closing: false } vm) return;
         _manageDevicesRequested = false;
         _resourcePreferenceDraft = null;
         using var cancellation = new CancellationTokenSource();
@@ -386,6 +392,8 @@ public partial class MainView : UserControl
     {
         _closingWindow = true;
         ResetDeviceInfoCopyFeedback();
+        ResetLocationActions();
+        await DismissLocationMapAsync();
         CancelAddDeviceHold();
         CancelDeviceGesture();
         AddDeviceHost.IsEnabled = false;
@@ -412,13 +420,28 @@ public partial class MainView : UserControl
         FAContentDialog? dialog = null;
         var savedTheme = ThemePreferences.Load();
         var savedUiBasicRenderMode = ThemePreferences.LoadUiBasicRenderMode();
+        await vm.RefreshFindHeadphonesAsync(token);
+        token.ThrowIfCancellationRequested();
         var panel = new AppSettingsPanel(vm, savedTheme,
             DesktopCapabilities.SupportsHeadsetControl && ManageDevicesRequested is not null,
             () => { _manageDevicesRequested = true; dialog?.Hide(); });
         panel.ThemePreviewChanged += theme => (Application.Current as App)?.ApplyTheme(theme);
         dialog = new FAContentDialog { Title = "应用设置", Content = panel, PrimaryButtonText = "保存", CloseButtonText = "取消", DefaultButton = FAContentDialogButton.Primary };
+        panel.FindHeadphonesBusyChanged += () => dialog.IsPrimaryButtonEnabled = !panel.FindHeadphonesBusy;
+        dialog.PrimaryButtonClick += async (_, args) =>
+        {
+            var deferral = args.GetDeferral();
+            try
+            {
+                if (!await panel.SaveFindHeadphonesDraftAsync(token)) args.Cancel = true;
+            }
+            finally { deferral.Complete(); }
+        };
+        dialog.CloseButtonClick += (_, _) => panel.CancelFindHeadphonesOperations();
         KeepSettingsDialogUnscaled(dialog);
-        var result = await ShowSettingsDialogAsync(dialog, owner, token);
+        FAContentDialogResult result;
+        try { result = await ShowSettingsDialogAsync(dialog, owner, token); }
+        finally { panel.CancelFindHeadphonesOperations(); }
         if (result != FAContentDialogResult.Primary || _closingWindow || token.IsCancellationRequested)
         {
             // Cancel, closing or "管理设备" keeps the saved appearance rather than the previewed one.

@@ -27,6 +27,17 @@ internal static class ThemePreferences
     internal static bool SaveHideSegoeFluentIconsNotice(bool hide) =>
         Update(preferences => preferences["hideSegoeFluentIconsNotice"] = hide);
 
+    internal static string LoadMapProvider()
+    {
+        var value = Read()["mapProvider"];
+        return value?.GetValueKind() == JsonValueKind.String && value.GetValue<string>() is { } provider
+            && provider is "apple" or "google" or "amap" ? provider : "openstreetmap";
+    }
+
+    internal static bool SaveMapProvider(string provider) =>
+        Update(preferences => preferences["mapProvider"] =
+            provider is "apple" or "google" or "amap" ? provider : "openstreetmap");
+
     internal static ModelFrameRate LoadModelFrameRate() => ParseModelFrameRate(Read()["modelFrameRate"]);
 
     // The former "display" and "120" choices, missing values and malformed values use the unlimited default.

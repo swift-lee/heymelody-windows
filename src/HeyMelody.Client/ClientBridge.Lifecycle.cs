@@ -222,7 +222,7 @@ public sealed partial class ClientBridge
     {
         if (_stopping) return;
         var item = new QueuedEvent(notification, connection);
-        if (notification.Kind is not ("catalog" or "snapshot" or "health" or "resources" or "calibration"))
+        if (notification.Kind is not ("catalog" or "snapshot" or "health" or "resources" or "calibration" or "findHeadphones"))
         {
             // Rare, non-coalescible messages remain ordered, but never block the pipe reader or terminal state.
             if (_overflowEvents.Count != 0 || !_events.Writer.TryWrite(item)) _overflowEvents.Enqueue(item);

@@ -23,6 +23,10 @@ public static class Program
             using var diagnostics = DiagnosticRuntime.InitializeWorker("catalog-worker");
             return HostPlatformFactory.RunWorker(NativeWorker.EnumerateAsync);
         }
+        // Explicit development check: use this executable's real UI-thread identity without starting
+        // Bluetooth, acquiring the shared Host mutex, initializing diagnostics, or saving preferences.
+        if (args is ["--check-location-permission"])
+            return HostPlatformFactory.IsSupported ? RunTray(args) : 2;
         if (args.Length != 0 || !HostPlatformFactory.IsSupported) return 2;
         using var singleton = DesktopRuntime.CreateMutex(BackendEndpoint.HostMutexName, out _);
         bool owner;

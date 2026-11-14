@@ -18,6 +18,6 @@
   <Target Name="BuildMacNativeBridge" BeforeTargets="BeforeBuild" Condition="'$(HeyMelodyDesktopPlatform)' == 'macOS' and $([MSBuild]::IsOSPlatform('OSX'))"
           Inputs="@(NativeBridgeSource);$(MSBuildProjectFullPath)" Outputs="$(NativeBridgeOutput)">
     <MakeDir Directories="$(NativeBridgeDirectory)" />
-    <Exec Command="xcrun clang++ -std=c++17 -fobjc-arc -fblocks -arch arm64 -mmacosx-version-min=15.0 -dynamiclib -install_name @rpath/libHeyMelodyMac.dylib -framework Foundation -framework AppKit -framework IOBluetooth -framework CoreBluetooth -framework CoreAudio -framework AudioToolbox @(NativeBridgeSource->'&quot;%(FullPath)&quot;', ' ') -o &quot;$(NativeBridgeOutput)&quot;" />
+    <Exec Command="xcrun clang++ -std=c++17 -fobjc-arc -fblocks -arch arm64 -mmacosx-version-min=15.0 -dynamiclib -install_name @rpath/libHeyMelodyMac.dylib -framework Foundation -framework AppKit -framework IOBluetooth -framework CoreBluetooth -framework CoreAudio -framework AudioToolbox -framework CoreLocation @(NativeBridgeSource->'&quot;%(FullPath)&quot;', ' ') -o &quot;$(NativeBridgeOutput)&quot;" />
   </Target>
 </Project>

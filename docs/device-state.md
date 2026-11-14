@@ -14,6 +14,6 @@ Host 保存上次由主窗口选择的真实设备，使用与白名单相同的
 
 ## 接口与验证
 
-IPC 使用 schema 4，`UiDevice.IsPreferredSelection` 随现有设备列表传递恢复偏好；`UiSnapshot.PresentationCached` 与可空的 `PresentationSampleTime` 标记缓存展示。会话身份、generation、revision、连接状态、实时观测和写入权限仍由当前后台生成并验证，不能由缓存恢复。
+IPC 使用 schema 5，`UiDevice.IsPreferredSelection` 随现有设备列表传递恢复偏好；`UiSnapshot.PresentationCached` 与可空的 `PresentationSampleTime` 标记缓存展示。会话身份、generation、revision、连接状态、实时观测和写入权限仍由当前后台生成并验证，不能由缓存恢复。
 
 Host 与 Client 回归覆盖稳定选择、完整展示数据、断连禁用、跨后台重启、读取失败、固件功能增删和缓存隔离。App 回归通过实际 ListBox 绑定验证连接状态刷新无需再次点击，名称／排序／外观变动保留高亮，缓存回填不触发 SET，以及离线时页头显示上次连接时间、重新连接后恢复“已连接”与绿色圆点。测试使用模拟设备和内存服务；真实耳机固件升级及原生 ARM64 执行需单独验证。

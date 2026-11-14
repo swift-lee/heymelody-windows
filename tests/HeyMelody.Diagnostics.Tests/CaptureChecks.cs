@@ -29,6 +29,27 @@ internal static class CaptureChecks
             headers = new Dictionary<string, string> { ["sign"] = signature, ["ts"] = "1700000000000" },
             emptyKey = new { heyMelodyKey = "" }
         });
+        const string latitude = "22.30123456", longitude = "114.20123456";
+        string[] locationLinks =
+        [
+            $"geo:{latitude},{longitude}",
+            $"https://www.openstreetmap.org/?mlat={latitude}&mlon={longitude}",
+            $"https://maps.apple.com/?ll={latitude},{longitude}",
+            $"https://www.google.com/maps/search/?api=1&query={latitude}%2C{longitude}",
+            $"https://uri.amap.com/marker?position={longitude},{latitude}&coordinate=wgs84"
+        ];
+        var locationLine = JsonSerializer.Serialize(new
+        {
+            kind = "findHeadphones", location = new { latitude = 22.30123456, longitude = 114.20123456, accuracyMeters = 80 },
+            status = "recorded"
+        });
+        DiagnosticLog.Debug("Fixture", "locationRedaction", "Opening " + locationLinks[0], new
+        {
+            Latitude = 22.30123456, Longitude = 114.20123456, record = locationLine,
+            nested = JsonSerializer.Serialize(new { record = locationLine }), links = locationLinks
+        });
+        DiagnosticLog.Error("Fixture", "locationException", "Map launch failed",
+            new IOException("Cannot open " + locationLinks[3]));
         DiagnosticLog.Stop("redaction completed");
         var text = ReadText(session.Directory!);
         var data = Event(Read(session.Directory!), "redaction").GetProperty("data");
@@ -42,6 +63,21 @@ internal static class CaptureChecks
         check(data.GetProperty("ordinary").GetString() == "{\"command\":\"0x0114\"}"
             && data.GetProperty("headers").GetProperty("ts").GetString() == "1700000000000", "records without credentials stay byte-for-byte original");
         check(data.GetProperty("emptyKey").GetProperty("heyMelodyKey").GetProperty("length").GetInt32() == 0, "empty key reports unset without a hash");
+        check(!text.Contains(latitude) && !text.Contains(longitude) && locationLinks.All(link => !text.Contains(link)),
+            "coordinates and geo/map URLs never reach diagnostics, including messages and exceptions");
+        var locationData = Event(Read(session.Directory!), "locationRedaction").GetProperty("data");
+        check(locationData.GetProperty("Latitude").GetProperty("redacted").GetBoolean()
+            && !locationData.GetProperty("Latitude").TryGetProperty("sha256Prefix", out _),
+            "numeric coordinates are redacted without retaining a reversible hash");
+        var locationRecord = JsonDocument.Parse(locationData.GetProperty("record").GetString()!).RootElement;
+        check(locationRecord.GetProperty("location").GetProperty("longitude").GetProperty("redacted").GetBoolean()
+            && locationRecord.GetProperty("location").GetProperty("accuracyMeters").GetInt32() == 80
+            && locationRecord.GetProperty("status").GetString() == "recorded",
+            "raw location IPC preserves operational status and accuracy while removing coordinates");
+        var nestedLocation = JsonDocument.Parse(locationData.GetProperty("nested").GetString()!).RootElement;
+        check(JsonDocument.Parse(nestedLocation.GetProperty("record").GetString()!).RootElement
+            .GetProperty("location").GetProperty("latitude").GetProperty("redacted").GetBoolean(),
+            "location redaction traverses multiple embedded JSON strings");
 
         DiagnosticLog.ResetForTests();
         DiagnosticLog.InitializeIdentity(DiagnosticComponents.Main, "main");

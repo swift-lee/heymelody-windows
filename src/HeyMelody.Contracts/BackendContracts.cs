@@ -8,7 +8,7 @@ public sealed class BackendRequest
 {
     // Shared detached `null` element: building one per request through reflection SerializeToElement was the costly path.
     private static readonly JsonElement NullAction = JsonDocument.Parse("null").RootElement.Clone();
-    public int SchemaVersion { get; set; } = 4;
+    public int SchemaVersion { get; set; } = 5;
     public long Id { get; set; }
     public string Operation { get; set; } = "";
     public string? BackendInstanceId { get; set; }
@@ -27,7 +27,7 @@ public sealed class BackendRequest
 
 public sealed class BackendMessage
 {
-    public int SchemaVersion { get; set; } = 4;
+    public int SchemaVersion { get; set; } = 5;
     public string Kind { get; set; } = "response";
     public long Id { get; set; }
     public bool Success { get; set; }
@@ -53,6 +53,7 @@ public sealed class BackendEvent
     public UiCalibrationSpectrum? CalibrationSpectrum { get; set; }
     public UiResourceSettings? Resources { get; set; }
     public UiPlatformStatus? Platform { get; set; }
+    public UiFindHeadphonesState? FindHeadphones { get; set; }
 }
 
 public sealed class BackendSubscription
@@ -64,6 +65,7 @@ public sealed class BackendSubscription
     public IReadOnlyList<UiSnapshot> Snapshots { get; set; } = [];
     public IReadOnlyList<DiagnosticFailure> DiagnosticFailures { get; set; } = [];
     public UiPlatformStatus? Platform { get; set; }
+    public UiFindHeadphonesState? FindHeadphones { get; set; }
 }
 
 public sealed record UiPlatformStatus(string Platform, string BluetoothAccess, string AdapterState, string Message);

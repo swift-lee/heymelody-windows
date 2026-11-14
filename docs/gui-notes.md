@@ -33,7 +33,7 @@ macOS 背景使用原生 NSVisualEffectView Blur，按窗口实际协商的透�
 
 2026-10-10 补充：本轮游戏音效及 Hi-Res／空间修复见[研究说明](research/game-audio-spatial.md)，修复阶段的源码与 X4 验证版本为 0.8.10，随后随降噪界面调整升级至 0.8.11。本文修改前[原稿已归档](../research/game-audio-spatial-20261010/original-documents/docs/gui-notes.md)，发布更新前的稿件另存于[本地档案](../research/game-audio-spatial-20261010/pre-release-0.8.11-documents/docs/gui-notes.md)，下方历史发布验证记录保持原值。
 
-0.6.0 完成 Windows Enco X4 功能的 Avalonia 初版迁移，0.6.1 改进后台刷新、交互及失败处理。当前界面使用 Avalonia 12.1.3、FluentAvaloniaUI 3.1.0 和 CommunityToolkit.Mvvm 8.4.2，功能随资源目录及实际设备能力提供。界面和客户端状态模型分别位于 `HeyMelody.App` 与 `HeyMelody.Client`；DTO、schema-4 双向命名管道契约及私有 worker 的 stdio 契约位于 `HeyMelody.Contracts`。`HeyMelody.Host` 独立托盘后台监管每台耳机的原生 worker，Windows 蓝牙调用不进入界面线程。
+0.6.0 完成 Windows Enco X4 功能的 Avalonia 初版迁移，0.6.1 改进后台刷新、交互及失败处理。当前界面使用 Avalonia 12.1.3、FluentAvaloniaUI 3.1.0 和 CommunityToolkit.Mvvm 8.4.2，功能随资源目录及实际设备能力提供。界面和客户端状态模型分别位于 `HeyMelody.App` 与 `HeyMelody.Client`；DTO、schema-5 双向命名管道契约及私有 worker 的 stdio 契约位于 `HeyMelody.Contracts`。`HeyMelody.Host` 独立托盘后台监管每台耳机的原生 worker，Windows 蓝牙调用不进入界面线程。
 
 当前源码及发布脚本默认版本均为 0.8.13。主界面右侧降噪保持默认展开的 FluentAvalonia Expander，沿用降噪图标、说明和模式选择器；用户主动折叠后，普通状态刷新不会重新展开。真实设备和 Demo 沿用各自的会话展开状态。
 
@@ -78,6 +78,16 @@ macOS 背景使用原生 NSVisualEffectView Blur，按窗口实际协商的透�
 使用 FluentAvalonia 的 `FAAppWindow`、`FASettingsExpander`、`FASettingsExpanderItem`、`FAInfoBar` 和 `FAContentDialog`，以及主题提供的按钮、下拉框、开关、文本框和滑块。系统、浅色、深色主题可在应用设置中切换，偏好保存到 `%LOCALAPPDATA%/HeyMelody/preferences.json`。无效偏好会回退到系统主题。项目图标沿用原创的 `Assets/HeyMelody.ico`。
 
 保留配对设备枚举、手动连接和断开、左右耳及充电盒电量与充电状态、降噪、五种声音预设、十段自定义 EQ、双设备连接、游戏模式、空间音频及 Hi-Res。显示状态来自后台 GET、RFCOMM 通知和经关联的 BLE 观测；可写能力仍需 RFCOMM 型号和能力核验。无法读取的电量显示 `—`，未知开关显示“未确认”并禁用写入，部分读取失败有单独提示。十段 EQ 的竖直滑块在 `MainView.axaml` 内把模板的左右内容边距由 14 改为 7（14+18+14=46 px 放进 32 px 槽时拇指偏右 7 px，悬停放大后越出右缘；7+18+7=32 使其居中），`EqSliderGeometryTests` 以无头布局断言拇指及其 1.167 倍悬停圆不越出滑块与祖先。2026-10-22 Windows x64 包复查后修正三处：频段增益标签放进 `Viewbox`（只缩小），最右一列的“dB”不再被裁；降噪模式改为居中的等宽 `UniformGrid`（四个以内单行，更多时分成均衡的两行，间距沿用 16／12），任意数量的模式整组水平居中；固定面板的展开内容边距 `HmExpanderContentPadding` 由 20 改为 16，与 FluentAvalonia 的 `SettingsExpanderPadding`、`SettingsExpanderItemPadding` 左右 16 一致，降噪面板同步使用 `UiMetrics.ExpanderContentInset`，其开关行不再叠加子项内边距。均为静态修改，未在本地运行检查。
+
+## 查找耳机
+
+“查找耳机”是使用定位标记图标的固定 Expander，位于设备信息上方，默认折叠，副标题为“记录耳机上次连接断开时的大致位置、播放提示音”；全局关闭、设备离线或型号不支持控制时均保留面板。设备开关不显示副标题，只依赖后台可用、真实设备选择和全局开关，不使用耳机写入能力门控。位置及偏好独立于控制快照，采用后台实例和独立 revision 校验，切换设备及后台重启不串用结果。
+
+应用设置的全局开关采用保存／取消草稿：尝试打开先请求 Host 检查系统权限，通过后只改变草稿，保存时复查并正式持久化；异步保存失败保持对话框。取消不会撤销系统已经授予的权限，但不提交全局开关。
+
+位置块展示经度、纬度、断开观测时间和精度；无记录时显示占位，复制与地图按钮禁用。位置字段下方不展示状态或操作提示，定位权限可到应用设置中检查。复制使用 invariant culture 的 `geo:纬度,经度`；成功后复制 ToggleButton 选中并显示“已复制”，5 秒后恢复，不另占一行提示。再次复制重置计时，切换设备、位置记录变化及页面关闭会清理反馈与迟到请求。地图选择使用与应用设置一致的 `FAContentDialog`，纵向显示 OpenStreetMap、Apple Maps、Google Maps、高德地图，下方“打开”“取消”；单选只编辑草稿，点击打开确认并保存应用级 `mapProvider` 后才启动地图。取消、点击对话框外部、Esc、设备切换及页面关闭均放弃未确认选择，外部点击不会穿透操作主界面。打开失败保留对话框和选择，偏好写入失败不阻止启动。提示音行及播放按钮为禁用占位。
+
+首次查找耳机实现的原生窗口检查仅在 Windows x64 Build 26300.9974 执行，位置数据使用 fixture，未调用耳机 SET。当时真实 Host 的显式系统权限请求返回 denied，未取得真实位置；macOS 原生编译、授权和后台定位未验证。后续复制反馈与按需定位优化通过离线定向验收，尚未原生验证 Windows 位置隐私指示的消退。
 
 ## 交互约束
 

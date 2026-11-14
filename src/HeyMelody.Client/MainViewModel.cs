@@ -209,6 +209,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         await SubscribeToBackendAsync();
         await EnumerateAsync(devices);
         await LoadResourcePreferencesAsync();
+        await RefreshFindHeadphonesAsync();
         if (_preview && SelectedDevice is not null) await ConnectOrDisconnectAsync();
     }
 

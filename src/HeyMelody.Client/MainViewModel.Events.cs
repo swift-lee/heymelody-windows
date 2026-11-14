@@ -27,8 +27,11 @@ public sealed partial class MainViewModel
         { PresentResourceSettings(resources); return; }
         if (notification.Kind == "platform" && AcceptBackend(notification.BackendInstanceId))
         { PresentPlatformStatus(notification.Platform); return; }
+        if (notification.Kind == "findHeadphones" && AcceptBackend(notification.BackendInstanceId))
+        { PresentFindHeadphones(notification.FindHeadphones); return; }
         if (notification.Kind == "unavailable")
         {
+            InvalidateFindHeadphones(clear: false);
             _subscribed = false;
             BackendStartupDevices = null;
             _backendSnapshots.Clear();
@@ -41,6 +44,7 @@ public sealed partial class MainViewModel
         }
         if (notification.Kind == "stopping")
         {
+            InvalidateFindHeadphones(clear: false);
             if (IsDemoSelected) return;
             AdvanceSession();
             InvalidateSnapshot();
@@ -82,6 +86,7 @@ public sealed partial class MainViewModel
         var subscription = await events.SubscribeAsync("main", _lifetime.Token);
         if (!AcceptBackend(subscription.BackendInstanceId)) return;
         PresentPlatformStatus(subscription.Platform);
+        PresentFindHeadphones(subscription.FindHeadphones);
         foreach (var snapshot in subscription.Snapshots) CacheSnapshot(snapshot);
         BackendStartupDevices = subscription.Devices.Count != 0 && subscription.Catalog.SelectionWarning is null
             ? subscription.Devices : null;
@@ -94,6 +99,7 @@ public sealed partial class MainViewModel
         if (_backendInstanceId == instance) return true;
         if (_backendInstanceId is { } previous)
         {
+            InvalidateFindHeadphones(clear: true);
             _retiredBackends.Add(previous);
             _backendSnapshots.Clear(); _artworkRevision = 0;
             if (!IsDemoSelected) { AdvanceSession(); InvalidateSnapshot(); }

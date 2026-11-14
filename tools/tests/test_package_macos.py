@@ -208,6 +208,28 @@ class EntryPointTests(unittest.TestCase):
         self.assertEqual(report["actualBackend"], "Metal")
 
 
+class LocationPurposeTests(unittest.TestCase):
+    def test_only_host_declares_the_macos_location_purpose(self):
+        for component in package.COMPONENTS:
+            with self.subTest(component=component):
+                info = package.bundle_info(component, VERSION)
+                verification.check_location_purpose(info, component)
+                self.assertEqual("NSLocationUsageDescription" in info, component == "HeyMelody.Host")
+                self.assertNotIn("NSLocationWhenInUseUsageDescription", info)
+                self.assertNotIn("NSLocationAlwaysAndWhenInUseUsageDescription", info)
+
+    def test_missing_or_empty_host_location_purpose_is_rejected(self):
+        for purpose in (None, "", "  ", 3):
+            with self.subTest(purpose=purpose):
+                info = {} if purpose is None else {"NSLocationUsageDescription": purpose}
+                with self.assertRaisesRegex(ValueError, "Absent macOS location purpose"):
+                    verification.check_location_purpose(info, "HeyMelody.Host")
+
+    def test_location_purpose_in_a_gui_bundle_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "only to the Host"):
+            verification.check_location_purpose({"NSLocationUsageDescription": "fixture"}, "HeyMelody")
+
+
 class StagingTests(unittest.TestCase):
     def test_corrupt_native_input_is_rejected_before_staging_or_signing(self):
         with tempfile.TemporaryDirectory(prefix="macos-input-test-") as directory:

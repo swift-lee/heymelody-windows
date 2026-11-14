@@ -16,6 +16,8 @@ if (args.FirstOrDefault() == "--native-performance-audit") return NativePerforma
 if (ProcessLifetimeTests.TryRunHelper(args, out var helperExit)) return helperExit;
 if (args is ["--diagnostic-settings-tests"]) return DiagnosticSettingsTests.Run();
 if (args is ["--native-exit-smoke"]) return WindowExitLifecycleTests.Run();
+if (args is ["--native-find-headphones-smoke", "--output-dir", var findNativeOutput])
+    return FindHeadphonesTests.RunNative(Path.GetFullPath(findNativeOutput));
 
 if (args is ["--smooth-scroll-tests"]) return SmoothScrollingTests.Run();
 
@@ -161,6 +163,12 @@ try
         Console.WriteLine(JsonSerializer.Serialize(new { passed = count, success = true, nativeBluetoothCalls = 0, output }));
         return 0;
     }
+    if (args is ["--find-headphones-tests"])
+    {
+        var checks = FindHeadphonesTests.Run(session, output);
+        Console.WriteLine(JsonSerializer.Serialize(new { passed = checks, success = true, nativeBluetoothCalls = 0, output }));
+        return 0;
+    }
     if (args is ["--rendering-settings-tests"] or ["--rendering-settings-tests", "--output-dir", _])
     {
         var checks = RenderingSettingsTests.Run(session, output);
@@ -296,6 +304,8 @@ try
     var settingsManagementChecks = SettingsManagementTests.Run(session);
     var renderingSettingsChecks = RenderingSettingsTests.Run(session, output);
     passed += renderingSettingsChecks;
+    var findHeadphonesChecks = FindHeadphonesTests.Run(session, output);
+    passed += findHeadphonesChecks;
     passed += startupChecks + settingsManagementChecks;
     var typographyChecks = TypographyTests.Run(session);
     var iconChecks = IconTests.Run(session);
@@ -314,7 +324,7 @@ try
     // Fixed layout/interaction/artwork cases plus counts returned by the visual and feature runners.
     int expected = (5 * 2 * 2) + 1 + 9 + deviceVisualChecks + 10 + renderingSettingsChecks
         + (HeyMelody.Platform.DesktopCapabilities.SupportsHeadsetControl ? 9 : 7)
-        + startupChecks + settingsManagementChecks
+        + startupChecks + settingsManagementChecks + findHeadphonesChecks
         + demoChecks + renderingChecks + animationChecks + layoutChecks + selectionChecks
         + gameAudioChecks + typographyChecks + iconChecks + defaultIconChecks + fontNoticeAssetChecks
         + frameLoopChecks + nativeDemoCliChecks + gestureChecks + ancFeatureChecks + layoutHelperChecks + backdropChecks;

@@ -192,14 +192,14 @@ internal static class ArtworkPersistenceTests
             var dialog = window.GetVisualDescendants().OfType<FAContentDialog>().Single(d => Equals(d.Title, "应用设置"));
             var cards = dialog.GetVisualDescendants().OfType<FASettingsExpanderItem>()
                 .Where(card => card.IsVisible && card.Parent is StackPanel { Name: "SettingsRoot" }).ToArray();
-            int expectedCards = 8 + (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? 1 : 0) + (OperatingSystem.IsMacOS() ? 0 : 1);
+            int expectedCards = 9 + (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? 1 : 0) + (OperatingSystem.IsMacOS() ? 0 : 1);
             Check(cards.Length == expectedCards && cards.All(card => card.IconSource is not null)
                 && IconTests.Matches(cards.Single(card => card.Name == "ModelFrameRateCard").IconSource, AppIcon.Rotate)
                 && IconTests.Matches(cards.Single(card => card.Name == "RedownloadCard").IconSource, AppIcon.CloudDownload),
                 "Every visible top-level setting, including the 3D frame rate, is an icon card; "
                 + $"expected={expectedCards}, actual={cards.Length}.");
             var button = dialog.GetVisualDescendants().OfType<Button>().Single(b => Avalonia.Automation.AutomationProperties.GetName(b) == "重新下载在线资源");
-            var ring = dialog.GetVisualDescendants().OfType<FAProgressRing>().Single();
+            var ring = dialog.GetVisualDescendants().OfType<FAProgressRing>().Single(value => value.Name == "RedownloadProgress");
             var result = dialog.GetVisualDescendants().OfType<FAInfoBar>().Single(bar => bar.Name == "RedownloadResult");
             Check(button.IsEnabled && !ring.IsVisible && !result.IsVisible, "Re-download starts idle.");
             button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); Dispatcher.UIThread.RunJobs();

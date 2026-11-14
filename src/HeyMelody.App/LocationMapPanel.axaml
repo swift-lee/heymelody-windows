@@ -1,0 +1,34 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:fa="clr-namespace:FluentAvalonia.UI.Controls;assembly=FluentAvalonia"
+             x:Class="HeyMelodyWindows.App.LocationMapPanel">
+  <UserControl.Styles>
+    <Style Selector="Border.map-provider-card">
+      <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
+      <Setter Property="Padding" Value="16,12" />
+    </Style>
+  </UserControl.Styles>
+  <StackPanel MinWidth="460" Spacing="4">
+    <TextBlock Text="选择地图" FontWeight="SemiBold" Margin="1,0,0,6" />
+    <Border Classes="map-provider-card">
+      <RadioButton x:Name="LocationMapOsm" Content="OpenStreetMap" GroupName="LocationMapProvider" Tag="openstreetmap"
+                   HorizontalAlignment="Stretch" />
+    </Border>
+    <Border Classes="map-provider-card">
+      <RadioButton x:Name="LocationMapApple" Content="Apple Maps" GroupName="LocationMapProvider" Tag="apple"
+                   HorizontalAlignment="Stretch" />
+    </Border>
+    <Border Classes="map-provider-card">
+      <RadioButton x:Name="LocationMapGoogle" Content="Google Maps" GroupName="LocationMapProvider" Tag="google"
+                   HorizontalAlignment="Stretch" />
+    </Border>
+    <Border Classes="map-provider-card">
+      <RadioButton x:Name="LocationMapAmap" Content="高德地图" GroupName="LocationMapProvider" Tag="amap"
+                   HorizontalAlignment="Stretch" />
+    </Border>
+    <fa:FAInfoBar x:Name="LocationMapError" Severity="Warning" IsClosable="False" IsVisible="False" IsOpen="False" Margin="0,8,0,0" />
+  </StackPanel>
+</UserControl>

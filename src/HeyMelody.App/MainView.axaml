@@ -329,6 +329,41 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
+            <fa:FASettingsExpander x:Name="FindHeadphonesPanel" Header="查找耳机" Description="记录耳机上次连接断开时的大致位置、播放提示音"
+                                   IconSource="{icons:AppIcon Location}" IsExpanded="False">
+              <fa:FASettingsExpanderItem Content="记录该设备断开时的位置">
+                <fa:FASettingsExpanderItem.Footer>
+                  <ToggleSwitch x:Name="DeviceLocationRecordingSwitch" OnContent="开" OffContent="关"
+                                IsChecked="{Binding DeviceLocationRecordingEnabled, Mode=OneWay}"
+                                IsEnabled="{Binding CanSetDeviceLocationRecording}"
+                                AutomationProperties.Name="记录该设备断开时的位置" />
+                </fa:FASettingsExpanderItem.Footer>
+              </fa:FASettingsExpanderItem>
+              <Border Padding="{StaticResource HmExpanderContentPadding}">
+                <StackPanel Spacing="16">
+                  <Grid x:Name="LocationInfoFields" ColumnDefinitions="100,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="12">
+                    <TextBlock Text="经度" Classes="muted" /><TextBlock Grid.Column="1" Text="{Binding LocationLongitudeText}" />
+                    <TextBlock Grid.Row="1" Text="纬度" Classes="muted" /><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding LocationLatitudeText}" />
+                    <TextBlock Grid.Row="2" Text="断开时间" Classes="muted" />
+                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding LocationRecordedAtText}" TextWrapping="Wrap" />
+                    <TextBlock Grid.Row="3" Text="定位精度" Classes="muted" />
+                    <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding LocationAccuracyText}" TextWrapping="Wrap" />
+                  </Grid>
+                  <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                    <ToggleButton x:Name="CopyLocationButton" Content="复制坐标" Click="CopyLocation_Click"
+                                  IsChecked="False" IsEnabled="{Binding HasRecordedLocation}"
+                                  AutomationProperties.LiveSetting="Polite" />
+                    <Button x:Name="OpenLocationMapButton" Content="在地图上查看" Click="OpenLocationMap_Click"
+                            IsEnabled="{Binding HasRecordedLocation}" AutomationProperties.Name="在地图上查看" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+              <fa:FASettingsExpanderItem Content="播放查找耳机提示音" Description="暂未支持">
+                <fa:FASettingsExpanderItem.Footer>
+                  <Button x:Name="PlayFindHeadphonesButton" Content="播放" IsEnabled="False" />
+                </fa:FASettingsExpanderItem.Footer>
+              </fa:FASettingsExpanderItem>
+            </fa:FASettingsExpander>
             <fa:FASettingsExpander x:Name="DeviceInfoPanel" Header="设备信息" Description="名称、产品编号与固件"
                                    IconSource="{icons:AppIcon Info}" IsExpanded="False">
               <Border Padding="{StaticResource HmExpanderContentPadding}">

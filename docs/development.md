@@ -184,6 +184,14 @@ dotnet run --project tests/HeyMelody.Calibration.UI.Tests -c Release -- --native
 
 三个 native 入口仅启动软件绘制的假服务窗口，不使用实际 Host 或耳机、不获取截图。Diagnostics 默认检查还覆盖子组件启动门与历史日志路径／SHA 保留。原生窗口、模拟通信及 ARM64 静态结果仍须分别报告。
 
+### 查找耳机验收
+
+位置记录的定向离线入口为 `dotnet run --project tests/HeyMelody.Host.Tests -c Release -- --find-headphones-tests` 和 `dotnet run --project tests/HeyMelody.App.Tests -c Release -- --find-headphones-tests`。Client.Tests 与 Diagnostics.Tests 的完整入口分别覆盖共享 IPC schema 5、序列化及坐标脱敏。平台提供者可注入，普通测试不请求系统权限或读取真实坐标。
+
+本机原生窗口验收使用 `dotnet run --project tests/HeyMelody.App.Tests -c Release -- --native-find-headphones-smoke --output-dir <新目录>`，展示 fixture 位置并输出截图，不启动真实地图或耳机操作。显式原生权限检查使用已构建的 `src/HeyMelody.Host/bin/Release/net10.0-windows10.0.19041.0/HeyMelody.Host.exe --check-location-permission`：在真正 Host 进程的 UI 线程调用系统授权 API，可能显示系统提示；不创建自有窗口、不获取坐标、不保存设置、不启动蓝牙后台。Host.Tests 的 `--native-location-permission-status` 入口则只作静默状态观察，不请求权限。
+
+2026-11-14 查找耳机轮原生检查仅覆盖当前本机 Windows x64 Build 26300.9974。macOS 桥接仅检查托管构建和打包配置，未验证 macOS 原生编译、TCC 或后台位置读取；本机权限未允许，实际定位成功路径仍以模拟测试验证。完整 App 验收中的模型帧复制断言失败另记入优化待办，不以定位定向通过替代完整套件通过。
+
 ## 发布与包校验
 
 仅在任务涉及构建发布包时执行。脚本默认版本为 0.9.2，`-Version` 同时选择程序集与包版本，本 Filament 试验默认生成自包含 Windows x64 目录和 ZIP；本地生成产物不等于向 GitHub 发布：

@@ -57,6 +57,8 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
     private readonly CancellationTokenSource _lifetime = new();
     private readonly Dictionary<ulong, Peer> _peers = [];
     private readonly Dictionary<ulong, bool> _osConnections = [];
+    private readonly Dictionary<ulong, long> _osConnectionRevisions = [];
+    private long _connectionObservationRevision;
     private readonly Dictionary<ulong, bool> _osPresent = [];
     private readonly DeviceWhitelistStore _whitelist;
     private readonly DeviceAppearanceStore _appearance;
@@ -75,11 +77,14 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
     internal BackendSupervisor(DeviceWhitelistStore? whitelist = null,
         Func<CancellationToken, Task<IReadOnlyList<BluetoothCandidate>>>? enumerate = null,
         Func<IPeerWorker>? workerFactory = null, TimeProvider? time = null, HeyMelodyWindows.Resources.ResourceCoordinator? resources = null,
-        DeviceAppearanceStore? appearance = null, DeviceStateStore? deviceState = null)
+        DeviceAppearanceStore? appearance = null, DeviceStateStore? deviceState = null,
+        ILocationProvider? locationProvider = null, FindHeadphonesStore? findHeadphonesStore = null)
     {
         _whitelist = whitelist ?? DeviceWhitelistStore.CreateDefault();
         _appearance = appearance ?? DeviceAppearanceStore.NextTo(_whitelist);
         _deviceState = deviceState ?? DeviceStateStore.NextTo(_whitelist);
+        _locationProvider = locationProvider ?? HostPlatformFactory.UnavailableLocation();
+        _findHeadphonesStore = findHeadphonesStore ?? FindHeadphonesStore.NextTo(_whitelist);
         _enumerate = enumerate ?? PeerWorker.EnumerateAsync;
         _workerFactory = workerFactory ?? (() => new PeerWorker());
         _resources = resources ?? (workerFactory is null ? new(bundleDirectory: BundleDirectory(AppContext.BaseDirectory)) : null);
@@ -87,6 +92,7 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
         DiagnosticLog.Info("host.lifecycle", "supervisorCreated", "Backend supervisor created", new { InstanceId });
         try { _allowed = _whitelist.Load(); }
         catch (InvalidDataException) { _catalogWarning = "设备选择记录已损坏，请重新选择并保存。"; }
+        InitializeFindHeadphones();
     }
 
     // Completes with true once the tray's first catalog refresh has succeeded; null outside start-up.
@@ -99,6 +105,7 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
         try
         {
             await InitializeResourcesAsync(token);
+            if (_findHeadphonesEnabled) await CheckLocationPermissionAsync(token);
             if (refreshCatalog) await RefreshCatalogAsync(token);
             startup.TrySetResult(true);
         }
@@ -139,7 +146,8 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
         {
             var result = new BackendSubscription { BackendInstanceId = InstanceId, Catalog = CatalogLocked(),
                 Devices = DevicesLocked(), Snapshots = _peers.Values.Where(p => p.Present && p.Allowed).Select(p => Copy(p.Published)).ToArray(),
-                DiagnosticFailures = DiagnosticFailuresLocked(), Platform = _platformStatus };
+                DiagnosticFailures = DiagnosticFailuresLocked(), Platform = _platformStatus,
+                FindHeadphones = FindHeadphonesLocked() };
             atomicReply?.Invoke(result); return result;
         }
     }
@@ -165,6 +173,8 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
         await _catalogGate.WaitAsync(linked.Token);
         try
         {
+            long observationBaseline;
+            lock (_sync) observationBaseline = _connectionObservationRevision;
             var candidates = await _enumerate(linked.Token);
             List<Peer> start = [];
             lock (_sync)
@@ -174,21 +184,27 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
                     .Where(p => !_osPresent.TryGetValue(p.Address, out var paired) || paired).ToDictionary(p => p.Address);
                 foreach (var peer in _peers.Values)
                     if (!present.ContainsKey(peer.Candidate.Address) && peer.Present)
-                    { peer.Present = false; StopPeerLocked(peer); PublishLocked(peer); }
+                    {
+                        peer.Present = false; StopPeerLocked(peer); CancelLocationAttemptLocked(LocationKey(peer));
+                        PublishLocked(peer);
+                    }
                 foreach (var candidate in present.Values)
                 {
                     if (!_peers.TryGetValue(candidate.Address, out var peer)) { _peers[candidate.Address] = peer = new(candidate); LoadAppearanceLocked(peer); }
                     var wasConnected = peer.Candidate.Connected;
                     peer.Present = true;
-                    peer.Candidate = _osConnections.TryGetValue(candidate.Address, out var connected)
-                        ? candidate with { Connected = connected } : candidate;
+                    bool connected = _osConnectionRevisions.GetValueOrDefault(candidate.Address) > observationBaseline
+                        && _osConnections.TryGetValue(candidate.Address, out var observed) ? observed : candidate.Connected;
+                    peer.Candidate = candidate with { Connected = connected };
                     peer.Allowed = _allowed.Contains(DeviceWhitelistStore.KeyFor(candidate.Address));
+                    if (wasConnected && !connected) RecordDisconnectedLocationLocked(peer);
                     if (!peer.Allowed || !peer.Candidate.Connected || !_radioAvailable || _suspended)
                     { if (peer.Worker is not null || wasConnected != peer.Candidate.Connected) StopPeerLocked(peer); }
                     else if (peer.State != MonitoringState.Unsupported && !peer.Paused && peer.Worker is null) start.Add(peer);
                     PublishLocked(peer);
                 }
                 PublishCatalogLocked();
+                PublishFindHeadphonesLocked();
             }
             foreach (var peer in start) _ = EnsureWorkerAsync(peer);
         }
@@ -219,11 +235,16 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
             foreach (var peer in _peers.Values)
             {
                 peer.Allowed = keys.Contains(DeviceWhitelistStore.KeyFor(peer.Candidate.Address));
-                if (!peer.Allowed) { StopPeerLocked(peer); peer.Broadcast = null; CancelBroadcastExpiryLocked(peer); }
+                if (!peer.Allowed)
+                {
+                    StopPeerLocked(peer); peer.Broadcast = null; CancelBroadcastExpiryLocked(peer);
+                    CancelLocationAttemptLocked(LocationKey(peer));
+                }
                 else if (EligibleLocked(peer) && peer.Worker is null) start.Add(peer);
                 PublishLocked(peer);
             }
             PublishCatalogLocked();
+            PublishFindHeadphonesLocked();
         }
         foreach (var peer in start) _ = EnsureWorkerAsync(peer);
         return new(true);
@@ -443,8 +464,11 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
         lock (_sync)
         {
             _osConnections[address] = connected;
+            _osConnectionRevisions[address] = ++_connectionObservationRevision;
             if (!_peers.TryGetValue(address, out var peer) || peer.Candidate.Connected == connected) return;
+            bool disconnected = peer.Candidate.Connected && !connected;
             peer.Candidate = peer.Candidate with { Connected = connected }; peer.Failures = 0;
+            if (disconnected) RecordDisconnectedLocationLocked(peer);
             if (!connected) StopPeerLocked(peer);
             else { if (peer.State == MonitoringState.Unsupported) peer.State = MonitoringState.WaitingForConnection; if (EligibleLocked(peer)) start = peer; }
             PublishLocked(peer); PublishCatalogLocked();
@@ -536,7 +560,9 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
             _osPresent[address] = paired;
             if (paired || !_peers.TryGetValue(address, out var peer)) return;
             peer.Present = false; StopPeerLocked(peer); peer.Broadcast = null; CancelBroadcastExpiryLocked(peer);
+            CancelLocationAttemptLocked(LocationKey(peer));
             PublishCatalogLocked();
+            PublishFindHeadphonesLocked();
         }
     }
 
@@ -730,12 +756,17 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
         {
             if (_disposed) return;
             _disposed = true; _stopping = true;
+            DisposeFindHeadphonesLocked();
             workers = _peers.Values.Where(p => p.Worker is not null).Select(p => p.Worker!).ToList();
             foreach (var peer in _peers.Values)
             { peer.Lifetime.Cancel(); CancelBroadcastExpiryLocked(peer); peer.BroadcastTimer?.Dispose(); peer.BroadcastTimer = null; }
             _lifetime.Cancel();
         }
-        try { foreach (var worker in workers) await worker.DisposeAsync(); }
+        try
+        {
+            await DisposeFindHeadphonesAsync();
+            foreach (var worker in workers) await worker.DisposeAsync();
+        }
         finally
         {
             try { await _deviceState.FlushAsync(); DisposeResources(); }
@@ -747,7 +778,7 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
     {
         DiagnosticLog.Info("host.lifecycle", "stop", "Stopping connected devices and calibrations", new { InstanceId });
         Peer[] peers;
-        lock (_sync) { _stopping = true; peers = _peers.Values.ToArray(); }
+        lock (_sync) { _stopping = true; CancelAllLocationAttemptsLocked(); peers = _peers.Values.ToArray(); }
         await CancelAllCalibrationsAsync();
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(125));
         foreach (var peer in peers)

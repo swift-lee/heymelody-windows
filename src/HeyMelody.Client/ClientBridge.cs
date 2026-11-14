@@ -350,7 +350,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                     ? matching.CorrelationId : null;
                 using var operation = correlation is { } id ? DiagnosticLog.BeginOperation(id) : DiagnosticLog.SuspendOperation();
                 DiagnosticLog.Info("client.ipc", "receive", "Received backend RPC record", new { record });
-                if (message.SchemaVersion != 4)
+                if (message.SchemaVersion != 5)
                 { _versionMismatch = true; throw new InvalidDataException("后台通信版本不一致。"); }
                 if (message.Kind == "response" && message.Id > 0 && message.Id <= Interlocked.Read(ref _nextId))
                 {
@@ -425,6 +425,9 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                         if (_connection is not { Closed: false } connection || _backendInstanceId != subscription.BackendInstanceId) continue;
                         QueueStateLocked(new BackendEvent { Kind = "catalog", BackendInstanceId = subscription.BackendInstanceId,
                             Catalog = subscription.Catalog, Devices = subscription.Devices }, connection);
+                        if (subscription.FindHeadphones is { } findHeadphones)
+                            QueueStateLocked(new BackendEvent { Kind = "findHeadphones", BackendInstanceId = subscription.BackendInstanceId,
+                                FindHeadphones = findHeadphones }, connection);
                         foreach (var snapshot in subscription.Snapshots)
                             QueueStateLocked(new BackendEvent { Kind = "snapshot", BackendInstanceId = subscription.BackendInstanceId, Snapshot = snapshot }, connection);
                     }

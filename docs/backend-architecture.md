@@ -10,7 +10,7 @@
 
 macOS 主应用和四个 helper 共用同一个后台。主应用只在窗口存在时以 Regular 策略保留 Dock 图标，批准关闭后立即转为 Accessory；主应用通过 LaunchServices 请求启动 Host，让 `LSUIElement` 在进程创建前生效，因此 Host 和其余 helper 始终以 Accessory 运行、从不注册 Dock 图标（包括启动瞬间），所有可见窗口关闭后只保留菜单栏图标。所有窗口的 ⌘Q 通过新增退出请求 RPC 发起下述既有投票流程，请求先应答再开始投票；⌘W 和关闭按钮保留本地组件关闭行为。Mac 原生蓝牙、授权与音频路由的实际耳机验证边界见 [macOS 说明](macos.md)，下文明确写 Windows 的原生 API 行为仍仅指 Windows。
 
-- App 与 DeviceManager 使用 schema-4 双向命名管道（历史版本为 schema 2／3）。端点按用户和 Windows Session ID 区分，服务端限制当前用户并检查客户端进程所在会话。公共契约只携带内存中的 opaque Identity，不携带蓝牙地址。
+- App 与 DeviceManager 使用 schema-5 双向命名管道（历史版本为 schema 2／3／4）。端点按用户和 Windows Session ID 区分，服务端限制当前用户并检查客户端进程所在会话。公共契约只携带内存中的 opaque Identity，不携带蓝牙地址。
 - Host supervisor 管理白名单、设备目录、每台设备的控制状态和观察缓存。设备的产品 ID 与协议颜色按白名单键持久化在 `device-appearance.json`，只作为外观提示随设备目录发布，不授予控制（见 [外观资源持久化](artwork-persistence.md)）。独立的 `--catalog-worker` 执行同步原生枚举；每台耳机使用独立的 `--worker` 执行 SDP/RFCOMM。原生调用卡住时可以结束对应 worker，托盘和其他耳机保持响应。
 - 主界面启动时在 Avalonia 初始化前于线程池建立管道（只连接、不订阅）；托盘单实例互斥体不存在时直接启动后台，不再先等 300 ms。`enumerate`／`enumerateCandidates` 在托盘首次初始化进行中时等待该次初始化，不另起 catalog-worker；其余时间每次查询仍新建刷新。主界面先用 subscribe 返回的有效名单进入页面，`enumerate` 在后台核对，结果经 catalog 事件更新。见[主界面启动](research/main-window-startup-0.9.9.md)。
 - worker 地址通过私有标准输入发送，不放在进程命令行。worker 与 Host 的 stdio 通信只在内部使用。历史 schema-1 RPC 适配器仅位于 Client.Tests，生产 ClientBridge 只使用共享管道。
@@ -34,6 +34,18 @@ SPP 与 BLE 各自保留观测时间，按耳机部件融合电量、充电盒�
 系统挂起停止 watcher 和控制会话；恢复后仅在仍有扫描需求时重建 watcher，并丢弃旧 watcher 代次或早于本次扫描的回调。Modern Standby 使用注册式 suspend/resume 通知。广播或监听 API 不可用时会发布诊断，现有可用 RFCOMM 仍可工作；确证蓝牙关闭时才停控制会话。
 
 详细 APK 依据和广播编码见 [bluetooth-events.md](research/bluetooth-events.md)。当前按欢律配置、App 条件、已实现的协议和设备能力开放设置；固件条件只产生提醒，适配范围见[设备支持说明](research/oppo-device-support.md)。客户端没有改变 Windows 音频驱动或 LE Audio 管线；后台提供 caseOpen 事件，尚未实现独立开盖弹窗；后台开盖检测保持运行，与将来弹窗的兼容安排见[资源占用](#资源占用)。
+
+## 查找耳机的位置记录
+
+定位由 Host 直属服务管理，独立于每设备协议 worker。`findHeadphones`、`locationPermission`、`setFindHeadphones`、`setDeviceLocationRecording` RPC 与 subscribe 基线／`findHeadphones` 事件传递独立状态及 revision，不使用设备控制 generation 或 SET。设备设置校验当前后台实例和现有名单，离线及协议不支持的设备仍可使用。
+
+只有系统确认的已连接→未连接才触发采集；连接事件和新鲜枚举结果经过同一更新入口，枚举期间的新事件优先。初始离线、重复 false、控制通道重启、暂停和退出不生成断开。单次采集最多 15 秒，位置采样时间不得早于观测断开前 60 秒或晚于采集窗口；失败保留旧记录。每设备独立序号防止迟到覆盖，关闭开关、移除设备和退出会取消任务。写盘在蓝牙状态锁外串行完成，失效任务不能提交位置。
+
+Windows 不保留常驻 `Geolocator` 或 `StatusChanged` 订阅。空闲时的权限检查只读取本进程最近一次显式授权或单次定位的结果；重启后的权限标为待核实，已保存的双开关仍可在断开时进行一次静默定位。自动路径不调用 `RequestAccessAsync`，只有用户在设置中开启、保存开启状态或重新检查时才复核系统授权，显式开启及保存仍要求已允许。单次请求在成功、失败、超时和取消后释放原生操作与定位对象；权限受阻后保留旧位置，并提示用户重新检查。
+
+`find-headphones.json` 与白名单文件同目录，按稳定 SHA256 设备键原子保存全局开关、每设备开关和最近成功位置，不持久化蓝牙地址。坐标不进入控制快照、worker 或普通诊断日志；诊断层脱敏坐标字段、嵌套原始 IPC 和含坐标的地图／geo URL。App 的 `preferences.json` 独立保存 `mapProvider`，仅在地图选择对话框点击“打开”时确认。
+
+Windows 在 Host UI 线程请求 Geolocator 系统权限；macOS 通过主 RunLoop 的 Core Location 桥及 Host bundle 的 `NSLocationUsageDescription` 请求。自动记录只作静默权限检查和一次性位置读取，不申请权限、不持续追踪。系统未上报的停机或休眠断开不能补造；定位采样时间与断开观测时间分别保留。
 
 ## 暂停、写入与退出
 
@@ -79,7 +91,7 @@ SPP 与 BLE 各自保留观测时间，按耳机部件融合电量、充电盒�
 - 资源协调器睡到下一次检查到期，不再每 30 秒空转：关闭在线资源时没有任何计划；偏好变化、重新下载、新美术目标和释放会唤醒它；电脑从休眠恢复时 Host 也会唤醒它（`Reschedule`），因为这一个长计时器未必计入休眠时间，休眠期间到期的检查随即按墙钟重新评估；两轮之间至少间隔 30 秒，10 分钟与 30 秒的检查节奏不变。一轮中出现取消以外的意外异常时写入 Trace 并设置 `LastError`，循环不再静默结束，按 30 秒下限重试。
 - BLE 广播过期改为每个 peer 一个可复用计时器，取代每条广播一个 CTS 加延迟任务。
 - 设备状态缓存：内容除 SampleTime 外未变、且样本时间前进不足 60 秒时不写盘，内存保持最新；关闭时 `FlushAsync` 写入最新样本；崩溃后磁盘上的时间最多晚 60 秒（界面只显示 HH:mm）。Host 启动时按文件内容预置每个条目的节流状态（仅 schema 2 且载入时未经修复的条目），重启后 60 秒内内容相同的首次记录不再重写文件；超过 60 秒仍照常写入。
-- IPC：每条连接一个带缓冲的 `RpcLineReader`，直接读取管道或 worker 标准流的字节并增量解码 UTF-8（无 BOM；客户端严格解码），不再叠 `StreamReader`；`Stream.ReadAsync` 一有数据即返回，因此整行已到达时不会因 `StreamReader` 在缓冲读满时继续等待而被扣住。行长上限、EOF 与 '\r' 语义不变，该流不得再被其他读取者使用；旧的静态 `ReadLineAsync` 已删除；每个管道事件只序列化一次并供所有客户端共用，按客户端的合并与限额不变。线格式字节和 schema 4 不变。
+- IPC：每条连接一个带缓冲的 `RpcLineReader`，直接读取管道或 worker 标准流的字节并增量解码 UTF-8（无 BOM；客户端严格解码），不再叠 `StreamReader`；`Stream.ReadAsync` 一有数据即返回，因此整行已到达时不会因 `StreamReader` 在缓冲读满时继续等待而被扣住。行长上限、EOF 与 '\r' 语义不变，该流不得再被其他读取者使用；旧的静态 `ReadLineAsync` 已删除；每个管道事件只序列化一次并供所有客户端共用，按客户端的合并与限额不变。该能耗轮未改变线格式字节及当时的 schema 4；当前共享 schema 见上文。
 
 ### 能耗轮验证边界
 

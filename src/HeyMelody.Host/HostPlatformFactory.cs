@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Avalonia.Threading;
 using HeyMelody.Platform;
 
 namespace HeyMelodyWindows.Host;
@@ -18,6 +19,46 @@ internal static class HostPlatformFactory
 #else
         return new UnavailableBluetoothPlatform();
 #endif
+    }
+    internal static ILocationProvider CreateLocation()
+    {
+#if WINDOWS
+        return new UiThreadLocationProvider(new HeyMelodyWindows.Windows.WindowsLocationProvider());
+#elif HEYMELODY_MACOS
+        if (OperatingSystem.IsMacOS() && RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
+            return new UiThreadLocationProvider(new HeyMelody.MacOS.MacLocationProvider());
+        return UnavailableLocation();
+#else
+        return UnavailableLocation();
+#endif
+    }
+    internal static ILocationProvider UnavailableLocation() => new UnavailableLocationProvider();
+    private sealed class UiThreadLocationProvider(ILocationProvider provider) : ILocationProvider
+    {
+        public event Action<LocationPermission>? PermissionChanged
+        { add => provider.PermissionChanged += value; remove => provider.PermissionChanged -= value; }
+        public async Task<LocationPermission> RequestPermissionAsync(CancellationToken token)
+        {
+            if (Dispatcher.UIThread.CheckAccess()) return await provider.RequestPermissionAsync(token);
+            return await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                token.ThrowIfCancellationRequested();
+                return provider.RequestPermissionAsync(token);
+            });
+        }
+        public Task<LocationPermission> CheckPermissionAsync(CancellationToken token) => provider.CheckPermissionAsync(token);
+        public Task<LocationFix> GetLocationAsync(CancellationToken token) => provider.GetLocationAsync(token);
+        public void Dispose() => provider.Dispose();
+    }
+    private sealed class UnavailableLocationProvider : ILocationProvider
+    {
+        private static readonly LocationPermission Permission = new(LocationAccess.Unavailable, "此平台尚未实现系统定位。");
+        public event Action<LocationPermission>? PermissionChanged { add { } remove { } }
+        public Task<LocationPermission> RequestPermissionAsync(CancellationToken token) => Task.FromResult(Permission);
+        public Task<LocationPermission> CheckPermissionAsync(CancellationToken token) => Task.FromResult(Permission);
+        public Task<LocationFix> GetLocationAsync(CancellationToken token) =>
+            Task.FromException<LocationFix>(new PlatformNotSupportedException(Permission.Message));
+        public void Dispose() { }
     }
     internal static int RunWorker(Func<Task<int>> worker)
     {

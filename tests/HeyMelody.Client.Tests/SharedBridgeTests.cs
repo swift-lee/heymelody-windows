@@ -8,6 +8,46 @@ internal static class SharedBridgeTests
 {
     public static async Task RunAsync(Func<string, Func<Task>, Task> test)
     {
+        await test("shared location preferences work for an offline unknown model without a control session", async () =>
+        {
+            string pipe = Name();
+            var initial = new UiFindHeadphonesState(false, new("unknown", ""), [], 1);
+            var recorded = new UiRecordedLocation(22.3, 114.2, 80, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+            var updated = new UiFindHeadphonesState(true, new("allowed", ""),
+                [new("unknown-offline", true, recorded, "recorded", "")], 3);
+            var pushed = new TaskCompletionSource<UiFindHeadphonesState>(TaskCreationOptions.RunContinuationsAsynchronously);
+            await using var server = new Server(pipe, async (reader, writer, token) =>
+            {
+                var subscribe = await Read(reader, token);
+                await Reply(writer, subscribe, new BackendSubscription { BackendInstanceId = "location-host", FindHeadphones = initial }, token);
+                var permission = await Read(reader, token);
+                Check(permission.Operation == "locationPermission" && permission.BackendInstanceId == "location-host");
+                await Reply(writer, permission, new UiLocationPermission("allowed", ""), token);
+                var global = await Read(reader, token);
+                Check(global.Operation == "setFindHeadphones" && global.Action.GetProperty("enabled").GetBoolean());
+                await Reply(writer, global, updated with { Devices = [], Revision = 2 }, token);
+                var device = await Read(reader, token);
+                Check(device.Operation == "setDeviceLocationRecording" && device.Identity == "unknown-offline"
+                    && device.DeviceGeneration is null && device.BackendInstanceId == "location-host"
+                    && device.Action.GetProperty("enabled").GetBoolean());
+                await Reply(writer, device, updated, token);
+                var read = await Read(reader, token);
+                Check(read.Operation == "findHeadphones");
+                await Reply(writer, read, updated, token);
+                await Send(writer, new BackendMessage { Kind = "event", Event = new BackendEvent
+                    { Kind = "findHeadphones", BackendInstanceId = "location-host", FindHeadphones = updated } }, token);
+                await Drain(reader, token);
+            });
+            await using var bridge = new ClientBridge(pipe, testBudget: TimeSpan.FromSeconds(5));
+            bridge.EventReceived += notification =>
+            { if (notification.FindHeadphones is { } state) pushed.TrySetResult(state); };
+            Check((await bridge.SubscribeAsync("main", default)).FindHeadphones?.Enabled == false);
+            Check((await bridge.RequestLocationPermissionAsync(default)).Status == "allowed");
+            Check((await bridge.SetFindHeadphonesEnabledAsync(true, default)).Enabled);
+            Check((await bridge.SetDeviceLocationRecordingAsync("unknown-offline", true, default)).Devices.Single().Enabled);
+            Check((await bridge.GetFindHeadphonesAsync(default)).Devices.Single().Location == recorded);
+            Check((await pushed.Task.WaitAsync(TimeSpan.FromSeconds(3))).Devices.Single().Location == recorded);
+        });
         await test("shared pipe routes concurrent responses and preserves newer push generation", async () =>
         {
             var pushed = new TaskCompletionSource<UiSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -81,18 +121,18 @@ internal static class SharedBridgeTests
             Check(!result.BackendReceiptReceived && result.SubmissionAttempted && result.PartialEffects
                 && result.AcknowledgementUnknown && result.FailureKind == ApplyFailure.WorkerUnavailable && submitted == 1);
         });
-        await test("shared pipe rejects schema 3 after subscribing without reconnecting or restarting the backend", async () =>
+        await test("shared pipe rejects schema 4 after subscribing without reconnecting or restarting the backend", async () =>
         {
             string pipe = Name(); int started = 0, reconnected = 0;
             var unavailable = new TaskCompletionSource<BackendEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
             await using var server = new Server(pipe, async (reader, writer, token) =>
             {
                 var subscribe = await Read(reader, token);
-                Check(subscribe.Operation == "subscribe" && subscribe.SchemaVersion == 4);
+                Check(subscribe.Operation == "subscribe" && subscribe.SchemaVersion == 5);
                 await Reply(writer, subscribe, new BackendSubscription { BackendInstanceId = "instance" }, token);
                 var request = await Read(reader, token);
-                Check(request.Operation == "enumerate" && request.SchemaVersion == 4);
-                await Send(writer, new BackendMessage { SchemaVersion = 3, Id = request.Id, Success = true,
+                Check(request.Operation == "enumerate" && request.SchemaVersion == 5);
+                await Send(writer, new BackendMessage { SchemaVersion = 4, Id = request.Id, Success = true,
                     Data = JsonSerializer.SerializeToElement(Array.Empty<UiDevice>(), RpcWire.Json) }, token);
                 await Drain(reader, token);
             }, 2);

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 namespace HeyMelody.Diagnostics;
 
@@ -13,6 +14,15 @@ internal static class DiagnosticRedaction
     {
         "heyMelodyKey", "cacheEncryptionKey", "cloudKey", "sign"
     };
+    private static readonly HashSet<string> LocationNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "latitude", "longitude", "lat", "lon", "lng", "geoUri", "mapUri", "locationUrl"
+    };
+    private static readonly Regex LocationLinks = new(
+        @"\b(?:geo:[^\s""'<>]+|https?://(?:www\.)?(?:openstreetmap\.org|maps\.apple\.com|google\.com/maps|uri\.amap\.com)[^\s""'<>]*)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+
+    internal static string RedactLocationText(string text) => LocationLinks.Replace(text, "[location redacted]");
 
     internal static bool IsSensitive(string name) => SensitiveNames.Contains(name);
 
@@ -33,7 +43,13 @@ internal static class DiagnosticRedaction
             case JsonObject value:
                 foreach (var (name, child) in value.ToArray())
                 {
-                    if (IsSensitive(name) && child is not null && child.GetValueKind() is not JsonValueKind.Object and not JsonValueKind.Array)
+                    if (LocationNames.Contains(name) && child is not null)
+                    {
+                        // Coordinates have a small search space: do not preserve a hash or the original value's length.
+                        value[name] = new JsonObject { ["redacted"] = true };
+                        changed = true;
+                    }
+                    else if (IsSensitive(name) && child is not null && child.GetValueKind() is not JsonValueKind.Object and not JsonValueKind.Array)
                     {
                         value[name] = Describe(child.GetValueKind() == JsonValueKind.String ? child.GetValue<string>() : child.ToJsonString());
                         changed = true;
@@ -63,13 +79,20 @@ internal static class DiagnosticRedaction
         if (child is JsonObject or JsonArray) return Redact(child, depth + 1);
         if (child is not JsonValue leaf || leaf.GetValueKind() != JsonValueKind.String) return false;
         var text = leaf.GetValue<string>();
-        if (!LooksLikeJson(text)) return false;
-        JsonNode? embedded;
-        try { embedded = JsonNode.Parse(text); }
-        catch (JsonException) { return false; }
-        // Rewrite embedded text only when it held a credential, so ordinary raw lines stay byte-for-byte original.
-        if (!Redact(embedded, depth + 1)) return false;
-        replacement = JsonValue.Create(embedded!.ToJsonString());
+        if (LooksLikeJson(text))
+        {
+            JsonNode? embedded = null;
+            try { embedded = JsonNode.Parse(text); }
+            catch (JsonException) { }
+            if (embedded is not null && Redact(embedded, depth + 1))
+            {
+                replacement = JsonValue.Create(embedded.ToJsonString());
+                return true;
+            }
+        }
+        var redacted = RedactLocationText(text);
+        if (redacted == text) return false;
+        replacement = JsonValue.Create(redacted);
         return true;
     }
 

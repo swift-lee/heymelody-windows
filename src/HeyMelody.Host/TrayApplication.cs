@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -34,10 +35,17 @@ internal sealed class TrayApplication : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            if (desktop.Args is ["--check-location-permission"])
+            {
+                Dispatcher.UIThread.Post(async () => await CheckLocationPermissionAsync(desktop));
+                base.OnFrameworkInitializationCompleted();
+                return;
+            }
             // Eco applies when no window is connected: this process and its workers drop to EcoQoS and idle priority.
             _energyPolicy = new(TimeProvider.System); _energy = new(_energyPolicy, new WindowsProcessEnergy());
             HostEnergy.Controller = _energy; _selfEnergy = _energy.Attach(_self = Process.GetCurrentProcess());
-            _supervisor = new(); _server = new(_supervisor, energy: _energyPolicy); _monitor = new(_supervisor);
+            _supervisor = new(locationProvider: HostPlatformFactory.CreateLocation());
+            _server = new(_supervisor, energy: _energyPolicy); _monitor = new(_supervisor);
             _supervisor.AttachDiagnostics();
             var menu = new NativeMenu();
             var open = new NativeMenuItem("打开主界面");
@@ -106,6 +114,34 @@ internal sealed class TrayApplication : Application
             _ = StartAsync();
         }
         base.OnFrameworkInitializationCompleted();
+    }
+    private static async Task CheckLocationPermissionAsync(IClassicDesktopStyleApplicationLifetime desktop)
+    {
+        int exitCode = 0;
+        try
+        {
+            using var provider = HostPlatformFactory.CreateLocation();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            var permission = await provider.RequestPermissionAsync(timeout.Token).WaitAsync(timeout.Token);
+            string access = permission.Access.ToString();
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                status = char.ToLowerInvariant(access[0]) + access[1..],
+                message = permission.Message,
+                hresult = (int?)null
+            }));
+        }
+        catch (Exception error)
+        {
+            exitCode = 1;
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                status = "failed",
+                message = error is OperationCanceledException ? "系统定位权限检查超时或已取消。" : "系统定位权限检查未完成。",
+                hresult = (int?)error.HResult
+            }));
+        }
+        finally { desktop.Shutdown(exitCode); }
     }
     // Normal exit ends the process well before this fires; it only bounds a hung UI thread or cleanup step.
     private static void StartForcedExitWatchdog() => _ = Task.Run(async () =>
