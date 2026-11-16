@@ -140,6 +140,8 @@ $abiFixturePath = Join-Path ([IO.Path]::GetDirectoryName($OutputPath)) 'native-a
 if ($LASTEXITCODE) { throw 'Native ABI packaging gate fixtures failed.' }
 $abiFixture = Get-Content -LiteralPath $abiFixturePath -Raw | ConvertFrom-Json
 foreach ($check in $abiFixture.checks) { Assert-Contract ([bool]$check.passed) $check.name }
+& (Join-Path $repo 'tools/tests/Test-AotPackaging.ps1')
+Assert-Contract $true 'AOT/shared native merges preserve identical libraries and reject conflicting bytes'
 $failed = @($checks | Where-Object { -not $_.passed }).Count
 New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($OutputPath)) -Force | Out-Null
 [ordered]@{ schemaVersion = 1; success = ($failed -eq 0); passed = ($checks.Count - $failed); failed = $failed; checks = $checks.ToArray() } |

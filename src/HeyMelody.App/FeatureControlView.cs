@@ -2,7 +2,10 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Data;
+using Avalonia.Data.Core;
 using Avalonia.Layout;
+using Avalonia.Markup.Xaml.MarkupExtensions;
+using Avalonia.Markup.Xaml.MarkupExtensions.CompiledBindings;
 using Avalonia.Media;
 using FluentAvalonia.UI.Controls;
 using HeyMelodyWindows.Ui;
@@ -56,7 +59,7 @@ public sealed class FeatureControlView : FASettingsExpanderItem
         {
             case "Switch":
                 var toggle = new ToggleSwitch { Classes = { "setting" } };
-                toggle.Bind(ToggleSwitch.IsCheckedProperty, new Binding(nameof(model.BooleanValue)) { Mode = BindingMode.OneWay });
+                toggle.Bind(ToggleSwitch.IsCheckedProperty, Property(nameof(model.BooleanValue), value => value.BooleanValue));
                 toggle.Click += async (_, _) =>
                 {
                     if (_model is not { } current) return;
@@ -68,14 +71,15 @@ public sealed class FeatureControlView : FASettingsExpanderItem
             case "Slider":
                 var slider = new Slider { Width = UiMetrics.EditorWidth - 44, Minimum = model.Minimum, Maximum = model.Maximum,
                     TickFrequency = model.Step, IsSnapToTickEnabled = model.Step > 0, VerticalAlignment = VerticalAlignment.Center };
-                slider.Bind(Slider.ValueProperty, new Binding(nameof(model.NumberValue)) { Mode = BindingMode.TwoWay });
+                slider.Bind(Slider.ValueProperty, Property(nameof(model.NumberValue), value => value.NumberValue,
+                    (value, number) => value.NumberValue = number, BindingMode.TwoWay));
                 UserInputCommit.Slider(slider, () => _model?.SubmitAsync() ?? Task.CompletedTask);
                 if (model.Id is "bass" or "prompt-volume") slider.TickPlacement = TickPlacement.BottomRight;
                 Avalonia.Automation.AutomationProperties.SetName(slider, model.Label);
                 // Every slider shows its current step next to the track.
                 var value = new TextBlock { MinWidth = 32, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
                 if (model.Definition.Value is null) value.Text = "—";
-                else value.Bind(TextBlock.TextProperty, new Binding(nameof(model.NumberValue)) { StringFormat = "{0:0}" });
+                else value.Bind(TextBlock.TextProperty, Property(nameof(model.NumberValue), item => item.NumberValue, format: "{0:0}"));
                 _boundEditors.Add(value);
                 editor = new StackPanel { Orientation = Orientation.Horizontal, Spacing = UiMetrics.SpacingMedium, Children = { slider, value } };
                 _boundEditors.Add(slider);
@@ -87,7 +91,7 @@ public sealed class FeatureControlView : FASettingsExpanderItem
                 {
                     var radio = new RadioButton { Content = option.Name, GroupName = group };
                     radio.Bind(RadioButton.IsCheckedProperty, new MultiBinding { Converter = new OptionSelectedConverter(), Bindings =
-                        { new Binding(nameof(model.SelectedOption)), new Binding { Source = option } } });
+                        { Property(nameof(model.SelectedOption), value => value.SelectedOption), new CompiledBindingExtension { Source = option } } });
                     radio.Click += async (_, _) =>
                     {
                         if (_model is not { } current) return;
@@ -101,7 +105,8 @@ public sealed class FeatureControlView : FASettingsExpanderItem
                 break;
             case "Text":
                 var text = new TextBox { Width = UiMetrics.EditorWidth };
-                text.Bind(TextBox.TextProperty, new Binding(nameof(model.TextValue)) { Mode = BindingMode.TwoWay });
+                text.Bind(TextBox.TextProperty, Property(nameof(model.TextValue), value => value.TextValue,
+                    (value, content) => value.TextValue = content, BindingMode.TwoWay));
                 var textDirty = false;
                 text.TextInput += (_, _) => textDirty = true;
                 text.PastingFromClipboard += (_, _) => textDirty = true;
@@ -124,7 +129,8 @@ public sealed class FeatureControlView : FASettingsExpanderItem
             case "Combo":
                 var combo = new ComboBox { ItemsSource = model.Options, MinWidth = 150, MaxWidth = UiMetrics.EditorWidth + 30,
                     ItemTemplate = new Avalonia.Controls.Templates.FuncDataTemplate<UiOption>((option, _) => new TextBlock { Text = option?.Name }) };
-                combo.Bind(SelectingItemsControl.SelectedItemProperty, new Binding(nameof(model.SelectedOption)) { Mode = BindingMode.TwoWay });
+                combo.Bind(SelectingItemsControl.SelectedItemProperty, Property(nameof(model.SelectedOption), value => value.SelectedOption,
+                    (value, option) => value.SelectedOption = option, BindingMode.TwoWay));
                 UserInputCommit.Combo(combo, () => _model?.SubmitAsync() ?? Task.CompletedTask);
                 editor = combo;
                 break;
@@ -133,10 +139,22 @@ public sealed class FeatureControlView : FASettingsExpanderItem
         }
         if (!_boundEditors.Contains(editor)) _boundEditors.Add(editor);
         foreach (var bound in _boundEditors) bound.DataContext = model;
-        editor.Bind(IsEnabledProperty, new Binding(nameof(model.CanEdit)));
+        editor.Bind(IsEnabledProperty, Property(nameof(model.CanEdit), value => value.CanEdit));
         editor.HorizontalAlignment = HorizontalAlignment.Right;
         Footer = editor;
         return true;
+    }
+
+    private static CompiledBindingExtension Property<T>(string name, Func<FeatureControlViewModel, T> getter,
+        Action<FeatureControlViewModel, T>? setter = null, BindingMode mode = BindingMode.OneWay, string? format = null)
+    {
+        var info = new ClrPropertyInfo(name, target => getter((FeatureControlViewModel)target),
+            setter is null ? null : (target, value) => setter((FeatureControlViewModel)target, (T)value!), typeof(T));
+        return new CompiledBindingExtension(new CompiledBindingPathBuilder()
+            .Property(info, PropertyInfoAccessorFactory.CreateInpcPropertyAccessor).Build())
+        {
+            Mode = mode, StringFormat = format, DataType = typeof(FeatureControlViewModel)
+        };
     }
 
     private void Hide()

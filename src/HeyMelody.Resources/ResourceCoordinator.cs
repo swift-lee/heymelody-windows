@@ -64,14 +64,14 @@ public sealed class ResourceCoordinator : IDisposable
             {
                 try
                 {
-                    var saved = JsonSerializer.Deserialize<ResourcePreferences>(await File.ReadAllBytesAsync(preferencesFile, token).ConfigureAwait(false), ResourceJson.Options);
+                    var saved = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(preferencesFile, token).ConfigureAwait(false), ResourceJsonContext.Default.ResourcePreferences);
                     // Older preferences may contain Source=1 and a second key. Unknown fields
                     // are ignored; the HeyMelody key, offline choice and cache key survive.
                     if (saved is not null) Preferences = saved;
                 }
                 catch (Exception error) when (error is IOException or JsonException)
                 {
-                    DiagnosticLog.Warning("Resources", "preferences.loadFailed", "Resource preferences could not be read; defaults apply.", error, new { path = preferencesFile });
+                    DiagnosticLog.Warning("Resources", "preferences.loadFailed", "Resource preferences could not be read; defaults apply.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", preferencesFile)));
                     LastError = "无法读取资源设置，已采用默认设置。";
                 }
             }
@@ -112,7 +112,7 @@ public sealed class ResourceCoordinator : IDisposable
     private async Task<RefreshOutcome> RefreshConfigurationAsync(bool force, bool redownload, CancellationToken token)
     {
         using var operation = DiagnosticLog.BeginOperation(DiagnosticLog.CurrentCorrelationId);
-        DiagnosticLog.Debug("Resources", "configuration.refresh-started", "Checking online configuration resources.", new { force, redownload });
+        DiagnosticLog.Debug("Resources", "configuration.refresh-started", "Checking online configuration resources.", global::HeyMelody.Diagnostics.DiagnosticData.Object(("force", force), ("redownload", redownload)));
         await InitializeAsync(token).ConfigureAwait(false);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, _settingsCancellation.Token, _lifetime.Token);
         await _gate.WaitAsync(linked.Token).ConfigureAwait(false);
@@ -146,7 +146,7 @@ public sealed class ResourceCoordinator : IDisposable
                         CleanupCatalogs(retained.Sha256);
                     }
                     _fileVersion = metadata.FileVersion;
-                    await ResourceFiles.AtomicWriteAsync(Path.Combine(ResourceRoot(), "metadata.json"), JsonSerializer.SerializeToUtf8Bytes(metadata.FileVersion), linked.Token).ConfigureAwait(false);
+                    await ResourceFiles.AtomicWriteAsync(Path.Combine(ResourceRoot(), "metadata.json"), JsonSerializer.SerializeToUtf8Bytes(metadata.FileVersion, ResourceWireJsonContext.Default.String), linked.Token).ConfigureAwait(false);
                 }
                 var now = Time.GetUtcNow();
                 _checks[check] = now.AddMinutes(10); LastSuccessfulCheck = now; LastError = null; Wake();
@@ -155,11 +155,11 @@ public sealed class ResourceCoordinator : IDisposable
             // An HttpClient timeout is an ordinary failure, not a caller cancellation.
             catch (Exception error) when (error is OperationCanceledException or HttpRequestException or IOException or InvalidDataException or JsonException
                 or CryptographicException or ArgumentException or UnauthorizedAccessException)
-            { DiagnosticLog.Error("Resources", "configuration.refresh-failed", "Configuration refresh failed; keeping the current resources.", error, new { force, redownload, Revision }); _checks[check] = Time.GetUtcNow().AddSeconds(30); LastError = "在线资源更新失败，继续使用当前有效资源。"; outcome = RefreshOutcome.Failed; Wake(); }
+            { DiagnosticLog.Error("Resources", "configuration.refresh-failed", "Configuration refresh failed; keeping the current resources.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("force", force), ("redownload", redownload), ("Revision", Revision))); _checks[check] = Time.GetUtcNow().AddSeconds(30); LastError = "在线资源更新失败，继续使用当前有效资源。"; outcome = RefreshOutcome.Failed; Wake(); }
         }
         finally { _gate.Release(); }
         if (outcome == RefreshOutcome.Updated && Volatile.Read(ref _batchedChanges) == 0) Changed?.Invoke(this, new(Revision, true, false));
-        DiagnosticLog.Info("Resources", "configuration.refresh-completed", "Configuration refresh completed.", new { outcome, Revision, LastError, LastSuccessfulCheck });
+        DiagnosticLog.Info("Resources", "configuration.refresh-completed", "Configuration refresh completed.", global::HeyMelody.Diagnostics.DiagnosticData.Object(("outcome", outcome), ("Revision", Revision), ("LastError", LastError), ("LastSuccessfulCheck", LastSuccessfulCheck)));
         return outcome;
     }
 
@@ -184,7 +184,7 @@ public sealed class ResourceCoordinator : IDisposable
                 // Anything else must not end the loop silently. The pass recorded no throttle, so the next one runs after the 30-second floor.
                 catch (Exception error)
                 {
-                    DiagnosticLog.Error("Resources", "auto-refresh.failed", "An automatic resource refresh pass failed.", error, new { Revision });
+                    DiagnosticLog.Error("Resources", "auto-refresh.failed", "An automatic resource refresh pass failed.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("Revision", Revision)));
                     Trace.WriteLine($"HeyMelody resources: auto-refresh pass failed: {error}");
                     LastError = "在线资源更新失败，继续使用当前有效资源。";
                 }
@@ -309,7 +309,7 @@ public sealed class ResourceCoordinator : IDisposable
         // First use of this slot: wait for the shared download, then fall back. A late package still
         // raises Changed, and clients resolve again.
         try { await refresh.WaitAsync(FirstDownloadWait, token).ConfigureAwait(false); }
-        catch (TimeoutException error) { DiagnosticLog.Warning("Resources", "artwork.first-wait-timeout", "The first artwork wait expired; the shared download may continue.", error, new { productId, color, model, role, FirstDownloadWait }); return null; }
+        catch (TimeoutException error) { DiagnosticLog.Warning("Resources", "artwork.first-wait-timeout", "The first artwork wait expired; the shared download may continue.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("productId", productId), ("color", color), ("model", model), ("role", role), ("FirstDownloadWait", FirstDownloadWait))); return null; }
         return AcquireCachedArtwork(productId, color, model, role);
     }
 
@@ -323,7 +323,7 @@ public sealed class ResourceCoordinator : IDisposable
             var refresh = Task.Run(async () =>
             {
                 try { return await RefreshArtworkAsync(productId, color, model, token: _lifetime.Token).ConfigureAwait(false); }
-                catch (Exception error) { DiagnosticLog.Error("Resources", "artwork.background-refresh-failed", "The shared artwork refresh task failed.", error, new { productId, color, model, key }); return false; }
+                catch (Exception error) { DiagnosticLog.Error("Resources", "artwork.background-refresh-failed", "The shared artwork refresh task failed.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("productId", productId), ("color", color), ("model", model), ("key", key))); return false; }
             });
             _artworkRefreshes[key] = refresh;
             return refresh;
@@ -361,9 +361,9 @@ public sealed class ResourceCoordinator : IDisposable
                         {
                             var entries = await DownloadAndExtractAsync(slot, temporary, metadata, productId, color, linked.Token).ConfigureAwait(false);
                             if (entries.Length == 0) throw new InvalidDataException("Resource package has no usable artwork.");
-                            await ResourceFiles.AtomicWriteAsync(Path.Combine(temporary, "artwork.json"), JsonSerializer.SerializeToUtf8Bytes(entries, ResourceJson.Options), linked.Token).ConfigureAwait(false);
+                            await ResourceFiles.AtomicWriteAsync(Path.Combine(temporary, "artwork.json"), JsonSerializer.SerializeToUtf8Bytes(entries, ResourceJsonContext.Default.ResourceArtworkArray), linked.Token).ConfigureAwait(false);
                             await ResourceFiles.AtomicWriteAsync(Path.Combine(temporary, ArtworkPackageExtractor.MarkerFile),
-                                JsonSerializer.SerializeToUtf8Bytes(new { schemaVersion = ArtworkPackageExtractor.SchemaVersion, sha256 = metadata.Sha256 }), linked.Token).ConfigureAwait(false);
+                                JsonSerializer.SerializeToUtf8Bytes(new ArtworkPackageMarker(ArtworkPackageExtractor.SchemaVersion, metadata.Sha256), ResourceWireJsonContext.Default.ArtworkPackageMarker), linked.Token).ConfigureAwait(false);
                             linked.Token.ThrowIfCancellationRequested();
                             string name = metadata.Sha256, package = Path.Combine(slot, name);
                             lock (_leaseGate)
@@ -377,7 +377,7 @@ public sealed class ResourceCoordinator : IDisposable
                                 Directory.Move(temporary, package);
                                 _retired.Remove(package);
                             }
-                            await ResourceFiles.AtomicWriteAsync(Path.Combine(slot, "current.json"), JsonSerializer.SerializeToUtf8Bytes(name), linked.Token).ConfigureAwait(false);
+                            await ResourceFiles.AtomicWriteAsync(Path.Combine(slot, "current.json"), JsonSerializer.SerializeToUtf8Bytes(name, ResourceWireJsonContext.Default.String), linked.Token).ConfigureAwait(false);
                             foreach (string old in Directory.EnumerateDirectories(slot)) if (old != package) Retire(old);
                             Revision++; outcome = RefreshOutcome.Updated;
                         }
@@ -389,11 +389,11 @@ public sealed class ResourceCoordinator : IDisposable
             catch (OperationCanceledException) when (linked.IsCancellationRequested) { throw; }
             catch (Exception error) when (error is OperationCanceledException or HttpRequestException or IOException or InvalidDataException or JsonException
                 or CryptographicException or ArgumentException or UnauthorizedAccessException)
-            { DiagnosticLog.Error("Resources", "artwork.refresh-failed", "Artwork refresh failed; keeping the current resources.", error, new { key, Revision }); _checks[key] = Time.GetUtcNow().AddSeconds(30); LastError = "在线美术资源更新失败，继续使用当前有效资源。"; outcome = RefreshOutcome.Failed; Wake(); }
+            { DiagnosticLog.Error("Resources", "artwork.refresh-failed", "Artwork refresh failed; keeping the current resources.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("key", key), ("Revision", Revision))); _checks[key] = Time.GetUtcNow().AddSeconds(30); LastError = "在线美术资源更新失败，继续使用当前有效资源。"; outcome = RefreshOutcome.Failed; Wake(); }
         }
         finally { _gate.Release(); }
         if (outcome == RefreshOutcome.Updated && Volatile.Read(ref _batchedChanges) == 0) Changed?.Invoke(this, new(Revision, false, true));
-        DiagnosticLog.Info("Resources", "artwork.refresh-completed", "Artwork refresh completed.", new { outcome, Revision, LastError });
+        DiagnosticLog.Info("Resources", "artwork.refresh-completed", "Artwork refresh completed.", global::HeyMelody.Diagnostics.DiagnosticData.Object(("outcome", outcome), ("Revision", Revision), ("LastError", LastError)));
         return outcome;
     }
 
@@ -426,7 +426,7 @@ public sealed class ResourceCoordinator : IDisposable
                 if (createdSlot && !extracting && Directory.Exists(slot)) ResourcePaths.DeleteOwnedDirectory(_online, slot);
             }
             catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException)
-            { DiagnosticLog.Warning("Resources", "artwork.scratch-cleanup-failed", "Could not remove a resource extraction scratch directory.", error, new { scratch, slot, createdSlot, extracting }); }
+            { DiagnosticLog.Warning("Resources", "artwork.scratch-cleanup-failed", "Could not remove a resource extraction scratch directory.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("scratch", scratch), ("slot", slot), ("createdSlot", createdSlot), ("extracting", extracting))); }
         }
     }
 
@@ -468,7 +468,7 @@ public sealed class ResourceCoordinator : IDisposable
         }
         finally { Interlocked.Decrement(ref _batchedChanges); }
         LastError = failed == 0 ? null : "部分在线资源重新下载失败，已保留原有资源。";
-        if (failed != 0) DiagnosticLog.Warning("Resources", "redownload.partialFailure", "Some online resources could not be redownloaded; existing resources were kept.", null, new { failed, updated, unchanged });
+        if (failed != 0) DiagnosticLog.Warning("Resources", "redownload.partialFailure", "Some online resources could not be redownloaded; existing resources were kept.", null, global::HeyMelody.Diagnostics.DiagnosticData.Object(("failed", failed), ("updated", updated), ("unchanged", unchanged)));
         if (Revision != before) Changed?.Invoke(this, new(Revision, catalogChanged, true));
         string message = failed != 0 ? $"{failed} 项在线资源重新下载失败，已保留原有资源。"
             : updated == 0 ? "已重新下载在线资源，配置与美术资源均已核对。" : $"已重新下载在线资源，更新了 {updated} 项美术资源。";
@@ -505,7 +505,7 @@ public sealed class ResourceCoordinator : IDisposable
         {
             try
             {
-                var entries = JsonSerializer.Deserialize<ResourceArtwork[]>(File.ReadAllBytes(Path.Combine(package, "artwork.json")), ResourceJson.Options) ?? [];
+                var entries = JsonSerializer.Deserialize(File.ReadAllBytes(Path.Combine(package, "artwork.json")), ResourceJsonContext.Default.ResourceArtworkArray) ?? [];
                 var candidates = entries.Where(e => e.ProductIds.Contains(productId, StringComparer.Ordinal) && e.Color == color
                     && (!model || role != "hero" || e.Role is "model" or "model-animation"));
                 var entry = SelectPackageEntry(candidates, role);
@@ -525,9 +525,9 @@ public sealed class ResourceCoordinator : IDisposable
     private static void CacheInvalid(string path, string reason, Exception? error = null)
     {
         if (error is FileNotFoundException or DirectoryNotFoundException)
-            DiagnosticLog.Debug("Resources", "cache.missing", "A resource cache file does not exist.", new { path, reason });
+            DiagnosticLog.Debug("Resources", "cache.missing", "A resource cache file does not exist.", global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", path), ("reason", reason)));
         else
-            DiagnosticLog.Warning("Resources", "cache.invalid", "A resource cache or package failed validation.", error, new { path, reason });
+            DiagnosticLog.Warning("Resources", "cache.invalid", "A resource cache or package failed validation.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", path), ("reason", reason)));
     }
 
     /// <summary>
@@ -559,7 +559,7 @@ public sealed class ResourceCoordinator : IDisposable
         catch (Exception error) when (error is IOException or InvalidDataException)
         {
             // Retain for the next cleanup attempt; never invalidate the new pointer.
-            DiagnosticLog.Debug("Resources", "package.deleteDeferred", "A retired resource package could not be deleted yet.", new { package, failure = error.Message });
+            DiagnosticLog.Debug("Resources", "package.deleteDeferred", "A retired resource package could not be deleted yet.", global::HeyMelody.Diagnostics.DiagnosticData.Object(("package", package), ("failure", error.Message)));
         }
     }
 
@@ -584,7 +584,7 @@ public sealed class ResourceCoordinator : IDisposable
         if (Directory.Exists(root)) foreach (string directory in Directory.EnumerateDirectories(root))
             if (directory != newestDirectory && IsHash(Path.GetFileName(directory))) Retire(directory);
         string metadata = Path.Combine(ResourceRoot(), "metadata.json");
-        try { if (File.Exists(metadata)) _fileVersion = JsonSerializer.Deserialize<string>(File.ReadAllBytes(metadata))!; }
+        try { if (File.Exists(metadata)) _fileVersion = JsonSerializer.Deserialize(File.ReadAllBytes(metadata), ResourceWireJsonContext.Default.String)!; }
         catch (Exception error) when (error is IOException or JsonException)
         { CacheInvalid(metadata, "resource metadata could not be read", error); }
     }
@@ -610,7 +610,7 @@ public sealed class ResourceCoordinator : IDisposable
         string root = Path.Combine(ResourceRoot(), "config");
         foreach (string old in Directory.EnumerateDirectories(root)) if (Path.GetFileName(old) != currentHash) Retire(old);
     }
-    private Task SavePreferencesAsync(CancellationToken token) => ResourceFiles.AtomicWriteAsync(Path.Combine(_storage, "preferences.json"), JsonSerializer.SerializeToUtf8Bytes(Preferences, ResourceJson.Options), token);
+    private Task SavePreferencesAsync(CancellationToken token) => ResourceFiles.AtomicWriteAsync(Path.Combine(_storage, "preferences.json"), JsonSerializer.SerializeToUtf8Bytes(Preferences, ResourceJsonContext.Default.ResourcePreferences), token);
     private string ActiveKey() => Preferences.HeyMelodyKey is { Length: > 0 } key ? key : Bundled.GetDefaultKey();
     private string ResourceRoot() => Path.Combine(_online, "heymelody");
     private static string ArtworkSlot(string productId, int color, bool model) => productId + "_" + color.ToString(System.Globalization.CultureInfo.InvariantCulture) + "_" + (model ? "14" : "control");
@@ -623,7 +623,7 @@ public sealed class ResourceCoordinator : IDisposable
     private static string PackageDigest(string name) => name[..64];
     private static string? ReadArtworkPointer(string slot)
     {
-        try { var value = JsonSerializer.Deserialize<string>(File.ReadAllBytes(Path.Combine(slot, "current.json"))); return IsPackageName(value) ? value : null; }
+        try { var value = JsonSerializer.Deserialize(File.ReadAllBytes(Path.Combine(slot, "current.json")), ResourceWireJsonContext.Default.String); return IsPackageName(value) ? value : null; }
         catch (Exception error) when (error is IOException or JsonException or UnauthorizedAccessException)
         { CacheInvalid(slot, "artwork pointer could not be read", error); return null; }
     }
@@ -637,7 +637,7 @@ public sealed class ResourceCoordinator : IDisposable
                 if (!marker.RootElement.TryGetProperty("schemaVersion", out var schema) || !schema.TryGetInt32(out int version)
                     || version != ArtworkPackageExtractor.SchemaVersion)
                 { CacheInvalid(package, "package schema version is outdated"); return false; }
-            var entries = JsonSerializer.Deserialize<ResourceArtwork[]>(File.ReadAllBytes(Path.Combine(package, "artwork.json")), ResourceJson.Options);
+            var entries = JsonSerializer.Deserialize(File.ReadAllBytes(Path.Combine(package, "artwork.json")), ResourceJsonContext.Default.ResourceArtworkArray);
             if (entries is null || entries.Length == 0) { CacheInvalid(package, "package artwork index is empty"); return false; }
             return entries.All(entry =>
             {
@@ -666,7 +666,7 @@ public sealed class ResourceCoordinator : IDisposable
                 }
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-            { DiagnosticLog.Warning("Resources", "artwork.sweep-failed", "An artwork slot could not be swept.", error, new { slot }); }
+            { DiagnosticLog.Warning("Resources", "artwork.sweep-failed", "An artwork slot could not be swept.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("slot", slot))); }
         }
     }
 

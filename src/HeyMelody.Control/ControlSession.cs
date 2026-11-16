@@ -26,7 +26,7 @@ internal sealed class ControlSession(IControlTransport transport, int number, Hi
         action.Sequence = sequence;
         var key = new RequestKey(command, sequence);
         byte[] frame = PacketEncoder.Encode(command, sequence, payload);
-        var context = new { connectionNumber = number, command = $"0x{command:X4}", sequence };
+        var context = global::HeyMelody.Diagnostics.DiagnosticData.Object(("connectionNumber", number), ("command", $"0x{command:X4}"), ("sequence", sequence));
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
         timeout.CancelAfter(options.RequestTimeout);
         try
@@ -55,7 +55,7 @@ internal sealed class ControlSession(IControlTransport transport, int number, Hi
                 action.Success = action.Status == 0;
                 action.Disposition = action.Status is null ? "missing-status" : action.Success ? "response" : "device-rejected";
                 DiagnosticLog.Info("Control", "request.response", "The control request received its response.",
-                    new { connectionNumber = number, command = $"0x{command:X4}", sequence, action.Status, action.Disposition, payloadLength = matched.Payload.Length });
+                    global::HeyMelody.Diagnostics.DiagnosticData.Object(("connectionNumber", number), ("command", $"0x{command:X4}"), ("sequence", sequence), ("Status", action.Status), ("Disposition", action.Disposition), ("payloadLength", matched.Payload.Length)));
                 if (action.Status is null) _usable = false;
                 return (action, matched.Payload);
             }
@@ -77,6 +77,6 @@ internal sealed class ControlSession(IControlTransport transport, int number, Hi
     {
         _usable = false;
         try { await transport.DisposeAsync(); }
-        catch (Exception error) { result.Warnings.Add("Control transport disposal failed."); DiagnosticLog.Error("Control", "session.dispose-failed", "Control transport disposal failed.", error, new { connectionNumber = number }); }
+        catch (Exception error) { result.Warnings.Add("Control transport disposal failed."); DiagnosticLog.Error("Control", "session.dispose-failed", "Control transport disposal failed.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("connectionNumber", number))); }
     }
 }

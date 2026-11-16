@@ -127,15 +127,16 @@ public sealed partial class DailyClient
         {
             if (snapshot.Revision <= _lastPublishedRevision) return;
             _lastPublishedRevision = snapshot.Revision;
-            DiagnosticLog.Debug("Daily", "state.published", "Published a fresh daily device snapshot.", snapshot);
+            DiagnosticLog.Debug("Daily", "state.published", "Published a fresh daily device snapshot.",
+                DiagnosticData.From(snapshot, DailyDiagnosticJsonContext.Default.DailySnapshot));
             foreach (Action<DailySnapshot> handler in SnapshotChanged?.GetInvocationList() ?? [])
-                try { handler(Clone(snapshot)); } catch (Exception error) { DiagnosticLog.Error("Daily", "snapshot-observer.failed", "A snapshot subscriber failed; monitoring continues.", error, new { snapshot.Revision }); }
+                try { handler(Clone(snapshot)); } catch (Exception error) { DiagnosticLog.Error("Daily", "snapshot-observer.failed", "A snapshot subscriber failed; monitoring continues.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("Revision", snapshot.Revision))); }
         }
     }
     private void OnSessionEnded(DailySession source, Exception failure)
     {
         DiagnosticLog.Error("Daily", "monitoring.session-ended", "A monitored daily session ended.", failure,
-            new { currentSession = ReferenceEquals(_session, source), calibrationActive = _calibrationActive, freshReadDepth = Volatile.Read(ref _freshReadDepth), source.CodecReadRecoveryPending });
+            global::HeyMelody.Diagnostics.DiagnosticData.Object(("currentSession", ReferenceEquals(_session, source)), ("calibrationActive", _calibrationActive), ("freshReadDepth", Volatile.Read(ref _freshReadDepth)), ("CodecReadRecoveryPending", source.CodecReadRecoveryPending)));
         // A temporary offline push would retire an already active Host worker and cancel
         // its read-only recovery. The final refresh publishes either the recovery or failure.
         if (ReferenceEquals(_session, source) && !_calibrationActive && Volatile.Read(ref _freshReadDepth) > 0
@@ -156,10 +157,10 @@ public sealed partial class DailyClient
     {
         if (!ReferenceEquals(_session, source)) return;
         foreach (Action<Packet> handler in Notification?.GetInvocationList() ?? [])
-            try { handler(packet); } catch (Exception error) { DiagnosticLog.Error("Daily", "notification-observer.failed", "A notification subscriber failed; monitoring continues.", error, new { command = $"0x{packet.Command:X4}", packet.Sequence }); }
+            try { handler(packet); } catch (Exception error) { DiagnosticLog.Error("Daily", "notification-observer.failed", "A notification subscriber failed; monitoring continues.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("command", $"0x{packet.Command:X4}"), ("Sequence", packet.Sequence))); }
         DeviceNotification? notification;
         try { if (!NotificationParsers.TryParse(packet, out notification)) return; }
-        catch (FormatException error) { DiagnosticLog.Error("Daily", "notification.envelope-invalid", "The notification envelope could not be parsed.", error, new { command = $"0x{packet.Command:X4}", packet.Sequence, payloadLength = packet.Payload.Length }); QueueRefresh(DailyRefreshScope.Full); return; }
+        catch (FormatException error) { DiagnosticLog.Error("Daily", "notification.envelope-invalid", "The notification envelope could not be parsed.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("command", $"0x{packet.Command:X4}"), ("Sequence", packet.Sequence), ("payloadLength", packet.Payload.Length))); QueueRefresh(DailyRefreshScope.Full); return; }
         var updates = new Dictionary<string, Action<DailySnapshot>>();
         var refreshes = new HashSet<DailyRefreshScope>();
         try
@@ -228,7 +229,7 @@ public sealed partial class DailyClient
         catch (Exception ex) when (ex is FormatException or ArgumentException or OverflowException)
         {
             DiagnosticLog.Error("Daily", "notification.fields-invalid", "The notification fields could not be applied.", ex,
-                new { command = $"0x{packet.Command:X4}", packet.Sequence, payloadLength = packet.Payload.Length, kind = notification?.Kind });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("command", $"0x{packet.Command:X4}"), ("Sequence", packet.Sequence), ("payloadLength", packet.Payload.Length), ("kind", notification?.Kind)));
             refreshes.Add(notification!.Kind switch {
                 DeviceNotificationKind.Battery => DailyRefreshScope.Battery,
                 DeviceNotificationKind.Anc => DailyRefreshScope.Anc,

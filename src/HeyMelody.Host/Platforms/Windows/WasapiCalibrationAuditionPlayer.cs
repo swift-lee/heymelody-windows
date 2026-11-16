@@ -130,7 +130,7 @@ internal sealed class WasapiCalibrationAuditionPlayer : ICalibrationAuditionPlay
             using var stream = typeof(WasapiCalibrationAuditionPlayer).Assembly.GetManifestResourceStream("HeyMelody.Host.Assets.hearing_enhancement_audition.wav")
                 ?? throw new InvalidDataException("试听音频不可用。");
             _wave = AuditionWave.Read(stream);
-            _enumerator = (IDeviceEnumerator)new DeviceEnumeratorClass();
+            _enumerator = CreateDeviceEnumerator();
             var trace = new EndpointTrace();
             _endpoint = EndpointIdentity.WaitForStable(() => EndpointIdentity.Resolve(_enumerator, address, trace), token, trace);
             token.ThrowIfCancellationRequested();

@@ -14,7 +14,7 @@ public static class DiagnosticBackendLauncher
             singleton!.Dispose();
         }
         catch (Exception failure)
-        { DiagnosticLog.Debug("client.lifecycle", "backendProbeFailed", "Backend singleton probe failed; assuming it is running", new { failure = failure.Message }); }
+        { DiagnosticLog.Debug("client.lifecycle", "backendProbeFailed", "Backend singleton probe failed; assuming it is running", global::HeyMelody.Diagnostics.DiagnosticData.Object(("failure", failure.Message))); }
         return true;
     }
 
@@ -27,20 +27,20 @@ public static class DiagnosticBackendLauncher
             throw bound;
         }
         var start = ApplicationPaths.ResolveComponent("HeyMelody.Host");
-        DiagnosticLog.Info("client.lifecycle", "backendLaunch", "Launching the backend", new { fileName = start.FileName, arguments = start.ArgumentList.ToArray() });
+        DiagnosticLog.Info("client.lifecycle", "backendLaunch", "Launching the backend", global::HeyMelody.Diagnostics.DiagnosticData.Object(("fileName", start.FileName), ("arguments", start.ArgumentList.ToArray())));
         try
         {
             if (MacBackendLauncher.TryStart(start, out var bundle))
             {
-                DiagnosticLog.Info("client.lifecycle", "backendLaunchRequested", "Backend launch requested through LaunchServices", new { bundle });
+                DiagnosticLog.Info("client.lifecycle", "backendLaunchRequested", "Backend launch requested through LaunchServices", global::HeyMelody.Diagnostics.DiagnosticData.Object(("bundle", bundle)));
                 return;
             }
             using var process = Process.Start(start) ?? throw new IOException("无法启动蓝牙后台。");
-            DiagnosticLog.Info("client.lifecycle", "backendLaunched", "Backend process started", new { processId = process.Id });
+            DiagnosticLog.Info("client.lifecycle", "backendLaunched", "Backend process started", global::HeyMelody.Diagnostics.DiagnosticData.Object(("processId", process.Id)));
         }
         catch (Exception failure)
         {
-            DiagnosticLog.Error("client.lifecycle", "backendLaunchFailed", "Backend process could not be started", failure, new { fileName = start.FileName });
+            DiagnosticLog.Error("client.lifecycle", "backendLaunchFailed", "Backend process could not be started", failure, global::HeyMelody.Diagnostics.DiagnosticData.Object(("fileName", start.FileName)));
             throw;
         }
     }

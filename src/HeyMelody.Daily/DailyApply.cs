@@ -8,7 +8,7 @@ public sealed partial class DailyClient
         EqualizerEdit? suppliedEdit, bool allowMutexChange, CancellationToken token)
     {
         using var operation = DiagnosticLog.BeginOperation(DiagnosticLog.CurrentCorrelationId);
-        DiagnosticLog.Info("Daily", "apply.started", "A user-requested daily setting operation started.", new { kind, value, level, allowMutexChange, suppliedEdit });
+        DiagnosticLog.Info("Daily", "apply.started", "A user-requested daily setting operation started.", global::HeyMelody.Diagnostics.DiagnosticData.Object(("kind", kind), ("value", value), ("level", level), ("allowMutexChange", allowMutexChange), ("suppliedEdit", DiagnosticData.From(suppliedEdit, DailyDiagnosticJsonContext.Default.EqualizerEdit))));
         // Copy mutable GUI input before any await; future slider changes cannot alter this submission.
         EqualizerEdit? edit = suppliedEdit is null ? null : new()
         { Id = suppliedEdit.Id, Name = suppliedEdit.Name, MinimumGain = suppliedEdit.MinimumGain,
@@ -92,7 +92,7 @@ public sealed partial class DailyClient
         catch (Exception error)
         {
             DiagnosticLog.Error("Daily", "apply.failed", "The daily setting operation failed; submitted settings will not be replayed.", error,
-                new { kind, value, level, result.SubmissionAttempted, result.TargetSubmitted, result.PrerequisiteSubmitted });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("kind", kind), ("value", value), ("level", level), ("SubmissionAttempted", result.SubmissionAttempted), ("TargetSubmitted", result.TargetSubmitted), ("PrerequisiteSubmitted", result.PrerequisiteSubmitted)));
             result.FailureKind = DailyApplyFailure.TransportUnknown;
             result.Error = token.IsCancellationRequested ? "操作已取消；已提交的设置不会自动重发。" :
                 "设置过程未完成；已提交的设置不会自动重发。";
@@ -143,7 +143,7 @@ public sealed partial class DailyClient
             result.AckAccepted == true && accepted == true ? true : null;
     }
     private static DailyApplyResult Reject(DailyApplyResult result, string text, DailyApplyFailure failure = DailyApplyFailure.Validation)
-    { result.Error = text; result.Message = text; result.FailureKind = failure; DiagnosticLog.Warning("Daily", "apply.rejected", text, data: result); return result; }
+    { result.Error = text; result.Message = text; result.FailureKind = failure; DiagnosticLog.Warning("Daily", "apply.rejected", text, data: DiagnosticData.From(result, DailyDiagnosticJsonContext.Default.DailyApplyResult)); return result; }
     private static DailyApplyResult Finish(DailyApplyResult result)
     {
         if (result.Success) result.Message = "设备已确认设置，状态回读一致。";
@@ -155,7 +155,7 @@ public sealed partial class DailyClient
             result.Message = result.ReadbackVerified ? "状态回读符合请求，但设置响应未完整确认；不会自动重发。" :
                 "设置已提交，响应或回读未确认；不会自动重发。";
         else result.Message = "设置响应与状态回读未同时确认，请刷新状态。";
-        DiagnosticLog.Info("Daily", "apply.completed", "The daily setting operation returned its acknowledgement/readback outcome.", result);
+        DiagnosticLog.Info("Daily", "apply.completed", "The daily setting operation returned its acknowledgement/readback outcome.", DiagnosticData.From(result, DailyDiagnosticJsonContext.Default.DailyApplyResult));
         return result;
     }
     private async Task<DailyApplyResult> SaveCoreAsync(EqualizerEdit? edit, DailyApplyResult result, CancellationToken token)
@@ -183,7 +183,7 @@ public sealed partial class DailyClient
         byte[] payload;
         try { payload = DailyParsers.BuildEqualizer(edit, before.EqualizerFrequencies,
             preserveReportedName: existing is not null && existing.Name == edit.Name); }
-        catch (Exception error) { DiagnosticLog.Error("Daily", "equalizer.validation-failed", "The equalizer edit did not pass validation.", error, edit); return Reject(result, "EQ 名称、频率或增益未通过校验。"); }
+        catch (Exception error) { DiagnosticLog.Error("Daily", "equalizer.validation-failed", "The equalizer edit did not pass validation.", error, DiagnosticData.From(edit, DailyDiagnosticJsonContext.Default.EqualizerEdit)); return Reject(result, "EQ 名称、频率或增益未通过校验。"); }
         if (existing is { Selected: true } && existing.Name == edit.Name &&
             existing.MinimumGain == edit.MinimumGain && existing.MaximumGain == edit.MaximumGain &&
             existing.Bands.SequenceEqual(edit.Bands))

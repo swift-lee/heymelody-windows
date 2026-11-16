@@ -22,7 +22,7 @@ internal sealed class EndpointTrace
     {
         if (hr >= 0) return false;
         DiagnosticLog.Debug("host.audio", "endpointNativeFailure", "WASAPI endpoint identity query returned a failing HRESULT",
-            new { Phase, Attempts, hresult = hr, hresultHex = $"0x{hr:X8}" });
+            global::HeyMelody.Diagnostics.DiagnosticData.Object(("Phase", Phase), ("Attempts", Attempts), ("hresult", hr), ("hresultHex", $"0x{hr:X8}")));
         LastNativeFailurePhase = Phase; LastNativeFailureHResult = hr; return true;
     }
 }
@@ -41,14 +41,14 @@ internal static partial class EndpointIdentity
             catch (EndpointMatchException e) when (e.MatchCount == 0 && attempt < 3)
             {
                 DiagnosticLog.Debug("host.audio", "endpointRetry", "No exact audition endpoint yet; retrying identity lookup",
-                    new { attempt, e.EndpointCount, e.MatchCount });
+                    global::HeyMelody.Diagnostics.DiagnosticData.Object(("attempt", attempt), ("EndpointCount", e.EndpointCount), ("MatchCount", e.MatchCount)));
                 if (wait is not null) wait(token);
                 else if (token.WaitHandle.WaitOne(250)) token.ThrowIfCancellationRequested();
             }
             catch (COMException e) when (attempt < 3 && e.HResult is unchecked((int)0x88890004) or unchecked((int)0x80070490))
             {
                 DiagnosticLog.Debug("host.audio", "endpointRetry", "Audition endpoint changed during identity lookup",
-                    new { attempt, trace.Phase, e.HResult, e.Message });
+                    global::HeyMelody.Diagnostics.DiagnosticData.Object(("attempt", attempt), ("Phase", trace.Phase), ("HResult", e.HResult), ("Message", e.Message)));
                 // AUDCLNT_E_DEVICE_INVALIDATED or HRESULT_FROM_WIN32(ERROR_NOT_FOUND).
                 if (wait is not null) wait(token);
                 else if (token.WaitHandle.WaitOne(250)) token.ThrowIfCancellationRequested();
@@ -56,8 +56,7 @@ internal static partial class EndpointIdentity
             catch (Exception error)
             {
                 DiagnosticLog.Warning("host.audio", "endpointResolutionFailed", "Audition endpoint identity lookup failed", error,
-                    new { trace.Phase, trace.Attempts, trace.EndpointCount, trace.MatchCount,
-                        trace.LastNativeFailurePhase, trace.LastNativeFailureHResult, error.HResult });
+                    global::HeyMelody.Diagnostics.DiagnosticData.Object(("Phase", trace.Phase), ("Attempts", trace.Attempts), ("EndpointCount", trace.EndpointCount), ("MatchCount", trace.MatchCount), ("LastNativeFailurePhase", trace.LastNativeFailurePhase), ("LastNativeFailureHResult", trace.LastNativeFailureHResult), ("HResult", error.HResult)));
                 throw;
             }
         }

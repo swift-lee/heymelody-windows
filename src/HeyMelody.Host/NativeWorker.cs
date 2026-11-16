@@ -68,9 +68,9 @@ internal static class NativeWorker
         service.CalibrationSpectrumChanged += spectrum => spectra.Writer.TryWrite(spectrum);
         async Task WriteAsync(WorkerMessage message)
         {
-            var line = JsonSerializer.Serialize(message, HostWire.Json);
+            var line = JsonSerializer.Serialize(message, HostWire.TypeInfo<WorkerMessage>());
             if (line.Length > RpcWire.MaximumLineCharacters) throw new InvalidDataException();
-            DiagnosticLog.Info("worker.rpc", "send", "Sending worker RPC record", new { line });
+            DiagnosticLog.Info("worker.rpc", "send", "Sending worker RPC record", global::HeyMelody.Diagnostics.DiagnosticData.Object(("line", line)));
             await outputGate.WaitAsync(lifetime.Token);
             try { await Console.Out.WriteLineAsync(line); await Console.Out.FlushAsync(); }
             finally { outputGate.Release(); }
@@ -103,8 +103,8 @@ internal static class NativeWorker
             var input = new RpcLineReader(Console.OpenStandardInput());
             while (await input.ReadLineAsync(lifetime.Token) is { } line)
             {
-                DiagnosticLog.Info("worker.rpc", "receive", "Received worker RPC record", new { line });
-                var request = JsonSerializer.Deserialize<WorkerRequest>(line, HostWire.Json) ?? throw new InvalidDataException();
+                DiagnosticLog.Info("worker.rpc", "receive", "Received worker RPC record", global::HeyMelody.Diagnostics.DiagnosticData.Object(("line", line)));
+                var request = JsonSerializer.Deserialize(line, HostWire.TypeInfo<WorkerRequest>()) ?? throw new InvalidDataException();
                 using var operation = DiagnosticLog.BeginOperation(request.DiagnosticCorrelationId);
                 if (request.Id <= lastId) throw new InvalidDataException();
                 lastId = request.Id;
@@ -138,11 +138,11 @@ internal static class NativeWorker
                         "shutdown" => await ShutdownAsync(),
                         _ => throw new InvalidDataException()
                     };
-                    response.Success = true; response.Data = JsonSerializer.SerializeToElement(data, HostWire.Json);
+                    response.Success = true; response.Data = JsonSerializer.SerializeToElement(data, HostWire.TypeInfo<object>());
                 }
                 catch (Exception error)
                 {
-                    DiagnosticLog.Error("worker.rpc", "operationFailed", "Worker operation failed", error, new { request.Id, request.Operation });
+                    DiagnosticLog.Error("worker.rpc", "operationFailed", "Worker operation failed", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("Id", request.Id), ("Operation", request.Operation)));
                     response.Success = false; response.Error = error is InvalidOperationException or ArgumentException ? error.Message : "设备未能完成操作，请检查连接后重试。";
                 }
                 await WriteAsync(response);
@@ -157,7 +157,7 @@ internal static class NativeWorker
             return 1;
         }
         finally { await service.DisposeCalibrationAsync(); lifetime.Cancel(); snapshots.Writer.TryComplete(); calibrations.Writer.TryComplete(); spectra.Writer.TryComplete(); try { await Task.WhenAll(publishing, publishingCalibration, publishingSpectrum); }
-            catch (Exception publishError) { DiagnosticLog.Debug("worker.lifecycle", "publisherEnded", "A worker publisher task ended with an error during shutdown", new { failure = publishError.Message, type = publishError.GetType().Name }); } }
+            catch (Exception publishError) { DiagnosticLog.Debug("worker.lifecycle", "publisherEnded", "A worker publisher task ended with an error during shutdown", global::HeyMelody.Diagnostics.DiagnosticData.Object(("failure", publishError.Message), ("type", publishError.GetType().Name))); } }
     }
 
     internal static async Task<int> EnumerateAsync()
@@ -166,7 +166,7 @@ internal static class NativeWorker
         {
             Console.OutputEncoding = new UTF8Encoding(false);
             using var platform = HostPlatformFactory.CreateBluetooth();
-            var line = JsonSerializer.Serialize(await platform.EnumeratePairedAsync(CancellationToken.None), HostWire.Json);
+            var line = JsonSerializer.Serialize(await platform.EnumeratePairedAsync(CancellationToken.None), HostWire.TypeInfo<IReadOnlyList<BluetoothCandidate>>());
             if (line.Length > RpcWire.MaximumLineCharacters) return 1;
             await Console.Out.WriteLineAsync(line); await Console.Out.FlushAsync(); return 0;
         }
@@ -234,7 +234,7 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
             if (_process is null)
             {
                 _process = Process.Start(startFactory?.Invoke() ?? NativeWorker.StartInfo("--worker")) ?? throw new IOException();
-                DiagnosticLog.Info("host.worker", "started", "Peer worker started", new { _process.Id });
+                DiagnosticLog.Info("host.worker", "started", "Peer worker started", global::HeyMelody.Diagnostics.DiagnosticData.Object(("Id", _process.Id)));
                 WatchExit(_process, "worker");
                 // The tray's current energy mode applies to the new worker at once and follows later changes until Stop.
                 // Publish before reading _stopped; Stop sets _stopped before it takes _energy. Both sides use full-fence exchanges,
@@ -252,9 +252,9 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
             await _writes.WaitAsync(deadline.Token);
             try
             {
-                var line = JsonSerializer.Serialize(request, HostWire.Json);
+                var line = JsonSerializer.Serialize(request, HostWire.TypeInfo<WorkerRequest>());
                 if (line.Length > RpcWire.MaximumLineCharacters) throw new InvalidDataException();
-                DiagnosticLog.Info("host.worker", "send", "Sending worker RPC record", new { line });
+                DiagnosticLog.Info("host.worker", "send", "Sending worker RPC record", global::HeyMelody.Diagnostics.DiagnosticData.Object(("line", line)));
                 submitted = true;
                 await _process.StandardInput.WriteLineAsync(line.AsMemory(), deadline.Token);
                 await _process.StandardInput.FlushAsync(deadline.Token);
@@ -263,13 +263,13 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
             var response = await completion.Task.WaitAsync(deadline.Token);
             if (!response.Success) throw new InvalidOperationException(response.Error ?? "设备未能完成操作。");
             if (response.Data is null) throw new InvalidDataException();
-            return response.Data.Value.Deserialize<T>(HostWire.Json) ?? throw new InvalidDataException();
+            return response.Data.Value.Deserialize(HostWire.TypeInfo<T>()) ?? throw new InvalidDataException();
         }
         catch (InvalidOperationException) { throw; }
         catch (Exception failure)
         {
             DiagnosticLog.Error("host.worker", "requestFailed", "Worker RPC did not complete", failure,
-                new { request.Id, request.Operation, submitted });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("Id", request.Id), ("Operation", request.Operation), ("submitted", submitted)));
             Stop();
             if (request.Operation == "apply") return (T)(object)new UiApplyResult
             {
@@ -291,16 +291,16 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
             while (await lines.ReadLineAsync(_lifetime.Token) is { } line)
             {
                 WorkerMessage message;
-                try { message = JsonSerializer.Deserialize<WorkerMessage>(line, HostWire.Json) ?? throw new InvalidDataException(); }
+                try { message = JsonSerializer.Deserialize(line, HostWire.TypeInfo<WorkerMessage>()) ?? throw new InvalidDataException(); }
                 catch (Exception failure)
                 {
-                    DiagnosticLog.Error("host.worker", "invalidRecord", "Received an invalid worker RPC record", failure, new { line });
+                    DiagnosticLog.Error("host.worker", "invalidRecord", "Received an invalid worker RPC record", failure, global::HeyMelody.Diagnostics.DiagnosticData.Object(("line", line)));
                     throw;
                 }
                 string? correlation = message.Kind == "response" && _pending.TryGetValue(message.Id, out var matching)
                     ? matching.CorrelationId : null;
                 using var operation = correlation is { } id ? DiagnosticLog.BeginOperation(id) : DiagnosticLog.SuspendOperation();
-                DiagnosticLog.Info("host.worker", "receive", "Received worker RPC record", new { line });
+                DiagnosticLog.Info("host.worker", "receive", "Received worker RPC record", global::HeyMelody.Diagnostics.DiagnosticData.Object(("line", line)));
                 if (message.Kind == "snapshot" && message.Snapshot is { } snapshot) SnapshotChanged?.Invoke(snapshot);
                 else if (message.Kind == "calibration" && message.Calibration is { } calibration) CalibrationChanged?.Invoke(calibration);
                 else if (message.Kind == "calibrationSpectrum" && message.CalibrationSpectrum is { } spectrum) CalibrationSpectrumChanged?.Invoke(spectrum);
@@ -316,13 +316,13 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
     private void Stop()
     {
         if (Interlocked.Exchange(ref _stopped, 1) != 0) return;
-        DiagnosticLog.Info("host.worker", "stopped", "Peer worker stopped", new { processId = _process?.Id });
+        DiagnosticLog.Info("host.worker", "stopped", "Peer worker stopped", global::HeyMelody.Diagnostics.DiagnosticData.Object(("processId", _process?.Id)));
         _lifetime.Cancel();
         Interlocked.Exchange(ref _energy, null)?.Dispose();
         foreach (var pending in _pending.Values) pending.Completion.TrySetException(new IOException("设备后台已中断。"));
         var process = _process;
         try { if (process is { HasExited: false }) process.Kill(entireProcessTree: true); }
-        catch (Exception failure) { DiagnosticLog.Debug("host.worker", "killFailed", "Peer worker could not be killed", new { processId = TryProcessId(process), failure = failure.Message }); }
+        catch (Exception failure) { DiagnosticLog.Debug("host.worker", "killFailed", "Peer worker could not be killed", global::HeyMelody.Diagnostics.DiagnosticData.Object(("processId", TryProcessId(process)), ("failure", failure.Message))); }
         Unavailable?.Invoke();
     }
     private int _disposing;
@@ -333,12 +333,12 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
         int pid;
         try { pid = process.Id; process.EnableRaisingEvents = true; }
         catch (Exception failure)
-        { DiagnosticLog.Debug("host.worker", "exitWatchFailed", "Worker exit could not be observed", new { role, failure = failure.Message }); return; }
+        { DiagnosticLog.Debug("host.worker", "exitWatchFailed", "Worker exit could not be observed", global::HeyMelody.Diagnostics.DiagnosticData.Object(("role", role), ("failure", failure.Message))); return; }
         process.Exited += (_, _) =>
         {
             int? exitCode = null; string? exitTime = null;
             try { exitCode = process.ExitCode; exitTime = process.ExitTime.ToUniversalTime().ToString("O"); } catch { }
-            DiagnosticLog.Info("host.worker", "exited", "Worker process exited", new { role, pid, exitCode, exitTime });
+            DiagnosticLog.Info("host.worker", "exited", "Worker process exited", global::HeyMelody.Diagnostics.DiagnosticData.Object(("role", role), ("pid", pid), ("exitCode", exitCode), ("exitTime", exitTime)));
         };
     }
     private static Task RunBackground(Func<Task> action) => Task.Run(async () =>
@@ -358,11 +358,11 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
                 await _process.WaitForExitAsync(deadline.Token);
             }
             catch (Exception failure)
-            { DiagnosticLog.Debug("host.worker", "shutdownRequestFailed", "Worker shutdown request did not complete", new { processId = TryProcessId(_process), failure = failure.Message }); }
+            { DiagnosticLog.Debug("host.worker", "shutdownRequestFailed", "Worker shutdown request did not complete", global::HeyMelody.Diagnostics.DiagnosticData.Object(("processId", TryProcessId(_process)), ("failure", failure.Message))); }
         }
         Stop();
         try { await _stderr.WaitAsync(TimeSpan.FromSeconds(2)); }
-        catch (Exception failure) { DiagnosticLog.Debug("host.worker", "stderrDrainTimeout", "Worker diagnostic stream did not finish", new { failure = failure.Message }); }
+        catch (Exception failure) { DiagnosticLog.Debug("host.worker", "stderrDrainTimeout", "Worker diagnostic stream did not finish", global::HeyMelody.Diagnostics.DiagnosticData.Object(("failure", failure.Message))); }
         _process?.Dispose();
     }
 
@@ -370,7 +370,7 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
     {
         using var process = Process.Start(NativeWorker.StartInfo("--catalog-worker")) ?? throw new IOException();
         using var energy = HostEnergy.Controller?.Attach(process);
-        DiagnosticLog.Info("host.worker", "catalogStarted", "Catalog worker started", new { process.Id });
+        DiagnosticLog.Info("host.worker", "catalogStarted", "Catalog worker started", global::HeyMelody.Diagnostics.DiagnosticData.Object(("Id", process.Id)));
         WatchExit(process, "catalog-worker");
         var stderr = WorkerDiagnosticReader.DrainAsync(process.StandardError, "catalog-worker", process.Id);
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -378,17 +378,13 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
         try
         {
             var line = await new RpcLineReader(process.StandardOutput.BaseStream).ReadLineAsync(budget.Token) ?? throw new IOException();
-            DiagnosticLog.Info("host.worker", "catalogReceive", "Received catalog worker RPC record", new { line });
-            var result = JsonSerializer.Deserialize<List<BluetoothCandidate>>(line, HostWire.Json) ?? throw new InvalidDataException();
+            DiagnosticLog.Info("host.worker", "catalogReceive", "Received catalog worker RPC record", global::HeyMelody.Diagnostics.DiagnosticData.Object(("line", line)));
+            var result = JsonSerializer.Deserialize(line, HostWire.TypeInfo<List<BluetoothCandidate>>()) ?? throw new InvalidDataException();
             await process.WaitForExitAsync(budget.Token);
             if (process.ExitCode != 0 || result.Count > 4096)
             {
                 var failure = new IOException("Catalog worker returned an unusable result.");
-                DiagnosticLog.Error("host.worker", "catalogFailed", "Catalog worker result was rejected", failure, new
-                {
-                    exitCode = process.ExitCode, count = result.Count,
-                    reason = process.ExitCode != 0 ? "nonZeroExit" : "tooManyCandidates"
-                });
+                DiagnosticLog.Error("host.worker", "catalogFailed", "Catalog worker result was rejected", failure, global::HeyMelody.Diagnostics.DiagnosticData.Object(("exitCode", process.ExitCode), ("count", result.Count), ("reason", process.ExitCode != 0 ? "nonZeroExit" : "tooManyCandidates")));
                 throw failure;
             }
             return result;
@@ -396,9 +392,9 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
         finally
         {
             try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-            catch (Exception failure) { DiagnosticLog.Debug("host.worker", "killFailed", "Catalog worker could not be killed", new { processId = process.Id, failure = failure.Message }); }
+            catch (Exception failure) { DiagnosticLog.Debug("host.worker", "killFailed", "Catalog worker could not be killed", global::HeyMelody.Diagnostics.DiagnosticData.Object(("processId", process.Id), ("failure", failure.Message))); }
             try { await stderr.WaitAsync(TimeSpan.FromSeconds(2)); }
-            catch (Exception failure) { DiagnosticLog.Debug("host.worker", "stderrDrainTimeout", "Catalog worker diagnostic stream did not finish", new { failure = failure.Message }); }
+            catch (Exception failure) { DiagnosticLog.Debug("host.worker", "stderrDrainTimeout", "Catalog worker diagnostic stream did not finish", global::HeyMelody.Diagnostics.DiagnosticData.Object(("failure", failure.Message))); }
         }
     }
 }

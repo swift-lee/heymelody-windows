@@ -66,6 +66,43 @@ internal static class NativePerformanceAuditCommandLineTests
             "Missing audit arguments accepted.");
         Check(!NativePerformanceAudit.TryParseOptions([.. baseline, "--theme", "light", "--seconds", "5"], out _),
             "Duplicate required audit option accepted.");
+        string[] published = ["--performance-benchmark", "--run-id", "0123456789abcdef0123456789abcdef",
+            "--output-dir", Path.Combine(Path.GetTempPath(), "heymelody-benchmark-cli-unused"), "--scenario", "ui-static"];
+        Check(HeyMelody.Performance.BenchmarkOptions.TryParse(published, out var publishedOptions)
+            && publishedOptions!.Seconds == 30 && publishedOptions.WarmupSeconds == 5 && !publishedOptions.Diagnostics,
+            "Published benchmark defaults rejected.");
+        Check(HeyMelody.Performance.BenchmarkOptions.TryParse([.. published, "--diagnostics", "true"], out var logging)
+            && logging!.Diagnostics, "Isolated benchmark diagnostics opt-in rejected.");
+        Check(HeyMelody.Performance.BenchmarkOptions.TryParse([.. published, "--diagnostics", "false"], out var noLogging)
+            && !noLogging!.Diagnostics, "Disabled benchmark diagnostics rejected.");
+        foreach (var invalid in new[] { "on", "1", "" })
+            Check(!HeyMelody.Performance.BenchmarkOptions.TryParse([.. published, "--diagnostics", invalid], out _),
+                "Invalid benchmark diagnostics value accepted.");
+        Check(HeyMelody.Performance.BenchmarkOptions.TryParse([.. published, "--seconds", "0"], out _),
+            "Startup-only published benchmark rejected.");
+        foreach (var invalid in new[] { "-1", "121", "NaN" })
+            Check(!HeyMelody.Performance.BenchmarkOptions.TryParse([.. published, "--seconds", invalid], out _),
+                "Published benchmark accepted invalid duration.");
+        Check(!HeyMelody.Performance.BenchmarkOptions.TryParse([.. published, "--run-id", Guid.NewGuid().ToString("N")], out _),
+            "Published benchmark accepted a duplicate run ID.");
+        Check(!HeyMelody.Performance.BenchmarkOptions.TryParse([.. published, "--unknown", "true"], out _),
+            "Published benchmark accepted unknown options.");
+        var relative = published.ToArray(); relative[4] = "relative-benchmark-output";
+        Check(!HeyMelody.Performance.BenchmarkOptions.TryParse(relative, out _),
+            "Published benchmark accepted a relative output directory.");
+        var invalidId = published.ToArray(); invalidId[2] = "production-pipe";
+        Check(!HeyMelody.Performance.BenchmarkOptions.TryParse(invalidId, out _),
+            "Published benchmark accepted an arbitrary pipe identifier.");
+        var second = published.ToArray(); second[2] = Guid.NewGuid().ToString("N");
+        Check(HeyMelody.Performance.BenchmarkOptions.TryParse(second, out var other)
+            && other!.PipeName != publishedOptions!.PipeName && other.HostMutex != publishedOptions.HostMutex,
+            "Published runs did not isolate their pipe and mutex.");
+        var identity = HeyMelody.Performance.BenchmarkProcess.Capture("cli-test", includeHash: false);
+        var wire = System.Text.Json.JsonSerializer.Serialize(identity,
+            HeyMelody.Performance.PerformanceBenchmarkJson.Default.BenchmarkProcess);
+        Check(System.Text.Json.JsonSerializer.Deserialize(wire,
+            HeyMelody.Performance.PerformanceBenchmarkJson.Default.BenchmarkProcess)?.ProcessId == Environment.ProcessId,
+            "Published benchmark identity source-generated JSON did not round-trip.");
         return checks;
     }
 }

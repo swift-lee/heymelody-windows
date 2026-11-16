@@ -72,7 +72,7 @@ public sealed class ResourceCatalog
             }
         }
         return new(version, online, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(utf8)),
-            JsonSerializer.SerializeToElement(content), profiles, online ? utf8.ToArray() : null);
+            JsonSerializer.SerializeToElement(content, ResourceWireJsonContext.Default.JsonObject), profiles, online ? utf8.ToArray() : null);
 
         void Add(JsonObject row)
         {
@@ -82,7 +82,7 @@ public sealed class ResourceCatalog
             if (type.StartsWith("S", StringComparison.OrdinalIgnoreCase) || type.Contains("speaker", StringComparison.OrdinalIgnoreCase)) return;
             bool spp = row["supportSpp"] is JsonValue value && value.TryGetValue<bool>(out var supported) && supported;
             var profile = new ResourceDeviceProfile(id, Text(row["name"]), brand, type, Text(row["uuid"]) is { Length: > 0 } uuid ? uuid : null,
-                spp, JsonSerializer.SerializeToElement(row));
+                spp, JsonSerializer.SerializeToElement(row, ResourceWireJsonContext.Default.JsonObject));
             if (!profiles.TryAdd(id, profile)) throw new InvalidDataException("Duplicate product identifier.");
         }
     }
@@ -98,7 +98,7 @@ public sealed class ResourceCatalog
 
 internal static class ResourceJson
 {
-    internal static readonly JsonSerializerOptions Options = new() { PropertyNameCaseInsensitive = true, WriteIndented = true };
+    internal static JsonSerializerOptions Options => ResourceJsonContext.Default.Options;
     internal static void ValidateUniqueProperties(JsonElement node)
     {
         if (node.ValueKind == JsonValueKind.Object)

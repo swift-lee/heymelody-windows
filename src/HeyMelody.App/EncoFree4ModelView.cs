@@ -189,7 +189,7 @@ public class DeviceModelView : UserControl
     private static FilamentModelData ReadModel(ArtworkFile file)
     {
         var expected = file.Sha256?.ToLowerInvariant();
-        DiagnosticLog.Debug("Model.Read", "started", "Reading the model for digest and structure validation.", new { expectedSha256 = expected });
+        DiagnosticLog.Debug("Model.Read", "started", "Reading the model for digest and structure validation.", global::HeyMelody.Diagnostics.DiagnosticData.Object(("expectedSha256", expected)));
         using var stream = file.Open();
         if (stream.Length is <= 0 or > FilamentModelData.MaximumBytes)
             throw new InvalidDataException("Model size exceeds its limit.");
@@ -197,7 +197,7 @@ public class DeviceModelView : UserControl
         stream.ReadExactly(bytes);
         var model = FilamentModelData.CreateValidated(bytes, string.IsNullOrEmpty(expected) ? null : expected);
         DiagnosticLog.Info("Model.Read", "verified", "Model digest and structure validation completed.",
-            new { expectedSha256 = expected, model.Sha256, bytes = bytes.Length });
+            global::HeyMelody.Diagnostics.DiagnosticData.Object(("expectedSha256", expected), ("Sha256", model.Sha256), ("bytes", bytes.Length)));
         return model;
     }
 
@@ -267,7 +267,7 @@ public class DeviceModelView : UserControl
     private async Task LoadAsync(int generation, FilamentBackend backend, CancellationTokenSource cancellation, Task retirement)
     {
         using var operation = DiagnosticLog.BeginOperation();
-        DiagnosticLog.Debug("Model.View", "loadStarted", "Starting a model view load generation.", new { generation, backend, modelSha256 = ModelDigest });
+        DiagnosticLog.Debug("Model.View", "loadStarted", "Starting a model view load generation.", global::HeyMelody.Diagnostics.DiagnosticData.Object(("generation", generation), ("backend", backend), ("modelSha256", ModelDigest)));
         var started = Stopwatch.GetTimestamp();
         var origin = _hasLoadSinceAttach ? started : _attachedAt;
         _hasLoadSinceAttach = true;
@@ -293,7 +293,7 @@ public class DeviceModelView : UserControl
             modelTask = MeasureReadAsync(_readModelOverride is null
                 ? VerifiedModels.GetAsync(_visual.File, out cacheHit) : _readModelOverride(_visual.File));
             DiagnosticLog.Debug("Model.View", "cacheDecision", "Model reader selected.",
-                new { generation, backend, cacheHit, readerOverride = _readModelOverride is not null, modelSha256 = ModelDigest });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("generation", generation), ("backend", backend), ("cacheHit", cacheHit), ("readerOverride", _readModelOverride is not null), ("modelSha256", ModelDigest)));
             renderer = await Task.Run(async () =>
             {
                 // Never create the replacement engine while the old engine is still draining readbacks.
@@ -351,7 +351,10 @@ public class DeviceModelView : UserControl
             _modelLoadedAt = modelLoadedAt;
             _loadTimings = timings;
             DiagnosticLog.Info("Model.View", "ready", "The selected renderer loaded the verified model; waiting for its first frame.",
-                new { generation, backend, modelSha256 = ModelDigest, timings, diagnostics = _lastDiagnostics });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("generation", generation), ("backend", backend),
+                    ("modelSha256", ModelDigest),
+                    ("timings", global::HeyMelody.Diagnostics.DiagnosticData.From(timings, ModelDiagnosticJson.Default.ModelLoadTimings)),
+                    ("diagnostics", global::HeyMelody.Diagnostics.DiagnosticData.From(_lastDiagnostics, ModelDiagnosticJson.Default.FilamentDiagnostics))));
             _firstFrameTimingPending = true;
             _afterFrameId = 0;
             MarkFrameRequested();
@@ -374,12 +377,12 @@ public class DeviceModelView : UserControl
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
-            DiagnosticLog.Debug("Model.View", "loadCancelled", "The model generation was cancelled.", new { generation, backend, modelSha256 = ModelDigest });
+            DiagnosticLog.Debug("Model.View", "loadCancelled", "The model generation was cancelled.", global::HeyMelody.Diagnostics.DiagnosticData.Object(("generation", generation), ("backend", backend), ("modelSha256", ModelDigest)));
         }
         catch (Exception exception)
         {
             DiagnosticLog.Error("Model.View", "loadFailed", "A model load stage failed.", exception,
-                new { generation, backend, modelSha256 = ModelDigest, currentGeneration = IsCurrentLoad(generation) });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("generation", generation), ("backend", backend), ("modelSha256", ModelDigest), ("currentGeneration", IsCurrentLoad(generation))));
             if (!IsCurrentLoad(generation)) return;
             // Preserve the serial loader's read-before-backend error priority when both fail.
             var failure = exception;
@@ -479,7 +482,7 @@ public class DeviceModelView : UserControl
         try { renderer.Dispose(); }
         catch (Exception exception)
         {
-            DiagnosticLog.Error("Model.View", "disposeFailed", "Native renderer disposal failed.", exception, new { modelSha256 = ModelDigest });
+            DiagnosticLog.Error("Model.View", "disposeFailed", "Native renderer disposal failed.", exception, global::HeyMelody.Diagnostics.DiagnosticData.Object(("modelSha256", ModelDigest)));
             Trace.WriteLine(exception);
         }
         finally { _lifetimeGate.Release(); }
@@ -490,7 +493,7 @@ public class DeviceModelView : UserControl
         _motionToRestore = null;
         LoadError = exception.ToString();
         DiagnosticLog.Error("Model.View", "rendererFailed", "The model renderer failed; the existing fallback presentation is used.", exception,
-            new { modelSha256 = ModelDigest });
+            global::HeyMelody.Diagnostics.DiagnosticData.Object(("modelSha256", ModelDigest)));
         Trace.WriteLine(LoadError);
         RetireRenderer();
         var message = exception switch
@@ -691,7 +694,7 @@ public class DeviceModelView : UserControl
             TotalMilliseconds = Stopwatch.GetElapsedTime(_timingOriginAt, now).TotalMilliseconds
         };
         _loadTimings = timings;
-        DiagnosticLog.Info("Model.View", "firstFrame", "The model's first frame was presented.", new { modelSha256 = ModelDigest, timings });
+        DiagnosticLog.Info("Model.View", "firstFrame", "The model's first frame was presented.", global::HeyMelody.Diagnostics.DiagnosticData.Object(("modelSha256", ModelDigest), ("timings", DiagnosticData.From(timings, ModelDiagnosticJson.Default.ModelLoadTimings))));
         if (RenderDiagnostics.Enabled)
             Trace.WriteLine(FormattableString.Invariant($"model_load generation={timings.Generation} backend={timings.Backend} total_ms={timings.TotalMilliseconds:F3} attach_ms={timings.AttachToLoadStartMilliseconds:F3} retirement_ms={timings.RetirementWaitMilliseconds:F3} gate_ms={timings.GateWaitMilliseconds:F3} read_ms={timings.ReadVerifyMilliseconds:F3} cache_hit={timings.CacheHit} runtime_ms={timings.RuntimePreparationMilliseconds:F3} probe={timings.ProbeDisposition} probe_ms={timings.ProbeWaitMilliseconds:F3} engine_ms={timings.EngineCreateMilliseconds:F3} model_ms={timings.ModelLoadMilliseconds:F3} first_frame_ms={timings.FirstFrameMilliseconds:F3}"));
         LoadMeasured?.Invoke(this, timings);

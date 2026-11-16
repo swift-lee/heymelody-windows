@@ -21,7 +21,7 @@ internal static class WorkerDiagnosticReader
                 // Preserve every character in chunks, including lines beyond the parser's memory bound.
                 if (DiagnosticLog.IsEnabled)
                     DiagnosticLog.Info("worker.stderr", "receive", "Received worker stderr",
-                        new { role, processId, text = new string(buffer, 0, count) });
+                        global::HeyMelody.Diagnostics.DiagnosticData.Object(("role", role), ("processId", processId), ("text", new string(buffer, 0, count))));
                 for (int i = 0; i < count; i++)
                 {
                     char value = buffer[i];
@@ -41,7 +41,7 @@ internal static class WorkerDiagnosticReader
         }
         catch (Exception failure)
         {
-            DiagnosticLog.Warning("worker.stderr", "ended", "Worker stderr reader ended", failure, new { role, processId });
+            DiagnosticLog.Warning("worker.stderr", "ended", "Worker stderr reader ended", failure, global::HeyMelody.Diagnostics.DiagnosticData.Object(("role", role), ("processId", processId)));
         }
     }
 

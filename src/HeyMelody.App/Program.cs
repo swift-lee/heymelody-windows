@@ -15,6 +15,7 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        if (args.FirstOrDefault() == "--performance-benchmark") return PerformanceBenchmark.Run(args);
         if (InstallationCheck.TryRun(args, out var installationExit)) return installationExit;
         using var loadTrace = args.Length == 0 && DesktopCapabilities.SupportsHeadsetControl ? null : ModelLoadTrace.Start();
         if (args.FirstOrDefault() == "--model-loading-benchmark") return ModelLoadingBenchmark.Run(args);

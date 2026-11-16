@@ -30,9 +30,6 @@ public enum ConnectionIndicator { Offline, Pending, Online }
 public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 {
     private static readonly int[] Frequencies = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
-    // Resolved once: state notifications compare every presentation property after each backend update.
-    private static readonly System.Reflection.PropertyInfo[] PresentationProperties = typeof(MainViewModel).GetProperties()
-        .Where(p => !p.Name.EndsWith("Command", StringComparison.Ordinal)).ToArray();
     private readonly IHeadsetService _service;
     private readonly IConfirmationService _confirmations;
     private readonly bool _preview;
@@ -197,7 +194,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         foreach (var control in _featureSections.SelectMany(s => s.Controls).Concat(_equalizerFeatures)) control.RefreshPermissions();
         foreach (var property in PresentationProperties)
         {
-            var value = property.GetValue(this);
+            var value = property.Read(this);
             if (!_published.TryGetValue(property.Name, out var old) || !Equals(old, value))
             { _published[property.Name] = value; OnPropertyChanged(property.Name); }
         }
@@ -625,7 +622,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private void SetStatus(string text, bool warning = false)
     {
         if (_status != text || _statusWarning != warning)
-            HeyMelody.Diagnostics.DiagnosticLog.Info("client.ui", "status", text, new { warning });
+            HeyMelody.Diagnostics.DiagnosticLog.Info("client.ui", "status", text, global::HeyMelody.Diagnostics.DiagnosticData.Object(("warning", warning)));
         _status = text; _statusWarning = warning; NotifyState();
     }
     private void Log(string text)

@@ -219,7 +219,7 @@ public sealed partial class DailyClient
         catch (Exception error)
         {
             DiagnosticLog.Error("Daily", "feature.apply-failed", "The feature setting operation failed without replay.", error,
-                new { id, value, text, result.SubmissionAttempted });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("id", id), ("value", value), ("text", text), ("SubmissionAttempted", result.SubmissionAttempted)));
             result.FailureKind = DailyApplyFailure.TransportUnknown;
             result.Error = "设置过程未完整确认；已提交的请求不会自动重发。"; return Finish(result);
         }

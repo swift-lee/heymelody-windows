@@ -29,7 +29,7 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
 
     public void Start()
     {
-        DiagnosticLog.Info("host.ipc", "start", "Starting the shared backend pipe", new { pipeName = pipeName ?? BackendEndpoint.PipeName });
+        DiagnosticLog.Info("host.ipc", "start", "Starting the shared backend pipe", global::HeyMelody.Diagnostics.DiagnosticData.Object(("pipeName", pipeName ?? BackendEndpoint.PipeName)));
         supervisor.EventPublished += Broadcast;
         supervisor.CalibrationOwnerEventPublished += SendOwnerEvent;
         _accept = AcceptAsync();
@@ -47,16 +47,16 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
                     await pipe.WaitForConnectionAsync(_acceptLifetime.Token);
                     if (!IsLocalSession(pipe))
                     {
-                        DiagnosticLog.Warning("host.ipc", "rejected", "Rejected a client", data: new { reason = "otherSession" });
+                        DiagnosticLog.Warning("host.ipc", "rejected", "Rejected a client", data: global::HeyMelody.Diagnostics.DiagnosticData.Object(("reason", "otherSession")));
                         pipe.Dispose(); continue;
                     }
                     if (_clients.Count >= 16)
                     {
-                        DiagnosticLog.Warning("host.ipc", "rejected", "Rejected a client", data: new { reason = "tooManyClients", count = _clients.Count });
+                        DiagnosticLog.Warning("host.ipc", "rejected", "Rejected a client", data: global::HeyMelody.Diagnostics.DiagnosticData.Object(("reason", "tooManyClients"), ("count", _clients.Count)));
                         pipe.Dispose(); continue;
                     }
                     var client = new Client(pipe, this);
-                    DiagnosticLog.Info("host.ipc", "connected", "Client connected", new { client.Key });
+                    DiagnosticLog.Info("host.ipc", "connected", "Client connected", global::HeyMelody.Diagnostics.DiagnosticData.Object(("Key", client.Key)));
                     _clients[client.Key] = client;
                     try
                     {
@@ -68,7 +68,7 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
                     catch (Exception setupFailure)
                     {
                         // One client's setup failure must not end the accept loop.
-                        DiagnosticLog.Error("host.ipc", "acceptFailed", "Per-client setup failed; dropping this client", setupFailure, new { client.Key });
+                        DiagnosticLog.Error("host.ipc", "acceptFailed", "Per-client setup failed; dropping this client", setupFailure, global::HeyMelody.Diagnostics.DiagnosticData.Object(("Key", client.Key)));
                         _clients.TryRemove(client.Key, out _);
                         client.Dispose();
                     }
@@ -114,7 +114,7 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
     private async Task HandleAsync(Client client, BackendRequest request)
     {
         using var operation = DiagnosticLog.BeginOperation(request.DiagnosticCorrelationId);
-        DiagnosticLog.Info("host.ipc", "request", "Dispatching client RPC", new { client.Key, request });
+        DiagnosticLog.Info("host.ipc", "request", "Dispatching client RPC", global::HeyMelody.Diagnostics.DiagnosticData.Object(("Key", client.Key), ("request", DiagnosticData.From(request, HostDiagnosticJsonContext.Default.BackendRequest))));
         if (request.SchemaVersion != 5)
         { client.Reply(request.Id, null, "versionMismatch", "前后端版本不一致，请重启软件或重新安装。"); return; }
         if (request.Operation.Length is 0 or > 32)
@@ -163,10 +163,10 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
                     if (request.BackendInstanceId != supervisor.InstanceId || request.DeviceGeneration is not { } generation)
                         throw new InvalidOperationException("后台或连接已变化，未提交设置。");
                     data = await supervisor.ApplyAsync(Identity(), generation,
-                        request.Action.Deserialize<UiAction>(RpcWire.Json) ?? throw new InvalidDataException(), client.Lifetime.Token); break;
+                        request.Action.Deserialize(RpcWire.TypeInfo<UiAction>()) ?? throw new InvalidDataException(), client.Lifetime.Token); break;
                 case "resourceSettings": data = supervisor.ResourceSettings(); break;
                 case "saveResourceSettings":
-                    data = await supervisor.SaveResourceSettingsAsync(request.Action.Deserialize<UiResourceSettings>(RpcWire.Json) ?? throw new InvalidDataException(), client.Lifetime.Token); break;
+                    data = await supervisor.SaveResourceSettingsAsync(request.Action.Deserialize(RpcWire.TypeInfo<UiResourceSettings>()) ?? throw new InvalidDataException(), client.Lifetime.Token); break;
                 case "redownloadResources": data = await supervisor.RedownloadResourcesAsync().WaitAsync(client.Lifetime.Token); break;
                 case "hearingProfiles":
                     data = await supervisor.HearingProfilesAsync(Identity(), Generation(), client.Lifetime.Token); break;
@@ -180,7 +180,7 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
                 case "advanceCalibration":
                     GenerationCheck();
                     data = await supervisor.AdvanceCalibrationAsync(client.Key, Handle(), request.Revision ?? throw new InvalidDataException(),
-                        request.Action.Deserialize<UiCalibrationInput>(RpcWire.Json) ?? throw new InvalidDataException(), client.Lifetime.Token); break;
+                        request.Action.Deserialize(RpcWire.TypeInfo<UiCalibrationInput>()) ?? throw new InvalidDataException(), client.Lifetime.Token); break;
                 case "cancelCalibration": data = await supervisor.CancelCalibrationAsync(client.Key, Handle()); break;
                 case "acquireArtwork":
                     data = new ArtworkLeaseReply(await supervisor.AcquireArtworkAsync(client.Key, StringArg("productId"), NullableInt("color"), StringArg("role"), client.Lifetime.Token)); break;
@@ -203,13 +203,13 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
         catch (InvalidOperationException error) when (request.Operation is "exitVote" or "stoppingAck")
         {
             // Benign race: the exit phase or request changed before this message arrived.
-            DiagnosticLog.Debug("host.lifecycle", "exitMessageStale", "Ignored a stale exit message", new { client.Key, client.Role, request.Id, request.Operation, error = error.Message });
+            DiagnosticLog.Debug("host.lifecycle", "exitMessageStale", "Ignored a stale exit message", global::HeyMelody.Diagnostics.DiagnosticData.Object(("Key", client.Key), ("Role", client.Role), ("Id", request.Id), ("Operation", request.Operation), ("error", error.Message)));
             client.Reply(request.Id, null, "operationFailed", error.Message);
         }
         catch (Exception error)
         {
             DiagnosticLog.Error("host.ipc", "operationFailed", "Backend operation failed", error,
-                new { client.Key, request.Id, request.Operation });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("Key", client.Key), ("Id", request.Id), ("Operation", request.Operation)));
             // Do not forward native exceptions, addresses or arbitrary peer-provided text.
             var message = error is InvalidOperationException && error.Message.Length <= 180
                 ? error.Message : "后台操作未完成，请检查蓝牙状态后重试。";
@@ -242,7 +242,7 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
             try
             {
                 var start = MainStartInfo();
-                DiagnosticLog.Debug("host.lifecycle", "mainLaunching", "Launching the main GUI", new { start.FileName, start.WorkingDirectory });
+                DiagnosticLog.Debug("host.lifecycle", "mainLaunching", "Launching the main GUI", global::HeyMelody.Diagnostics.DiagnosticData.Object(("FileName", start.FileName), ("WorkingDirectory", start.WorkingDirectory)));
                 // The window inherits this process's priority class: leave Eco before it starts, then pin Normal in case the class stuck.
                 HostEnergy.Controller?.PrepareLaunch();
                 _mainLaunch = Process.Start(start);
@@ -259,7 +259,7 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
 
     private void Detach(Client client)
     {
-        DiagnosticLog.Info("host.ipc", "disconnected", "Client disconnected", new { client.Key, client.Role });
+        DiagnosticLog.Info("host.ipc", "disconnected", "Client disconnected", global::HeyMelody.Diagnostics.DiagnosticData.Object(("Key", client.Key), ("Role", client.Role)));
         _clients.TryRemove(client.Key, out _);
         UpdateGuiCount();
         supervisor.ClientDetached(client.Key);
@@ -302,7 +302,7 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
         internal string Line()
         {
             if (Volatile.Read(ref _line) is { } line) return line;
-            line = JsonSerializer.Serialize(_message, RpcWire.Json);
+            line = JsonSerializer.Serialize(_message, RpcWire.TypeInfo<BackendMessage>());
             return Interlocked.CompareExchange(ref _line, line, null) ?? line;
         }
     }
@@ -331,7 +331,7 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
         public void Reply(long id, object? data, string? errorCode = null, string? error = null)
         {
             Enqueue(new(new BackendMessage { Id = id, Success = errorCode is null, ErrorCode = errorCode, Error = error,
-                Data = data is null ? null : JsonSerializer.SerializeToElement(data, RpcWire.Json) }));
+                Data = data is null ? null : JsonSerializer.SerializeToElement(data, RpcWire.TypeInfo<object>()) }));
         }
         public void SendEvent(BackendEvent value) => Send(new Outbound(value));
         public Task SendFlushedAsync(BackendEvent value)
@@ -371,15 +371,15 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
                 long lastId = 0;
                 while (await lines.ReadLineAsync(Lifetime.Token) is { } line)
                 {
-                    DiagnosticLog.Info("host.ipc", "receive", "Received client RPC record", new { client = Key, line });
-                    var request = JsonSerializer.Deserialize<BackendRequest>(line, RpcWire.Json) ?? throw new InvalidDataException();
+                    DiagnosticLog.Info("host.ipc", "receive", "Received client RPC record", global::HeyMelody.Diagnostics.DiagnosticData.Object(("client", Key), ("line", line)));
+                    var request = JsonSerializer.Deserialize(line, RpcWire.TypeInfo<BackendRequest>()) ?? throw new InvalidDataException();
                     if (request.Id <= lastId) throw new InvalidDataException(); lastId = request.Id;
                     if (!_dispatch.Wait(0)) throw new InvalidDataException("Too many outstanding requests.");
                     _ = DispatchAsync(request);
                 }
             }
             catch (Exception failure)
-            { DiagnosticLog.Warning("host.ipc", "receiveEnded", "Client receive channel ended", failure, new { client = Key }); }
+            { DiagnosticLog.Warning("host.ipc", "receiveEnded", "Client receive channel ended", failure, global::HeyMelody.Diagnostics.DiagnosticData.Object(("client", Key))); }
             finally { Dispose(); owner.Detach(this); try { await output; } catch { } }
         }
         private async Task DispatchAsync(BackendRequest request)
@@ -387,7 +387,7 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
             try { await owner.HandleAsync(this, request); }
             catch (Exception failure)
             {
-                DiagnosticLog.Error("host.ipc", "dispatchFailed", "Client RPC dispatch failed", failure, new { client = Key, request.Id });
+                DiagnosticLog.Error("host.ipc", "dispatchFailed", "Client RPC dispatch failed", failure, global::HeyMelody.Diagnostics.DiagnosticData.Object(("client", Key), ("Id", request.Id)));
                 Reply(request.Id, null, "operationFailed", "后台操作未完成。");
             }
             finally { _dispatch.Release(); }
@@ -407,14 +407,14 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
             }
             catch (Exception failure)
             {
-                DiagnosticLog.Warning("host.ipc", "sendEnded", "Client send channel ended", failure, new { client = Key });
+                DiagnosticLog.Warning("host.ipc", "sendEnded", "Client send channel ended", failure, global::HeyMelody.Diagnostics.DiagnosticData.Object(("client", Key)));
                 Dispose();
             }
             async Task WriteAsync(Outbound message)
             {
                 using var operation = message.DiagnosticCorrelationId is { } id ? DiagnosticLog.BeginOperation(id) : null;
                 var line = message.Line();
-                DiagnosticLog.Info("host.ipc", "send", "Sending backend RPC record", new { client = Key, line });
+                DiagnosticLog.Info("host.ipc", "send", "Sending backend RPC record", global::HeyMelody.Diagnostics.DiagnosticData.Object(("client", Key), ("line", line)));
                 if (line.Length > RpcWire.MaximumLineCharacters) throw new InvalidDataException();
                 using var budget = CancellationTokenSource.CreateLinkedTokenSource(Lifetime.Token);
                 budget.CancelAfter(TimeSpan.FromSeconds(10));

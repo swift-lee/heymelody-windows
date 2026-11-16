@@ -7,6 +7,8 @@
   <ItemGroup>
     <ProjectReference Include="../HeyMelody.Platform/HeyMelody.Platform.csproj" />
     <InternalsVisibleTo Include="HeyMelody.Diagnostics.Tests" />
+    <InternalsVisibleTo Include="HeyMelody" />
+    <InternalsVisibleTo Include="HeyMelody.Host" />
     <InternalsVisibleTo Include="HeyMelody.Host.Tests" />
     <InternalsVisibleTo Include="HeyMelody.Client.Tests" />
     <InternalsVisibleTo Include="HeyMelody.App.Tests" />

@@ -49,7 +49,7 @@ public static class DiagnosticLog
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
         {
             Write(DiagnosticLevel.Critical, "Runtime", "process.unhandled", "Unhandled process exception",
-                new { args.IsTerminating }, args.ExceptionObject as Exception);
+                DiagnosticData.Object(("IsTerminating", args.IsTerminating)), args.ExceptionObject as Exception);
             Flush();
         };
         TaskScheduler.UnobservedTaskException += (_, args) =>
@@ -59,11 +59,11 @@ public static class DiagnosticLog
         {
             if (_writing || !IsEnabled) return;
             Write(DiagnosticLevel.Debug, "Runtime", "exception.firstChance", "Exception thrown",
-                new { type = args.Exception.GetType().FullName, args.Exception.HResult }, args.Exception);
+                DiagnosticData.Object(("type", args.Exception.GetType().FullName), ("HResult", args.Exception.HResult)), args.Exception);
         };
         AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         {
-            Info("Runtime", "process.exiting", "Process is exiting", new { Environment.ExitCode });
+            Info("Runtime", "process.exiting", "Process is exiting", DiagnosticData.Object(("ExitCode", Environment.ExitCode)));
             Flush();
         };
     }
@@ -78,16 +78,14 @@ public static class DiagnosticLog
         catch (Exception error) { PublishFailure("无法创建日志文件，本组件日志未开始记录。", error); return; }
         // A repeated join must close the earlier writer instead of leaking its pump and file handle.
         Interlocked.Exchange(ref _writer, created)?.Dispose();
-        Info("Runtime", "process.started", "Process joined diagnostic session", new
-        {
-            arguments = Environment.GetCommandLineArgs(), executable = Environment.ProcessPath,
-            version = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
-            operatingSystem = RuntimeInformation.OSDescription, osArchitecture = RuntimeInformation.OSArchitecture.ToString(),
-            processArchitecture = RuntimeInformation.ProcessArchitecture.ToString(), runtime = RuntimeInformation.FrameworkDescription,
-            culture = System.Globalization.CultureInfo.CurrentCulture.Name, processStartedAtUtc = StartTimeUtc(),
-            processorCount = Environment.ProcessorCount, is64BitProcess = Environment.Is64BitProcess,
-            serverGarbageCollector = System.Runtime.GCSettings.IsServerGC, currentDirectory = Environment.CurrentDirectory
-        });
+        Info("Runtime", "process.started", "Process joined diagnostic session", DiagnosticData.Object(
+            ("arguments", Environment.GetCommandLineArgs()), ("executable", Environment.ProcessPath),
+            ("version", Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion),
+            ("operatingSystem", RuntimeInformation.OSDescription), ("osArchitecture", RuntimeInformation.OSArchitecture.ToString()),
+            ("processArchitecture", RuntimeInformation.ProcessArchitecture.ToString()), ("runtime", RuntimeInformation.FrameworkDescription),
+            ("culture", System.Globalization.CultureInfo.CurrentCulture.Name), ("processStartedAtUtc", StartTimeUtc()),
+            ("processorCount", Environment.ProcessorCount), ("is64BitProcess", Environment.Is64BitProcess),
+            ("serverGarbageCollector", System.Runtime.GCSettings.IsServerGC), ("currentDirectory", Environment.CurrentDirectory)));
     }
 
     public static IDisposable BeginOperation(string? correlationId = null)
@@ -133,14 +131,14 @@ public static class DiagnosticLog
     {
         if (data is null) return null;
         JsonNode? node;
-        try { node = JsonSerializer.SerializeToNode(data, data.GetType()); }
+        try { node = DiagnosticData.ToNode(data); }
         catch (Exception error)
         {
             // A diagnostic object's getter must not change the result of the operation being diagnosed.
             node = new JsonObject { ["serializationError"] = error.ToString(), ["valueType"] = data.GetType().FullName };
         }
         DiagnosticRedaction.Redact(node);
-        return node is null ? null : JsonSerializer.SerializeToElement(node);
+        return node is null ? null : DiagnosticData.Element(node);
     }
 
     private static string? Describe(Exception? exception)
@@ -171,7 +169,7 @@ public static class DiagnosticLog
         string hex;
         try { hex = Convert.ToHexString(bytes); }
         catch (Exception error) { hex = "<conversion failed: " + error.Message + ">"; }
-        Debug(source, eventName, "Protocol bytes", new { length = bytes.Length, hex, context = data });
+        Debug(source, eventName, "Protocol bytes", DiagnosticData.Object(("length", bytes.Length), ("hex", hex), ("context", data)));
     }
 
     public static void Flush() => Volatile.Read(ref _writer)?.Flush(TimeSpan.FromSeconds(2));
@@ -208,14 +206,14 @@ public static class DiagnosticLog
             try { Console.Error.WriteLine(FormatFailureLine(failure)); } catch { }
     }
 
-    public static string FormatFailureLine(DiagnosticFailure failure) => FailurePrefix + JsonSerializer.Serialize(failure);
+    public static string FormatFailureLine(DiagnosticFailure failure) => FailurePrefix + JsonSerializer.Serialize(failure, DiagnosticJsonContext.Default.DiagnosticFailure);
     public static bool TryParseFailureLine(string line, out DiagnosticFailure? failure)
     {
         failure = null;
         if (!line.StartsWith(FailurePrefix, StringComparison.Ordinal) || line.Length > 65536) return false;
         try
         {
-            failure = JsonSerializer.Deserialize<DiagnosticFailure>(line.AsSpan(FailurePrefix.Length));
+            failure = JsonSerializer.Deserialize(line.AsSpan(FailurePrefix.Length), DiagnosticJsonContext.Default.DiagnosticFailure);
             return failure is not null && !string.IsNullOrWhiteSpace(failure.Component)
                 && !string.IsNullOrWhiteSpace(failure.ProcessInstanceId);
         }

@@ -2,10 +2,25 @@
 #if Ver < EncodeVer(6, 6, 0)
   #error Inno Setup 6.6 or newer is required.
 #endif
+#ifndef CompilationMode
+  #define CompilationMode "ReadyToRun"
+#endif
+#if (CompilationMode != "ReadyToRun") && (CompilationMode != "AotExperimental")
+  #error Unsupported application compilation mode.
+#endif
+#if (CompilationMode == "AotExperimental") && (AppArch != "x64")
+  #error AotExperimental supports only x64.
+#endif
 
 [Setup]
 AppId=HeyMelody
+#if CompilationMode == "AotExperimental"
+AppName=HeyMelody（Native AOT 实验版）
+AppVerName=HeyMelody {#AppVersion}（Native AOT 实验版）
+UninstallDisplayName=HeyMelody {#AppVersion}（Native AOT 实验版）
+#else
 AppName=HeyMelody
+#endif
 AppVersion={#AppVersion}
 AppPublisher=HeyMelody contributors
 AppPublisherURL=https://github.com/swift-lee/heymelody-windows
@@ -49,6 +64,11 @@ Source: "{#HelperExe}"; DestName: "HeyMelody.InstallerSupport.exe"; Flags: dontc
 Source: "{#HelperExe}"; DestDir: "{app}\.installer"; DestName: "HeyMelody.InstallerSupport.exe"; Flags: ignoreversion uninsneveruninstall
 Source: "{#FilesManifest}"; DestDir: "{app}\.installer"; DestName: "payload-files.txt"; Flags: ignoreversion uninsneveruninstall
 Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Registry]
+; Both modes share installation identity and switch only after the previous
+; payload has been uninstalled, so an AOT backend cannot retain CoreCLR files.
+Root: HKCU32; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\HeyMelody_is1"; ValueType: string; ValueName: "CompilationMode"; ValueData: "{#CompilationMode}"; Flags: uninsdeletevalue
 
 [Icons]
 Name: "{userprograms}\HeyMelody"; Filename: "{app}\{#AppArch}\HeyMelody.exe"; WorkingDir: "{app}\{#AppArch}"
@@ -264,7 +284,7 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
-  Target, PreviousInno, PreviousLegacy, Uninstaller: String;
+  Target, PreviousInno, PreviousLegacy, Uninstaller, PreviousCompilationMode: String;
   ExitCode: Integer;
 begin
   { Keep waiting on a retry even if the old uninstall registration is already gone. }
@@ -278,8 +298,14 @@ begin
   Target := WizardDirValue;
   Result := CheckInstallation(Target, False, SetupHelper);
   if Result <> '' then Exit;
+  { Existing installers predate this value and always contained ReadyToRun. }
+  if not RegQueryStringValue(HKCU32, InnoKey, 'CompilationMode',
+      PreviousCompilationMode) then
+    PreviousCompilationMode := 'ReadyToRun';
   if RegQueryStringValue(HKCU32, InnoKey, 'InstallLocation', PreviousInno) and
-      (PreviousInno <> '') and not SameDirectory(PreviousInno, Target) then begin
+      (PreviousInno <> '') and
+      (not SameDirectory(PreviousInno, Target) or
+       (CompareText(PreviousCompilationMode, '{#CompilationMode}') <> 0)) then begin
     Result := CheckInstallation(PreviousInno, False, SetupHelper);
     if Result <> '' then Exit;
     Uninstaller := RegisteredInnoUninstaller(PreviousInno);

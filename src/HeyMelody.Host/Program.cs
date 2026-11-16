@@ -11,6 +11,19 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        if (args is ["--performance-benchmark-worker", var benchmarkOutput])
+            return PerformanceBenchmarkHost.RunWorkerAsync(benchmarkOutput).GetAwaiter().GetResult();
+        if (args.FirstOrDefault() == "--performance-benchmark")
+        {
+            if (!PerformanceBenchmarkHost.TryConfigure(args, out var benchmarkExit)) return benchmarkExit;
+            using var diagnostic = PerformanceBenchmarkHost.Options!.Diagnostics
+                ? IsolatedBenchmarkDiagnostics.Start(DiagnosticComponents.Host, "benchmark",
+                    PerformanceBenchmarkHost.Options.RunId, PerformanceBenchmarkHost.Options.Output) : null;
+            using var isolated = DesktopRuntime.CreateMutex(PerformanceBenchmarkHost.Options!.HostMutex, out _);
+            if (!isolated.WaitOne(0)) return 2;
+            try { return RunTray(args); }
+            finally { isolated.ReleaseMutex(); }
+        }
         if (InstallationCheck.TryRun(args, out var installationResult)) return installationResult;
         // Workers never initialize Avalonia or acquire the tray singleton.
         if (args is ["--worker"])

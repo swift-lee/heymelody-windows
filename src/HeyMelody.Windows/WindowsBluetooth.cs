@@ -50,7 +50,8 @@ public static class WindowsBluetooth
                 if (found) continue;
                 if (error != 259) throw new Win32Exception(error, "Bluetooth device enumeration failed.");
                 var devices = result.Values.OrderBy(x => x.Address).ToArray();
-                DiagnosticLog.Debug("Windows.Bluetooth", "devices.enumerated", "Enumerated the cached Bluetooth candidates.", devices);
+                DiagnosticLog.Debug("Windows.Bluetooth", "devices.enumerated", "Enumerated the cached Bluetooth candidates.",
+                    DiagnosticData.From(devices, WindowsDiagnosticJsonContext.Default.BluetoothCandidateArray));
                 return devices;
             }
         }

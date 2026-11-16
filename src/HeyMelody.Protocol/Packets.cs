@@ -81,7 +81,7 @@ public sealed class PacketDecoder
     public IReadOnlyList<Packet> Feed(ReadOnlySpan<byte> bytes)
     {
         DiagnosticLog.Bytes("Protocol", "decode.input", bytes,
-            new { decoderId = _diagnosticId, streamOffset = _receivedBytes });
+            global::HeyMelody.Diagnostics.DiagnosticData.Object(("decoderId", _diagnosticId), ("streamOffset", _receivedBytes)));
         _receivedBytes += bytes.Length;
         var result = new List<Packet>();
         try
@@ -174,7 +174,7 @@ public sealed class PacketDecoder
     private void AddDecoded(List<Packet> output, Packet packet)
     {
         DiagnosticLog.Bytes("Protocol", "packet.decoded", packet.Payload,
-            new { decoderId = _diagnosticId, command = $"0x{packet.Command:X4}", packet.Sequence });
+            global::HeyMelody.Diagnostics.DiagnosticData.Object(("decoderId", _diagnosticId), ("command", $"0x{packet.Command:X4}"), ("Sequence", packet.Sequence)));
         _packetDecoded?.Invoke(packet);
         output.Add(packet);
     }
@@ -197,8 +197,7 @@ public sealed class PacketDecoder
             if (!knownReply || _allowCodecReplyCompatibility?.Invoke(bytes[2]) != true)
                 throw Malformed("inner-length", BinaryPrimitives.ReadUInt16LittleEndian(bytes), bytes[2]);
             DiagnosticLog.Warning("Protocol", "codec.compatibility-used", "Accepted the verified codec reply length compatibility layout.",
-                data: new { decoderId = _diagnosticId, command = "0x8114", sequence = bytes[2], declaredLength = declared,
-                    actualPayloadLength = bytes.Length - 5, actualMessageLength = bytes.Length });
+                data: global::HeyMelody.Diagnostics.DiagnosticData.Object(("decoderId", _diagnosticId), ("command", "0x8114"), ("sequence", bytes[2]), ("declaredLength", declared), ("actualPayloadLength", bytes.Length - 5), ("actualMessageLength", bytes.Length)));
         }
         return new(BinaryPrimitives.ReadUInt16LittleEndian(bytes), bytes[2], bytes[5..].ToArray());
     }
@@ -214,16 +213,8 @@ public sealed class PacketDecoder
     private void RecordFailure(string eventName, Exception error)
     {
         if (!DiagnosticLog.IsEnabled) return;
-        var context = new { decoderId = _diagnosticId, receivedBytes = _receivedBytes, consumedBytes = _consumedBytes,
-            bufferedFrameLength = _frame.Count, expectedFrameLength = _expectedFrameSize, declaredFrameLength = _length,
-            bufferedMessageLength = _message.Count,
-            declaredMessagePayloadLength = _diagnosticDeclaredPayloadLength ?? (_message.Count >= 5 ? (int?)(_message[3] | _message[4] << 8) : null),
-            actualMessageLength = _diagnosticActualMessageLength,
-            actualMessagePayloadLength = _diagnosticActualMessageLength is int actualLength ? (int?)Math.Max(0, actualLength - 5)
-                : _message.Count >= 5 ? _message.Count - 5 : null,
-            fragmenting = _fragmenting, nextFragmentSequence = _nextFsn,
-            failureReason = error.Data["HeyMelody.Protocol.FrameFailure"], responseCommand = error.Data["HeyMelody.Protocol.ResponseCommand"],
-            responseSequence = error.Data["HeyMelody.Protocol.ResponseSequence"] };
+        var context = global::HeyMelody.Diagnostics.DiagnosticData.Object(("decoderId", _diagnosticId), ("receivedBytes", _receivedBytes), ("consumedBytes", _consumedBytes), ("bufferedFrameLength", _frame.Count), ("expectedFrameLength", _expectedFrameSize), ("declaredFrameLength", _length), ("bufferedMessageLength", _message.Count), ("declaredMessagePayloadLength", _diagnosticDeclaredPayloadLength ?? (_message.Count >= 5 ? (int?)(_message[3] | _message[4] << 8) : null)), ("actualMessageLength", _diagnosticActualMessageLength), ("actualMessagePayloadLength", _diagnosticActualMessageLength is int actualLength ? (int?)Math.Max(0, actualLength - 5)
+                : _message.Count >= 5 ? _message.Count - 5 : null), ("fragmenting", _fragmenting), ("nextFragmentSequence", _nextFsn), ("failureReason", error.Data["HeyMelody.Protocol.FrameFailure"]), ("responseCommand", error.Data["HeyMelody.Protocol.ResponseCommand"]), ("responseSequence", error.Data["HeyMelody.Protocol.ResponseSequence"]));
         DiagnosticLog.Bytes("Protocol", "decode.buffered-frame", _frame.ToArray(), context);
         DiagnosticLog.Bytes("Protocol", "decode.buffered-message", _message.ToArray(), context);
         DiagnosticLog.Error("Protocol", eventName, "Protocol decoding failed before buffered state was reset.", error, context);

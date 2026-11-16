@@ -52,7 +52,7 @@ public sealed partial class ClientBridge
             if (RetiredPipes.ContainsKey(BackendEndpoint.PipeName) || DiagnosticRuntime.IsBoundLaunchExpired)
             {
                 DiagnosticLog.Info("client.lifecycle", "ownedComponentRefused", "Refused to start a component after the backend ended",
-                    new { start.FileName, retired = RetiredPipes.ContainsKey(BackendEndpoint.PipeName), expired = DiagnosticRuntime.IsBoundLaunchExpired });
+                    global::HeyMelody.Diagnostics.DiagnosticData.Object(("FileName", start.FileName), ("retired", RetiredPipes.ContainsKey(BackendEndpoint.PipeName)), ("expired", DiagnosticRuntime.IsBoundLaunchExpired)));
                 throw new OperationCanceledException("后台已经结束，不能再启动此周期的组件。", token);
             }
             DiagnosticRuntime.BindChildStart(start);
@@ -72,7 +72,7 @@ public sealed partial class ClientBridge
                     || DiagnosticRuntime.HasBoundLaunch)
                 {
                     DiagnosticLog.Info("client.lifecycle", "backendStartRefused", "Refused to restart the backend while exiting",
-                        new { _disposed, _stopping, exitPending = ExitPendingLocked, retired = RetiredPipes.ContainsKey(_pipeName), boundLaunch = DiagnosticRuntime.HasBoundLaunch });
+                        global::HeyMelody.Diagnostics.DiagnosticData.Object(("_disposed", _disposed), ("_stopping", _stopping), ("exitPending", ExitPendingLocked), ("retired", RetiredPipes.ContainsKey(_pipeName)), ("boundLaunch", DiagnosticRuntime.HasBoundLaunch)));
                     throw new IOException("后台正在退出，不能重新启动。");
                 }
                 _startBackend?.Invoke();
@@ -92,7 +92,7 @@ public sealed partial class ClientBridge
         }
         if (retired is not null)
         {
-            DiagnosticLog.Info("client.lifecycle", "retiredPipeReplay", "Replaying the retired pipe's terminal state", new { retired.ExitRequestId, retired.BackendInstanceId });
+            DiagnosticLog.Info("client.lifecycle", "retiredPipeReplay", "Replaying the retired pipe's terminal state", global::HeyMelody.Diagnostics.DiagnosticData.Object(("ExitRequestId", retired.ExitRequestId), ("BackendInstanceId", retired.BackendInstanceId)));
             CommitStopping(retired, propagate: false);
         }
         if (DiagnosticRuntime.HasBoundLaunch)
@@ -104,7 +104,7 @@ public sealed partial class ClientBridge
 
     private void BoundOwnerEnded()
     {
-        DiagnosticLog.Info("client.lifecycle", "boundOwnerEnded", "The bound launch owner ended; committing stopping", new { _backendInstanceId });
+        DiagnosticLog.Info("client.lifecycle", "boundOwnerEnded", "The bound launch owner ended; committing stopping", global::HeyMelody.Diagnostics.DiagnosticData.Object(("_backendInstanceId", _backendInstanceId)));
         CommitStopping(new() { Kind = "stopping", BackendInstanceId = _backendInstanceId ?? "" });
     }
 
@@ -136,8 +136,7 @@ public sealed partial class ClientBridge
                 }
             }
             DiagnosticLog.Info("client.lifecycle", "commitStopping", "Committing the terminal stopping state",
-                new { notification.ExitRequestId, notification.BackendInstanceId, propagate, peers = others.Length,
-                    alreadyStopping = _stopping, ackConnection = connection is not null, fromSource = sourceConnection is not null });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("ExitRequestId", notification.ExitRequestId), ("BackendInstanceId", notification.BackendInstanceId), ("propagate", propagate), ("peers", others.Length), ("alreadyStopping", _stopping), ("ackConnection", connection is not null), ("fromSource", sourceConnection is not null)));
             if (!_stopping)
             {
                 _stopping = true;
@@ -159,7 +158,7 @@ public sealed partial class ClientBridge
             : Interlocked.Exchange(ref connection.StopAckSent, 1) != 0 ? "alreadySent" : null;
         if (skipped is not null)
         {
-            DiagnosticLog.Debug("client.lifecycle", "stoppingAckSkipped", "Terminal acknowledgement not sent", new { reason = skipped, notification.ExitRequestId });
+            DiagnosticLog.Debug("client.lifecycle", "stoppingAckSkipped", "Terminal acknowledgement not sent", global::HeyMelody.Diagnostics.DiagnosticData.Object(("reason", skipped), ("ExitRequestId", notification.ExitRequestId)));
             return;
         }
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
@@ -171,11 +170,11 @@ public sealed partial class ClientBridge
             {
                 var ack = new BackendRequest { Operation = "stoppingAck", ExitRequestId = notification.ExitRequestId,
                     BackendInstanceId = notification.BackendInstanceId, Id = Interlocked.Increment(ref _nextId) };
-                var record = JsonSerializer.Serialize(ack, RpcWire.Json);
-                DiagnosticLog.Info("client.ipc", "send", "Sending terminal acknowledgement on the original pipe", new { record });
+                var record = JsonSerializer.Serialize(ack, RpcWire.TypeInfo<BackendRequest>());
+                DiagnosticLog.Info("client.ipc", "send", "Sending terminal acknowledgement on the original pipe", global::HeyMelody.Diagnostics.DiagnosticData.Object(("record", record)));
                 await connection.Writer.WriteLineAsync(record.AsMemory(), budget.Token);
                 await connection.Writer.FlushAsync(budget.Token);
-                DiagnosticLog.Debug("client.lifecycle", "stoppingAckSent", "Terminal state acknowledged", new { ack.Id, ack.ExitRequestId });
+                DiagnosticLog.Debug("client.lifecycle", "stoppingAckSent", "Terminal state acknowledged", global::HeyMelody.Diagnostics.DiagnosticData.Object(("Id", ack.Id), ("ExitRequestId", ack.ExitRequestId)));
             }
             finally { connection.WriteGate.Release(); }
         }
@@ -187,7 +186,7 @@ public sealed partial class ClientBridge
     {
         if (_stopping)
         {
-            DiagnosticLog.Debug("client.lifecycle", "prepareDropped", "Ignored requestExit after stopping", new { notification.ExitRequestId });
+            DiagnosticLog.Debug("client.lifecycle", "prepareDropped", "Ignored requestExit after stopping", global::HeyMelody.Diagnostics.DiagnosticData.Object(("ExitRequestId", notification.ExitRequestId)));
             return;
         }
         if (_exitRequest?.ExitRequestId != notification.ExitRequestId || _exitRequest?.BackendInstanceId != notification.BackendInstanceId)
@@ -210,10 +209,10 @@ public sealed partial class ClientBridge
             || notification.BackendInstanceId != _exitRequest.BackendInstanceId)
         {
             DiagnosticLog.Debug("client.lifecycle", "exitCancelledDropped", "Ignored an exitCancelled that does not match the current request",
-                new { notification.ExitRequestId, current = _exitRequest?.ExitRequestId, _stopping });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("ExitRequestId", notification.ExitRequestId), ("current", _exitRequest?.ExitRequestId), ("_stopping", _stopping)));
             return;
         }
-        DiagnosticLog.Info("client.lifecycle", "exitCancelled", "Exit request cancelled by the Host", new { notification.ExitRequestId });
+        DiagnosticLog.Info("client.lifecycle", "exitCancelled", "Exit request cancelled by the Host", global::HeyMelody.Diagnostics.DiagnosticData.Object(("ExitRequestId", notification.ExitRequestId)));
         _exitRequest = null; _exitConnection = null; _localExitVote = null; _preparePublished = false;
         _controlEvents.Writer.TryWrite(new(notification, null));
     }
@@ -256,7 +255,7 @@ public sealed partial class ClientBridge
         {
             if (_stopping)
             {
-                DiagnosticLog.Debug("client.lifecycle", "voteSkipped", "Exit vote skipped because the bridge is already stopping", new { exitRequestId, approved });
+                DiagnosticLog.Debug("client.lifecycle", "voteSkipped", "Exit vote skipped because the bridge is already stopping", global::HeyMelody.Diagnostics.DiagnosticData.Object(("exitRequestId", exitRequestId), ("approved", approved)));
                 return;
             }
             if (_exitRequest is not { } current || current.ExitRequestId != exitRequestId || _exitConnection is null)
@@ -265,10 +264,10 @@ public sealed partial class ClientBridge
             connection = _exitConnection;
             _localExitVote = approved;
         }
-        DiagnosticLog.Info("client.lifecycle", "exitVote", "Voting on the original pipe", new { exitRequestId, approved, connectionClosed = connection.Closed });
+        DiagnosticLog.Info("client.lifecycle", "exitVote", "Voting on the original pipe", global::HeyMelody.Diagnostics.DiagnosticData.Object(("exitRequestId", exitRequestId), ("approved", approved), ("connectionClosed", connection.Closed)));
         if (connection.Closed && approved)
         {
-            DiagnosticLog.Info("client.lifecycle", "stoppingSynthesized", "Original pipe closed; synthesizing stopping for an approving vote", new { exitRequestId });
+            DiagnosticLog.Info("client.lifecycle", "stoppingSynthesized", "Original pipe closed; synthesizing stopping for an approving vote", global::HeyMelody.Diagnostics.DiagnosticData.Object(("exitRequestId", exitRequestId)));
             CommitStopping(new() { Kind = "stopping", BackendInstanceId = request.BackendInstanceId, ExitRequestId = exitRequestId }, sourceConnection: connection);
             return;
         }
@@ -285,7 +284,7 @@ public sealed partial class ClientBridge
         catch (IOException) when (approved && (_stopping || connection.Closed))
         {
             settled = true;
-            DiagnosticLog.Info("client.lifecycle", "stoppingSynthesized", "Original pipe closed during the vote; synthesizing stopping", new { exitRequestId });
+            DiagnosticLog.Info("client.lifecycle", "stoppingSynthesized", "Original pipe closed during the vote; synthesizing stopping", global::HeyMelody.Diagnostics.DiagnosticData.Object(("exitRequestId", exitRequestId)));
             CommitStopping(new() { Kind = "stopping", BackendInstanceId = request.BackendInstanceId, ExitRequestId = exitRequestId }, sourceConnection: connection);
         }
         finally
@@ -298,7 +297,7 @@ public sealed partial class ClientBridge
                     if (_exitRequest?.ExitRequestId == exitRequestId && _localExitVote == approved && !_stopping)
                     {
                         _localExitVote = null;
-                        DiagnosticLog.Warning("client.lifecycle", "exitVoteUndelivered", "Approving vote was not delivered; local vote reset", data: new { exitRequestId });
+                        DiagnosticLog.Warning("client.lifecycle", "exitVoteUndelivered", "Approving vote was not delivered; local vote reset", data: global::HeyMelody.Diagnostics.DiagnosticData.Object(("exitRequestId", exitRequestId)));
                     }
             }
             if (!approved)

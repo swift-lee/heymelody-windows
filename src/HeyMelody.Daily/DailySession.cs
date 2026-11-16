@@ -99,8 +99,7 @@ internal sealed class DailySession : IAsyncDisposable
             Packet packet = await completion.Task.WaitAsync(timeout.Token);
             byte? status = packet.Payload.Length == 0 ? null : packet.Payload[0];
             DiagnosticLog.Info("Daily", "request.response", "Received the matched response.",
-                new { sessionId = _diagnosticId, command = $"0x{command:X4}", sequence = seq, responseCommand = $"0x{packet.Command:X4}",
-                    status, payloadLength = packet.Payload.Length, codecCompatibilityUsed = _codecReplyCompatibilityUsed });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("sessionId", _diagnosticId), ("command", $"0x{command:X4}"), ("sequence", seq), ("responseCommand", $"0x{packet.Command:X4}"), ("status", status), ("payloadLength", packet.Payload.Length), ("codecCompatibilityUsed", _codecReplyCompatibilityUsed)));
             if (status is null) Stop(new FormatException("Missing response status."),
                 DailyReadFailureKind.ProtocolFormat, matchedMissingStatus: true);
             return new(submitted, true, status, packet.Payload, Sequence: packet.Sequence,
@@ -175,7 +174,7 @@ internal sealed class DailySession : IAsyncDisposable
                     using var packetOperation = matched && correlation is not null
                         ? DiagnosticLog.BeginOperation(correlation) : DiagnosticLog.SuspendOperation();
                     DiagnosticLog.Bytes("Daily", matched ? "response.matched" : currentFilter ? "filter.received" : "packet.unmatched", packet.Payload,
-                        new { sessionId = _diagnosticId, command = $"0x{packet.Command:X4}", packet.Sequence, matched, currentFilter });
+                        global::HeyMelody.Diagnostics.DiagnosticData.Object(("sessionId", _diagnosticId), ("command", $"0x{packet.Command:X4}"), ("Sequence", packet.Sequence), ("matched", matched), ("currentFilter", currentFilter)));
                     if (currentFilter || !filter && !matched && NotificationParsers.IsNotificationCommand(packet.Command))
                         Notification?.Invoke(packet);
                 }
@@ -263,13 +262,13 @@ internal sealed class DailySession : IAsyncDisposable
         catch (Exception error) { DiagnosticLog.Error("Daily", "session.dispose-failed", "Daily transport disposal failed.", error, DiagnosticContext()); }
         await _reader;
         _lifetime.Dispose();
-        DiagnosticLog.Info("Daily", "session.closed", "The daily session and reader have closed.", new { sessionId = _diagnosticId });
+        DiagnosticLog.Info("Daily", "session.closed", "The daily session and reader have closed.", global::HeyMelody.Diagnostics.DiagnosticData.Object(("sessionId", _diagnosticId)));
     }
     private object DiagnosticContext()
     {
-        lock (_pendingGate) return new { sessionId = _diagnosticId, transport = _transport.GetType().FullName,
-            pendingCommand = _key is RequestKey key ? $"0x{key.Command:X4}" : null, pendingSequence = _key?.Sequence,
-            pendingCorrelationId = _pendingCorrelationId, usable = Usable, remainingSequences = Remaining,
-            codecCompatibilityAllowed = _allowCodecReplyCompatibility, codecCompatibilityUsed = _codecReplyCompatibilityUsed };
+        lock (_pendingGate) return DiagnosticData.Object(("sessionId", _diagnosticId), ("transport", _transport.GetType().FullName),
+            ("pendingCommand", _key is RequestKey key ? $"0x{key.Command:X4}" : null), ("pendingSequence", _key?.Sequence),
+            ("pendingCorrelationId", _pendingCorrelationId), ("usable", Usable), ("remainingSequences", Remaining),
+            ("codecCompatibilityAllowed", _allowCodecReplyCompatibility), ("codecCompatibilityUsed", _codecReplyCompatibilityUsed));
     }
 }

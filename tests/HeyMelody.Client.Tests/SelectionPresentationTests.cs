@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Reflection;
 using HeyMelodyWindows.App;
 
 internal static class SelectionPresentationTests
@@ -7,6 +8,21 @@ internal static class SelectionPresentationTests
 
     internal static async Task RunAsync(Func<string, Func<Task>, Task> test)
     {
+        await test("the AOT presentation getter table covers every public presentation property exactly once", () =>
+        {
+            var expected = typeof(MainViewModel).GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Where(property => !property.Name.EndsWith("Command", StringComparison.Ordinal))
+                .Select(property => property.Name).ToHashSet(StringComparer.Ordinal);
+            var field = typeof(MainViewModel).GetField("PresentationProperties", BindingFlags.Static | BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException("The presentation getter table is missing.");
+            var getters = ((string Name, Func<MainViewModel, object?> Read)[])field.GetValue(null)!;
+            var actual = getters.Select(getter => getter.Name).ToHashSet(StringComparer.Ordinal);
+            Check(getters.Length == actual.Count, "The presentation getter table contains duplicate property names.");
+            Check(expected.SetEquals(actual),
+                "Presentation getter coverage differs; missing: " + string.Join(", ", expected.Except(actual).Order(StringComparer.Ordinal))
+                + "; extra: " + string.Join(", ", actual.Except(expected).Order(StringComparer.Ordinal)));
+            return Task.CompletedTask;
+        });
         await test("old cached controls and generic warnings cannot restore retired auto-volume or claim current write failures", async () =>
         {
             var service = new Service();

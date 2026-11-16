@@ -5,7 +5,7 @@ param(
     [ValidateSet('vulkan', 'opengl')][string[]]$Backends = @('vulkan', 'opengl'),
     [ValidateSet('free4', 'dynaudio', 'online')][string[]]$Models = @('free4', 'dynaudio', 'online'),
     [string]$OnlineModelFile,
-    [ValidateRange(5, 30)][int]$ColdRuns = 5,
+    [ValidateRange(1, 30)][int]$ColdRuns = 5,
     [ValidateRange(5, 30)][int]$HotRuns = 5
 )
 $ErrorActionPreference = 'Stop'

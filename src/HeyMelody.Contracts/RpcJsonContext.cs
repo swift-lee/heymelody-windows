@@ -8,7 +8,7 @@ namespace HeyMelodyWindows.Host;
 // Source-generated metadata for every type that crosses RpcWire.Json. General defaults, not Web: the generated writers
 // are only used while the runtime options match these settings (naming policy, ignore condition, no converters/encoder).
 // `object` and the collection roots cover Reply/SerializeToElement(object) and RequestAsync<List<...>> callers;
-// anything not listed (worker-private records, anonymous diagnostics) falls back to reflection in RpcWire.Json.
+// Host-private types are registered separately by HostWire; Native AOT never falls back to reflection.
 [JsonSourceGenerationOptions(JsonSerializerDefaults.General,
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(BackendRequest))]

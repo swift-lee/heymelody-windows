@@ -131,19 +131,23 @@ try {
         $PythonExecutable = (Get-Command $(if ($IsWindows) { 'python' } else { 'python3' }) -ErrorAction Stop).Source
     }
     $PythonExecutable = (Get-Command $PythonExecutable -ErrorAction Stop).Source
-    if (-not (Invoke-OfflineCheck 'python-project-structure' $PythonExecutable @('-m', 'unittest', 'discover', '-s', 'tools/tests', '-p', 'test_project_structure.py') 300)) {
+    # Official embeddable Python deliberately omits the working directory from
+    # sys.path. Supply only this invocation's repository path, without editing _pth.
+    $unittestBootstrap = 'import runpy,sys; sys.path.insert(0,sys.argv[1]); sys.argv=["unittest"]+sys.argv[2:]; runpy.run_module("unittest",run_name="__main__")'
+    $unittestArguments = @('-c', $unittestBootstrap, $repo, 'discover', '-s', 'tools/tests', '-p')
+    if (-not (Invoke-OfflineCheck 'python-project-structure' $PythonExecutable ($unittestArguments + 'test_project_structure.py') 300)) {
         $checksSucceeded = $false
     }
-    if (-not (Invoke-OfflineCheck 'python-ui-assets' $PythonExecutable @('-m', 'unittest', 'discover', '-s', 'tools/tests', '-p', 'test_ui_assets.py') 300)) {
+    if (-not (Invoke-OfflineCheck 'python-ui-assets' $PythonExecutable ($unittestArguments + 'test_ui_assets.py') 300)) {
         $checksSucceeded = $false
     }
     if ($Profile -eq 'MacOS') {
-        if (-not (Invoke-OfflineCheck 'python-package-macos' $PythonExecutable @('-m', 'unittest', 'discover', '-s', 'tools/tests', '-p', 'test_package_macos.py') 300)) {
+        if (-not (Invoke-OfflineCheck 'python-package-macos' $PythonExecutable ($unittestArguments + 'test_package_macos.py') 300)) {
             $checksSucceeded = $false
         }
     }
     if ($Profile -eq 'Windows') {
-        if (-not (Invoke-OfflineCheck 'python-release-verifier' $PythonExecutable @('-m', 'unittest', 'discover', '-s', 'tools/tests', '-p', 'test_verify_release.py') 300)) {
+        if (-not (Invoke-OfflineCheck 'python-release-verifier' $PythonExecutable ($unittestArguments + 'test_verify_release.py') 300)) {
             $checksSucceeded = $false
         }
     }

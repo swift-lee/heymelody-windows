@@ -13,7 +13,8 @@ public sealed class DeviceProfile : SourceMetadata
         SupportSpp = ProfileJson.Property(source, "supportSpp", out var spp) && spp.ValueKind == JsonValueKind.True;
         Provenance = provenance;
         Conditions = ProfileJson.Conditions(source);
-        var functions = ProfileJson.Property(source, "function", out var f) && f.ValueKind == JsonValueKind.Object ? f : JsonSerializer.SerializeToElement(new { });
+        using var emptyFunctions = JsonDocument.Parse("{}");
+        var functions = ProfileJson.Property(source, "function", out var f) && f.ValueKind == JsonValueKind.Object ? f : emptyFunctions.RootElement;
         _rawFunctions = functions.Clone();
         HighToneQuality = ProfileJson.Int(functions, "highToneQuality");
         HighAudio = ProfileJson.Int(functions, "highAudio");

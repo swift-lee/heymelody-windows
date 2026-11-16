@@ -89,7 +89,7 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
         _workerFactory = workerFactory ?? (() => new PeerWorker());
         _resources = resources ?? (workerFactory is null ? new(bundleDirectory: BundleDirectory(AppContext.BaseDirectory)) : null);
         _time = time ?? TimeProvider.System;
-        DiagnosticLog.Info("host.lifecycle", "supervisorCreated", "Backend supervisor created", new { InstanceId });
+        DiagnosticLog.Info("host.lifecycle", "supervisorCreated", "Backend supervisor created", global::HeyMelody.Diagnostics.DiagnosticData.Object(("InstanceId", InstanceId)));
         try { _allowed = _whitelist.Load(); }
         catch (InvalidDataException) { _catalogWarning = "设备选择记录已损坏，请重新选择并保存。"; }
         InitializeFindHeadphones();
@@ -304,7 +304,7 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
         try
         {
             DiagnosticLog.Info("host.connection", "initialize", "Initializing peer worker",
-                new { peer.Identity, generation, peer.Candidate });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("Identity", peer.Identity), ("generation", generation), ("Candidate", DiagnosticData.From(peer.Candidate, HostDiagnosticJsonContext.Default.BluetoothCandidate))));
             lock (_sync)
             {
                 if (peer.Generation != generation || !ReferenceEquals(peer.Worker, worker)) return;
@@ -370,7 +370,7 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
     {
         if (peer.Generation != generation || peer.Paused || _stopping) return;
         DiagnosticLog.Warning("host.connection", "workerFailed", "Peer worker became unavailable", data:
-            new { peer.Identity, generation, failureSnapshot });
+            global::HeyMelody.Diagnostics.DiagnosticData.Object(("Identity", peer.Identity), ("generation", generation), ("failureSnapshot", DiagnosticData.From(failureSnapshot, HostDiagnosticJsonContext.Default.UiSnapshot))));
         // Keep only the safe diagnostic, never the retired transport's state or permissions.
         // Initialization responses can arrive before their snapshot events.
         var failed = failureSnapshot ?? peer.Spp;
@@ -750,7 +750,7 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        DiagnosticLog.Info("host.lifecycle", "dispose", "Disposing backend supervisor", new { InstanceId });
+        DiagnosticLog.Info("host.lifecycle", "dispose", "Disposing backend supervisor", global::HeyMelody.Diagnostics.DiagnosticData.Object(("InstanceId", InstanceId)));
         List<IPeerWorker> workers;
         lock (_sync)
         {
@@ -776,7 +776,7 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
 
     public async Task StopGracefullyAsync()
     {
-        DiagnosticLog.Info("host.lifecycle", "stop", "Stopping connected devices and calibrations", new { InstanceId });
+        DiagnosticLog.Info("host.lifecycle", "stop", "Stopping connected devices and calibrations", global::HeyMelody.Diagnostics.DiagnosticData.Object(("InstanceId", InstanceId)));
         Peer[] peers;
         lock (_sync) { _stopping = true; CancelAllLocationAttemptsLocked(); peers = _peers.Values.ToArray(); }
         await CancelAllCalibrationsAsync();

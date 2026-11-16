@@ -33,14 +33,14 @@ public sealed class BundledResourceStore
     public BundledResourceStore(string? directory = null)
     {
         _directory = System.IO.Path.GetFullPath(directory ?? System.IO.Path.Combine(HeyMelody.Platform.ApplicationPaths.ResourceRoot, "ResourceBundles"));
-        Artwork = JsonSerializer.Deserialize<ResourceArtwork[]>(ReadEmbedded("artwork.json"), ResourceJson.Options) ?? [];
+        Artwork = JsonSerializer.Deserialize(ReadEmbedded("artwork.json"), ResourceJsonContext.Default.ResourceArtworkArray) ?? [];
     }
 
     public ResourceCatalog GetCatalog() => _catalog.Value;
 
     public string GetDefaultKey()
     {
-        var keys = JsonSerializer.Deserialize<Dictionary<string, string>>(ReadEmbedded("default-keys.json"))!;
+        var keys = JsonSerializer.Deserialize(ReadEmbedded("default-keys.json"), ResourceWireJsonContext.Default.DictionaryStringString)!;
         return keys["HeyMelodyKey"];
     }
 

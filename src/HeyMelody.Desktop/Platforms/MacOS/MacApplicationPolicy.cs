@@ -55,5 +55,5 @@ internal static class MacApplicationPolicy
 
     private static void Log(string stage, MacActivationPolicy? policy, Exception? error) =>
         DiagnosticLog.Warning("ui.lifetime", "macActivationPolicyFailed", "The macOS activation policy was unavailable",
-            error, new { stage, policy = policy?.ToString() });
+            error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("stage", stage), ("policy", policy?.ToString())));
 }

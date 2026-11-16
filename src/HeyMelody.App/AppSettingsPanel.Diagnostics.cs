@@ -81,7 +81,7 @@ public partial class AppSettingsPanel
         {
             DiagnosticSettingsStore.Save(SelectedLogComponents, _diagnosticArmIntent);
             DiagnosticLog.Info("Settings", "logging.scheduled", "Diagnostic preferences saved",
-                new { selectedComponents = SelectedLogComponents, armIntent = _diagnosticArmIntent.ToString() });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("selectedComponents", SelectedLogComponents), ("armIntent", _diagnosticArmIntent.ToString())));
             _diagnosticSelectionDirty = false;
             _diagnosticArmIntent = DiagnosticArmIntent.Preserve;
             return true;
@@ -89,7 +89,7 @@ public partial class AppSettingsPanel
         catch (Exception failure)
         {
             DiagnosticLog.Warning("Settings", "logging.saveFailed", "Diagnostic preferences could not be saved", failure,
-                new { selectedComponents = SelectedLogComponents, armIntent = _diagnosticArmIntent.ToString() });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("selectedComponents", SelectedLogComponents), ("armIntent", _diagnosticArmIntent.ToString())));
             error = failure.Message;
             return false;
         }
@@ -112,7 +112,7 @@ public partial class AppSettingsPanel
         catch (Exception error)
         {
             DiagnosticLog.Warning("Settings", "logging.openDirectoryFailed", "Log directory could not be opened", error,
-                new { sessionDirectory });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("sessionDirectory", sessionDirectory)));
             ShowDiagnosticSettingsError("打开日志目录失败", error.Message);
         }
     }
@@ -123,7 +123,7 @@ public partial class AppSettingsPanel
         catch (Exception error)
         {
             DiagnosticLog.Debug("Settings", "logging.sessionReadFailed", "Current diagnostic session could not be read",
-                new { error = error.ToString() });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("error", error.ToString())));
             _currentDiagnosticSession = null;
         }
         PresentDiagnosticSettings();

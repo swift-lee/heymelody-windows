@@ -11,5 +11,6 @@
     <InternalsVisibleTo Include="HeyMelody.Client.Tests" />
     <InternalsVisibleTo Include="HeyMelody.Host.Tests" />
     <InternalsVisibleTo Include="HeyMelody.App.Tests" />
+    <InternalsVisibleTo Include="HeyMelody" />
   </ItemGroup>
 </Project>

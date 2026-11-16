@@ -2,6 +2,7 @@
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.9.2',
     [ValidateNotNullOrEmpty()][ValidateSet('x64', 'x86', 'arm64')][string[]]$Architectures = @('x64'),
+    [ValidateSet('ReadyToRun', 'AotExperimental')][string]$CompilationMode = 'ReadyToRun',
     [switch]$SkipTests,
     [switch]$TestsOnly,
     [switch]$FinalizeOnly,
@@ -14,9 +15,11 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$releaseRoot = if ($OutputRoot) { [IO.Path]::GetFullPath($OutputRoot) } else { Join-Path $root 'release' }
+$releaseRoot = if ($OutputRoot) { [IO.Path]::GetFullPath($OutputRoot) } elseif ($CompilationMode -eq 'AotExperimental') { Join-Path $root 'release/aot-experimental' } else { Join-Path $root 'release' }
 $stage = Join-Path $releaseRoot ('HeyMelody_Windows_' + $Version)
 $targetArchitectures = @($Architectures | Select-Object -Unique)
+if ($CompilationMode -eq 'AotExperimental' -and ($targetArchitectures.Count -ne 1 -or $targetArchitectures[0] -ne 'x64')) { throw 'AotExperimental supports only win-x64.' }
+if ($CompilationMode -eq 'AotExperimental' -and $FinalizeOnly) { throw 'AotExperimental does not support FinalizeOnly; preserve and verify the complete original build.' }
 if (-not $TestsOnly -and $targetArchitectures -contains 'x86') { throw 'The Filament native module supports Windows x64 and ARM64; a Windows x86 native module is not available.' }
 if (-not $FilamentRuntimeRoot) { $FilamentRuntimeRoot = Join-Path $root 'artifacts/filament-compat' }
 $FilamentRuntimeRoot = [IO.Path]::GetFullPath($FilamentRuntimeRoot)
@@ -71,6 +74,8 @@ New-Item -ItemType Directory -Path $stage -Force | Out-Null
 $scratch = Join-Path $releaseRoot ('build-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $scratch | Out-Null
 $builds = @()
+$buildSdkVersion = (& dotnet --version | Out-String).Trim()
+if ($LASTEXITCODE -ne 0) { throw 'Cannot determine the .NET SDK version.' }
 $packageCacheLine = & dotnet nuget locals global-packages --list
 if ($LASTEXITCODE -ne 0 -or $packageCacheLine -notmatch '^global-packages:\s*(.+?)\s*$') { throw 'NuGet package-cache path is unavailable.' }
 $packageCache = $Matches[1]
@@ -84,6 +89,13 @@ $publishProperties = @('-p:CopyDebugSymbolFilesFromPackages=false',
     '-p:CreateHardLinksForAdditionalFilesIfPossible=false')
 $publishProperties += $restoreProperties
 $publishProperties += '-p:FilamentRuntimeRoot=' + $FilamentRuntimeRoot
+$readyToRunArtifacts = Join-Path $scratch 'ready-to-run-artifacts'
+$publishProperties += @('-p:UseArtifactsOutput=true', ('-p:ArtifactsPath=' + $readyToRunArtifacts))
+
+function Get-ReadyToRunAssets([string]$Project) {
+    if ($FinalizeOnly) { return (Join-Path $root ('src/' + $Project + '/obj/project.assets.json')) }
+    Join-Path $readyToRunArtifacts ('obj/' + $Project + '/project.assets.json')
+}
 
 function Resolve-PackageDirectory([object]$Assets, [string]$PackagePath) {
     # A package may have been resolved from either the repository cache or a fallback.
@@ -99,10 +111,44 @@ function Resolve-PackageDirectory([object]$Assets, [string]$PackagePath) {
     throw ('Resolved package is unavailable in its declared caches: ' + $PackagePath)
 }
 
-function Export-PackageNotices([string]$AssetsPath, [string]$Destination) {
-    $assets = Get-Content -LiteralPath $AssetsPath -Raw | ConvertFrom-Json
+function Get-DownloadedCompilerPackages([object]$Assets) {
+    $seen = @{}
+    foreach ($framework in $Assets.project.frameworks.PSObject.Properties) {
+        foreach ($download in @($framework.Value.downloadDependencies)) {
+            if (-not $download.name -or $download.name -notmatch '(?i)ilcompiler') { continue }
+            $versions = @([regex]::Matches($download.version, '\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?') | ForEach-Object Value | Select-Object -Unique)
+            if ($versions.Count -ne 1) { throw ('Compiler download version is not exact: ' + $download.name) }
+            $version = $versions[0]
+            $path = $download.name.ToLowerInvariant() + '/' + $version
+            if ($seen.ContainsKey($path)) { continue }
+            $seen[$path] = $true
+            $directory = Resolve-PackageDirectory $Assets $path
+            $digest = @(Get-ChildItem -LiteralPath $directory -Filter '*.nupkg.sha512' -File)
+            if ($digest.Count -ne 1) { throw ('Compiler download package digest is missing: ' + $path) }
+            $noticeFiles = @(Get-ChildItem -LiteralPath $directory -File -Recurse | Where-Object { $_.Name -match '(?i)license|licence|copying|copyright|notice' } | ForEach-Object { [IO.Path]::GetRelativePath($directory, $_.FullName).Replace('\', '/') })
+            [pscustomobject]@{ package = $download.name; version = $version; path = $path; sha512 = [IO.File]::ReadAllText($digest[0].FullName).Trim(); files = $noticeFiles }
+        }
+    }
+}
+
+function Export-PackageNotices([string[]]$AssetsPath, [string]$Destination) {
+    $resolvedLibraries = @{}
+    foreach ($inputAssetsPath in $AssetsPath) {
+        $inputAssets = Get-Content -LiteralPath $inputAssetsPath -Raw | ConvertFrom-Json
+        foreach ($inputEntry in $inputAssets.libraries.PSObject.Properties) {
+            if ($resolvedLibraries.ContainsKey($inputEntry.Name) -and $resolvedLibraries[$inputEntry.Name].entry.Value.sha512 -ne $inputEntry.Value.sha512) { throw ('Conflicting package identity: ' + $inputEntry.Name) }
+            $resolvedLibraries[$inputEntry.Name] = @{ entry = $inputEntry; assets = $inputAssets }
+        }
+        foreach ($download in @(Get-DownloadedCompilerPackages $inputAssets)) {
+            $name = $download.package + '/' + $download.version
+            $library = [pscustomobject]@{ type = 'package'; path = $download.path; sha512 = $download.sha512; files = $download.files }
+            $resolvedLibraries[$name] = @{ entry = [pscustomobject]@{ Name = $name; Value = $library }; assets = $inputAssets }
+        }
+    }
     $notices = @()
-    foreach ($entry in $assets.libraries.PSObject.Properties | Sort-Object Name) {
+    foreach ($resolvedLibrary in $resolvedLibraries.Values | Sort-Object { $_.entry.Name }) {
+        $entry = $resolvedLibrary.entry
+        $assets = $resolvedLibrary.assets
         $library = $entry.Value
         if ($library.type -ne 'package' -or $entry.Name -like 'Microsoft.NETCore.App.Runtime.*') { continue }
         $parts = $entry.Name.Split('/')
@@ -151,6 +197,9 @@ function Export-PackageNotices([string]$AssetsPath, [string]$Destination) {
     [ordered]@{ schemaVersion = 1; source = 'resolved NuGet project.assets.json'; packages = @($notices); supplementalNotices = @($supplemental) } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $Destination 'PACKAGE-NOTICES.json') -Encoding UTF8
 }
 
+if ($CompilationMode -eq 'AotExperimental') {
+    . (Join-Path $root 'tools/Publish-AotExperimental.ps1')
+} else {
 foreach ($architecture in $targetArchitectures) {
     $rid = 'win-' + $architecture
     $filamentNativeDirectory = Join-Path $FilamentRuntimeRoot ('runtimes/' + $rid + '/native')
@@ -195,16 +244,16 @@ foreach ($architecture in $targetArchitectures) {
     }
     $runtimeConfig = Get-Content -LiteralPath (Join-Path $app 'HeyMelody.runtimeconfig.json') -Raw | ConvertFrom-Json
     foreach ($runtimeEntry in @(
-        @{ directory = $app; name = 'HeyMelody'; assets = 'src/HeyMelody.App/obj/project.assets.json' },
-        @{ directory = $app; name = 'HeyMelody.DeviceManager'; assets = 'src/HeyMelody.DeviceManager/obj/project.assets.json' },
-        @{ directory = $app; name = 'HeyMelody.FitTest'; assets = 'src/HeyMelody.FitTest/obj/project.assets.json' },
-        @{ directory = $app; name = 'HeyMelody.HearingSetup'; assets = 'src/HeyMelody.HearingSetup/obj/project.assets.json' },
-        @{ directory = $hostOutput; name = 'HeyMelody.Host'; assets = 'src/HeyMelody.Host/obj/project.assets.json' }
+        @{ directory = $app; name = 'HeyMelody'; assets = (Get-ReadyToRunAssets 'HeyMelody.App') },
+        @{ directory = $app; name = 'HeyMelody.DeviceManager'; assets = (Get-ReadyToRunAssets 'HeyMelody.DeviceManager') },
+        @{ directory = $app; name = 'HeyMelody.FitTest'; assets = (Get-ReadyToRunAssets 'HeyMelody.FitTest') },
+        @{ directory = $app; name = 'HeyMelody.HearingSetup'; assets = (Get-ReadyToRunAssets 'HeyMelody.HearingSetup') },
+        @{ directory = $hostOutput; name = 'HeyMelody.Host'; assets = (Get-ReadyToRunAssets 'HeyMelody.Host') }
     )) {
         $runtimeDirectory = $runtimeEntry.directory
         $publishedRuntime = Get-Content -LiteralPath (Join-Path $runtimeDirectory ($runtimeEntry.name + '.runtimeconfig.json')) -Raw | ConvertFrom-Json
         $runtimeVersion = @($publishedRuntime.runtimeOptions.includedFrameworks | Where-Object { $_.name -eq 'Microsoft.NETCore.App' })[0].version
-        $runtimeAssets = Get-Content -LiteralPath (Join-Path $root $runtimeEntry.assets) -Raw | ConvertFrom-Json
+        $runtimeAssets = Get-Content -LiteralPath $runtimeEntry.assets -Raw | ConvertFrom-Json
         $corePackage = Resolve-PackageDirectory $runtimeAssets ('microsoft.netcore.app.runtime.' + $rid + '/' + $runtimeVersion)
         Copy-Item -LiteralPath (Join-Path $corePackage 'LICENSE.TXT') -Destination (Join-Path $runtimeDirectory 'LICENSE.txt')
         Copy-Item -LiteralPath (Join-Path $corePackage 'THIRD-PARTY-NOTICES.TXT') -Destination (Join-Path $runtimeDirectory 'THIRD-PARTY-NOTICES.txt')
@@ -216,8 +265,8 @@ foreach ($architecture in $targetArchitectures) {
     $managerRuntime = @($managerConfig.runtimeOptions.includedFrameworks | Where-Object { $_.name -eq 'Microsoft.NETCore.App' })[0].version
     if ($guiRuntime -ne $managerRuntime) { throw 'The GUI and device manager must share the exact .NET runtime version.' }
     # Both GUI projects deliberately use identical package versions in the same publish directory.
-    $guiAssets = Get-Content -LiteralPath (Join-Path $root 'src/HeyMelody.App/obj/project.assets.json') -Raw | ConvertFrom-Json
-    $managerAssets = Get-Content -LiteralPath (Join-Path $root 'src/HeyMelody.DeviceManager/obj/project.assets.json') -Raw | ConvertFrom-Json
+    $guiAssets = Get-Content -LiteralPath (Get-ReadyToRunAssets 'HeyMelody.App') -Raw | ConvertFrom-Json
+    $managerAssets = Get-Content -LiteralPath (Get-ReadyToRunAssets 'HeyMelody.DeviceManager') -Raw | ConvertFrom-Json
     foreach ($dependency in $managerAssets.libraries.PSObject.Properties | Where-Object { $_.Value.type -eq 'package' }) {
         if (-not $guiAssets.libraries.PSObject.Properties[$dependency.Name]) { throw ('The manager has a dependency not covered by the shared GUI notices: ' + $dependency.Name) }
     }
@@ -225,7 +274,7 @@ foreach ($architecture in $targetArchitectures) {
         $componentConfig = Get-Content -LiteralPath (Join-Path $app ($component + '.runtimeconfig.json')) -Raw | ConvertFrom-Json
         $componentFrameworks = @($componentConfig.runtimeOptions.includedFrameworks)
         if ($componentFrameworks.Count -ne 1 -or $componentFrameworks[0].name -ne 'Microsoft.NETCore.App' -or $componentFrameworks[0].version -ne $guiRuntime) { throw ('Calibration component does not share the GUI runtime: ' + $component) }
-        $componentAssets = Get-Content -LiteralPath (Join-Path $root ('src/' + $component + '/obj/project.assets.json')) -Raw | ConvertFrom-Json
+        $componentAssets = Get-Content -LiteralPath (Get-ReadyToRunAssets $component) -Raw | ConvertFrom-Json
         foreach ($dependency in $componentAssets.libraries.PSObject.Properties | Where-Object { $_.Value.type -eq 'package' }) {
             if (-not $guiAssets.libraries.PSObject.Properties[$dependency.Name]) { throw ('Calibration dependency is not covered by shared GUI notices: ' + $dependency.Name) }
         }
@@ -235,10 +284,12 @@ foreach ($architecture in $targetArchitectures) {
     }
     if (-not (Test-Path -LiteralPath (Join-Path $hostOutput 'HeyMelody.Resources.dll') -PathType Leaf)) { throw 'Offline resources missing from backend publication: HeyMelody.Resources.dll' }
     if (Test-Path -LiteralPath (Join-Path $hostOutput 'ResourceBundles')) { throw ('The backend must share the GUI ResourceBundles: ' + $rid) }
-    Export-PackageNotices (Join-Path $root 'src/HeyMelody.App/obj/project.assets.json') $app
-    Export-PackageNotices (Join-Path $root 'src/HeyMelody.Host/obj/project.assets.json') $hostOutput
+    Export-PackageNotices (Get-ReadyToRunAssets 'HeyMelody.App') $app
+    Export-PackageNotices (Get-ReadyToRunAssets 'HeyMelody.Host') $hostOutput
     $builds += [ordered]@{
         architecture = $architecture; rid = $rid; selfContained = $true
+        componentCompilation = [ordered]@{ gui = 'ready-to-run'; host = 'ready-to-run'; deviceManager = 'ready-to-run'; fitTest = 'ready-to-run'; hearingSetup = 'ready-to-run' }
+        toolchain = [ordered]@{ sdkVersion = $buildSdkVersion; runtimeVersion = $guiRuntime }
         gui = ($architecture + '/HeyMelody.exe'); deviceManager = ($architecture + '/HeyMelody.DeviceManager.exe'); host = ($architecture + '/backend/HeyMelody.Host.exe')
         fitTest = ($architecture + '/HeyMelody.FitTest.exe'); hearingSetup = ($architecture + '/HeyMelody.HearingSetup.exe')
         guiFramework = 'net10.0-windows10.0.19041.0'; deviceManagerFramework = 'net10.0-windows10.0.19041.0'; fitTestFramework = 'net10.0-windows10.0.19041.0'; hearingSetupFramework = 'net10.0-windows10.0.19041.0'; hostFramework = 'net10.0-windows10.0.19041.0'; uiToolkit = 'Avalonia + FluentAvalonia'
@@ -255,6 +306,7 @@ foreach ($architecture in $targetArchitectures) {
         modelRenderer = $nativeVerification
     }
 }
+}
 Copy-Item -LiteralPath (Join-Path $root 'packaging/Start-HeyMelody.ps1') -Destination (Join-Path $stage 'Start-HeyMelody.ps1')
 Copy-Item -LiteralPath (Join-Path $root 'packaging/Start-HeyMelody.cmd') -Destination (Join-Path $stage 'Start-HeyMelody.cmd')
 Copy-Item -LiteralPath (Join-Path $root 'packaging/Start-3D-Demo.cmd') -Destination (Join-Path $stage 'Start-3D-Demo.cmd')
@@ -268,7 +320,7 @@ if ($ValidationPath) {
     }
     Copy-Item -LiteralPath $ValidationPath -Destination (Join-Path $stage 'VALIDATION.json')
 }
-$manifest = [ordered]@{ schemaVersion = 2; version = $Version; builtAtUtc = [DateTime]::UtcNow.ToString('o'); builds = $builds; modelRenderer = 'Filament'; uiAssets = 'misans-4.009-v1'; diagnosticLogging = 'one-host-session-debug-jsonl-v1'; nativeArm64ExecutionVerified = $false; validationScope = 'build-only unless an exact-version execution receipt is supplied' }
+$manifest = [ordered]@{ schemaVersion = 2; version = $Version; builtAtUtc = [DateTime]::UtcNow.ToString('o'); compilationMode = $CompilationMode; builds = $builds; modelRenderer = 'Filament'; uiAssets = 'misans-4.009-v1'; diagnosticLogging = 'one-host-session-debug-jsonl-v1'; nativeArm64ExecutionVerified = $false; validationScope = 'build-only unless an exact-version execution receipt is supplied' }
 $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $stage 'manifest.json') -Encoding UTF8
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $archive, [System.IO.Compression.CompressionLevel]::Optimal, $false)

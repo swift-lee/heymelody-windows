@@ -172,7 +172,7 @@ internal sealed class WindowsStateMonitor(WindowsBluetoothPlatform supervisor) :
                 var changed = _radioAvailable != available; _radioAvailable = available;
                 if (changed)
                 {
-                    DiagnosticLog.Debug("host.monitor", "radioChanged", "Bluetooth radio availability changed", new { available });
+                    DiagnosticLog.Debug("host.monitor", "radioChanged", "Bluetooth radio availability changed", global::HeyMelody.Diagnostics.DiagnosticData.Object(("available", available)));
                     supervisor.SetRadioAvailable(state); _advertisementFailures = _deviceFailures = 0;
                     if (state) RestartDeviceWatcher();
                 }
@@ -253,7 +253,7 @@ internal sealed class WindowsStateMonitor(WindowsBluetoothPlatform supervisor) :
                         (_, args) =>
                         {
                             DiagnosticLog.Debug("host.monitor", "advertisementWatcherStopped", "BLE advertisement watcher stopped",
-                                new { generation, args.Error });
+                                global::HeyMelody.Diagnostics.DiagnosticData.Object(("generation", generation), ("Error", args.Error)));
                             AdvertisementFailed(generation);
                         };
                     watcher.Received += received; watcher.Stopped += stopped;
@@ -263,7 +263,7 @@ internal sealed class WindowsStateMonitor(WindowsBluetoothPlatform supervisor) :
             }
             catch (Exception error)
             {
-                DiagnosticLog.Error("host.monitor", "advertisementWatcherStartFailed", "BLE advertisement watchers could not start", error, new { generation });
+                DiagnosticLog.Error("host.monitor", "advertisementWatcherStartFailed", "BLE advertisement watchers could not start", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("generation", generation)));
                 AdvertisementFailed(generation);
             }
         }
@@ -323,7 +323,7 @@ internal sealed class WindowsStateMonitor(WindowsBluetoothPlatform supervisor) :
                 if (reader.UnconsumedBufferLength > 4096) continue;
                 var data = new byte[reader.UnconsumedBufferLength]; reader.ReadBytes(data);
                 DiagnosticLog.Bytes("host.monitor", "advertisementReceived", data,
-                    new { manufacturer.CompanyId, args.BluetoothAddress, args.BluetoothAddressType, args.Timestamp, args.RawSignalStrengthInDBm, generation });
+                    global::HeyMelody.Diagnostics.DiagnosticData.Object(("CompanyId", manufacturer.CompanyId), ("BluetoothAddress", args.BluetoothAddress), ("BluetoothAddressType", args.BluetoothAddressType), ("Timestamp", args.Timestamp), ("RawSignalStrengthInDBm", args.RawSignalStrengthInDBm), ("generation", generation)));
                 lock (_observerSync)
                 {
                     if (_disposed || _suspended || generation != _scanGeneration) return;
@@ -334,7 +334,7 @@ internal sealed class WindowsStateMonitor(WindowsBluetoothPlatform supervisor) :
             }
         }
         catch (Exception error)
-        { DiagnosticLog.Error("host.monitor", "advertisementFailed", "BLE advertisement processing failed", error, new { generation }); }
+        { DiagnosticLog.Error("host.monitor", "advertisementFailed", "BLE advertisement processing failed", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("generation", generation))); }
     }
     private void StopAdvertisements()
     {
@@ -351,7 +351,7 @@ internal sealed class WindowsStateMonitor(WindowsBluetoothPlatform supervisor) :
         lock (_observerSync)
         {
             if (_suspended == suspended) return;
-            DiagnosticLog.Debug("host.monitor", "suspendChanged", "Windows suspend state changed", new { suspended });
+            DiagnosticLog.Debug("host.monitor", "suspendChanged", "Windows suspend state changed", global::HeyMelody.Diagnostics.DiagnosticData.Object(("suspended", suspended)));
             _suspended = suspended; _advertisementFailures = _deviceFailures = 0;
             if (suspended)
             {
@@ -445,7 +445,7 @@ internal sealed class PowerMessageWindow : IDisposable
             catch (Exception error)
             {
                 DiagnosticLog.Error("host.monitor", "powerNotificationFailed", "Windows power notification callback failed", error,
-                    new { message, wparam = (ulong)wparam });
+                    global::HeyMelody.Diagnostics.DiagnosticData.Object(("message", message), ("wparam", (ulong)wparam)));
             } // Never let a managed exception cross the native window procedure.
         }
         return _previous == 0 ? DefWindowProc(window, message, wparam, lparam) : CallWindowProc(_previous, window, message, wparam, lparam);

@@ -18,7 +18,6 @@ namespace HeyMelodyWindows.App;
 internal static class ModelLoadingBenchmark
 {
     private static State _state = null!;
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
     public static int Run(string[] arguments)
     {
@@ -38,27 +37,26 @@ internal static class ModelLoadingBenchmark
             return 2;
         }
         Directory.CreateDirectory(options.Output);
+        HeyMelody.Diagnostics.DiagnosticPaths.DataRootOverride = Path.Combine(options.Output, "data");
         _state = new(options);
-        File.WriteAllText(Path.Combine(options.Output, "process.json"), JsonSerializer.Serialize(new
-        {
-            processId = Environment.ProcessId, processName = Process.GetCurrentProcess().ProcessName,
-            startedAtUtc = DateTimeOffset.UtcNow, options.Model, backend = options.Backend.ToString(),
-            modelFile = options.File, coldRuns = 1, options.HotRuns,
-            scope = "isolated production model-control scene in the named process; no device-selection or artwork RPC path; full product-window private-working-set acceptance is separate"
-        }, Json));
+        File.WriteAllText(Path.Combine(options.Output, "process.json"), JsonSerializer.Serialize(new ModelBenchmarkProcess(
+            Environment.ProcessId, Process.GetCurrentProcess().ProcessName, DateTimeOffset.UtcNow,
+            options.Model, options.Backend.ToString(), options.File, 1, options.HotRuns,
+            "Isolated production model-control scene; no headset or resource RPC."),
+            ModelBenchmarkJson.Default.ModelBenchmarkProcess));
         var thread = new Thread(() =>
         {
             var oldPath = ThemePreferences.SettingsPathOverride;
+            ThemePreferences.SettingsPathOverride = Path.Combine(options.Output, "unwritten-preferences.json");
             var oldCompatibility = ModelRenderingPreferences.CompatibilityMode;
             var oldFrameRate = ModelRenderingPreferences.FrameRate;
-            ThemePreferences.SettingsPathOverride = Path.Combine(options.Output, "unwritten-preferences.json");
             try
             {
                 ModelRenderingPreferences.Reload();
                 ModelRenderingPreferences.Apply(options.Backend == FilamentBackend.OpenGL);
                 DeviceModelView.DefaultFactoryOverride = null;
                 AppBuilder.Configure<BenchmarkApplication>().UsePlatformDetect()
-                    .UseHeyMelodyRendering(UiRenderingPreferenceReader.Load()).UseHeyMelodyTypography().LogToTrace()
+                    .UseHeyMelodyRendering(basicRenderMode: false).UseHeyMelodyTypography().LogToTrace()
                     .StartWithClassicDesktopLifetime([], ShutdownMode.OnExplicitShutdown);
             }
             catch (Exception error) { _state.Failure = error.ToString(); }
@@ -76,30 +74,27 @@ internal static class ModelLoadingBenchmark
             Volatile.Read(ref _state.RequestStop)?.Invoke();
             if (!thread.Join(TimeSpan.FromSeconds(5)))
             {
-                var timeout = new { success = false, processId = Environment.ProcessId,
-                    failure = "The native benchmark exceeded eight minutes and did not stop within the five-second shutdown budget.",
-                    scope = "timeout receipt only; the active UI/native state was not inspected" };
-                File.WriteAllText(Path.Combine(options.Output, "model-loading-timeout.json"), JsonSerializer.Serialize(timeout, Json));
-                Console.WriteLine(JsonSerializer.Serialize(timeout));
+                var timeout = new ModelBenchmarkFailure(false, Environment.ProcessId,
+                    "The native benchmark exceeded eight minutes and did not stop within the five-second shutdown budget.",
+                    "Timeout receipt only; the active UI/native state was not inspected.");
+                var receipt = JsonSerializer.Serialize(timeout, ModelBenchmarkJson.Default.ModelBenchmarkFailure);
+                File.WriteAllText(Path.Combine(options.Output, "model-loading-timeout.json"), receipt);
+                Console.WriteLine(receipt);
                 return 1;
             }
             _state.Failure ??= "The native benchmark exceeded eight minutes.";
         }
-        var report = new
-        {
-            success = _state.Completed && _state.Failure is null,
-            processId = Environment.ProcessId, nativeBluetoothCalls = 0,
-            processName = Process.GetCurrentProcess().ProcessName,
-            scope = "isolated production model-control scene; real Filament/Win32, one cold attachment and repeated detach/non-model/reattach; no backend switching, device-selection or artwork RPC; full product-window private-working-set acceptance is separate",
-            options.Model, backend = options.Backend.ToString(), options.HotRuns,
-            appAssemblySha256 = HashFile(typeof(DeviceModelView).Assembly.Location),
-            nativeLibrarySha256 = _state.NativeLibrarySha256,
-            modelSha256 = _state.ModelSha256, viewport = _state.Viewport,
-            runs = _state.Runs, screenshot = _state.Screenshot, failure = _state.Failure
-        };
-        File.WriteAllText(Path.Combine(options.Output, "model-loading.json"), JsonSerializer.Serialize(report, Json));
-        Console.WriteLine(JsonSerializer.Serialize(new { report.success, options.Model, backend = options.Backend.ToString(), runs = _state.Runs.Count, output = options.Output, report.failure }));
-        return report.success ? 0 : 1;
+        var process = HeyMelody.Performance.BenchmarkProcess.Capture("app-model");
+        var report = new ModelBenchmarkReport(_state.Completed && _state.Failure is null,
+            Environment.ProcessId, 0, Process.GetCurrentProcess().ProcessName,
+            "Published executable; isolated model scene; fresh-process first attachment and repeated detach/reattach; no device-selection or artwork RPC.",
+            options.Model, options.Backend.ToString(), options.HotRuns, process.Sha256,
+            _state.NativeLibrarySha256, _state.ModelSha256, _state.Viewport, _state.Runs,
+            _state.Screenshot, _state.Failure, process);
+        File.WriteAllText(Path.Combine(options.Output, "model-loading.json"),
+            JsonSerializer.Serialize(report, ModelBenchmarkJson.Default.ModelBenchmarkReport));
+        Console.WriteLine($"Model benchmark success={report.Success}; model={options.Model}; output={options.Output}");
+        return report.Success ? 0 : 1;
     }
 
     private static bool TryParse(string[] arguments, out Options options)
@@ -194,9 +189,10 @@ internal static class ModelLoadingBenchmark
                     throw new InvalidOperationException("The renderer did not present using the requested native backend.");
                 // Capture identity while the first engine is alive; driver module teardown can race enumeration.
                 _state.NativeLibrarySha256 ??= await CaptureNativeLibraryHashAsync();
-                var receipt = new { sample = index, kind = index == 0 ? "cold" : "hot", measuredAtUtc = DateTimeOffset.UtcNow, timings = result };
+                var receipt = new ModelBenchmarkRun(index, index == 0 ? "cold" : "hot", DateTimeOffset.UtcNow, result);
                 _state.Runs.Add(receipt);
-                File.AppendAllText(Path.Combine(_state.Options.Output, "measurements.jsonl"), JsonSerializer.Serialize(receipt) + Environment.NewLine);
+                File.AppendAllText(Path.Combine(_state.Options.Output, "measurements.jsonl"),
+                    JsonSerializer.Serialize(receipt, ModelBenchmarkJson.Default.ModelBenchmarkRun) + Environment.NewLine);
                 if (index < _state.Options.HotRuns)
                 {
                     // Keep the selected backend and in-process model cache, but actually retire the view.
@@ -204,7 +200,7 @@ internal static class ModelLoadingBenchmark
                     await Task.Delay(100);
                 }
             }
-            _state.Viewport = new { model.Bounds.Width, model.Bounds.Height, renderScaling = window.RenderScaling };
+            _state.Viewport = new(model.Bounds.Width, model.Bounds.Height, window.RenderScaling);
             // Capture after measurement at a reproducible pose, without changing timed rendering behavior.
             long cameraBefore = model.CameraUpdateCount;
             ulong frameBefore = model.Diagnostics.FrameId;
@@ -254,8 +250,8 @@ internal static class ModelLoadingBenchmark
             bitmap.Save(output, PngBitmapEncoderOptions.Default);
         }
         finally { pin.Free(); }
-        _state.Screenshot = new { file = "model.png", pixelFormat = "RGBA8", frame.Width, frame.Height, frame.FrameId,
-            yaw = model.Motion.Yaw, pitch = model.Motion.Pitch, model.Diagnostics.SourceTriangles, model.Diagnostics.SourceMeshes };
+        _state.Screenshot = new("model.png", "RGBA8", frame.Width, frame.Height, frame.FrameId,
+            model.Motion.Yaw, model.Motion.Pitch, model.Diagnostics.SourceTriangles, model.Diagnostics.SourceMeshes);
     }
 
     private static string HashFile(string path)
@@ -288,10 +284,11 @@ internal static class ModelLoadingBenchmark
     private sealed class State(Options options)
     {
         public Options Options { get; } = options;
-        public List<object> Runs { get; } = [];
+        public List<ModelBenchmarkRun> Runs { get; } = [];
         public bool Completed;
         public string? Failure, ModelSha256, NativeLibrarySha256;
-        public object? Screenshot, Viewport;
+        public ModelBenchmarkScreenshot? Screenshot;
+        public ModelBenchmarkViewport? Viewport;
         public Action? RequestStop;
     }
 }

@@ -25,14 +25,10 @@ internal sealed class ModelLoadTrace : IDisposable
         {
             stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
             writer = new StreamWriter(stream) { AutoFlush = true };
-            writer.WriteLine(JsonSerializer.Serialize(new
-            {
-                kind = "session", schemaVersion = 1, processId = Environment.ProcessId,
-                executable = Path.GetFileName(Environment.ProcessPath),
-                os = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
-                architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
-                startedUtc = DateTimeOffset.UtcNow
-            }));
+            writer.WriteLine(JsonSerializer.Serialize(new ModelTraceSession("session", 1, Environment.ProcessId,
+                Path.GetFileName(Environment.ProcessPath), System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+                System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(), DateTimeOffset.UtcNow),
+                ModelBenchmarkJson.Default.ModelTraceSession));
             var trace = new ModelLoadTrace(writer);
             writer = null;
             stream = null;
@@ -59,11 +55,8 @@ internal sealed class ModelLoadTrace : IDisposable
     {
         try
         {
-            _writer.WriteLine(JsonSerializer.Serialize(new
-            {
-                kind = "load", processId = Environment.ProcessId, measuredUtc = DateTimeOffset.UtcNow,
-                modelSha256 = view.ModelDigest, timings
-            }));
+            _writer.WriteLine(JsonSerializer.Serialize(new ModelTraceLoad("load", Environment.ProcessId,
+                DateTimeOffset.UtcNow, view.ModelDigest, timings), ModelBenchmarkJson.Default.ModelTraceLoad));
         }
         catch (Exception error) when (error is IOException or ObjectDisposedException)
         { Trace.WriteLine($"Model load trace unavailable: {error.Message}"); }

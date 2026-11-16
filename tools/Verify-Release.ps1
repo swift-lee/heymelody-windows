@@ -16,7 +16,8 @@ param(
     [switch]$VerifyDeviceArtwork,
     [ValidateNotNullOrEmpty()][ValidateSet('x64', 'x86', 'arm64')][string[]]$Architectures = @('x64', 'x86', 'arm64'),
     [string]$OutputPath,
-    [string]$OutputRoot
+    [string]$OutputRoot,
+    [string]$PythonExecutable
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -166,6 +167,23 @@ $manifest = Read-Json (Join-Path $taskStage 'manifest.json')
 Require ($manifest.schemaVersion -eq 2 -and $manifest.version -eq $Version) 'The release manifest has the wrong schema/version.'
 Require (@($manifest.builds).Count -eq $targetArchitectures.Count -and @(Compare-Object @($manifest.builds.architecture | Sort-Object) @($targetArchitectures | Sort-Object)).Count -eq 0) 'The release manifest does not match the requested architectures.'
 Require (-not $manifest.nativeArm64ExecutionVerified) 'A static receipt cannot assert ARM64 hardware execution.'
+$compilationMode = if ($manifest.compilationMode) { $manifest.compilationMode } else { 'ReadyToRun' }
+Require ($compilationMode -in @('ReadyToRun', 'AotExperimental')) 'Unknown compilation mode.'
+$experimentalReceipt = $null
+if ($compilationMode -eq 'AotExperimental') {
+    Require ($targetArchitectures.Count -eq 1 -and $targetArchitectures[0] -eq 'x64') 'AotExperimental supports only win-x64.'
+    if (-not $PythonExecutable) { $PythonExecutable = (Get-Command python -ErrorAction Stop).Source }
+    $temporaryReceipt = Join-Path ([IO.Path]::GetTempPath()) ('heymelody-aot-static-' + [Guid]::NewGuid().ToString('N') + '.json')
+    try {
+        $pythonBootstrap = 'import pathlib,runpy,sys; sys.path.insert(0,str(pathlib.Path(sys.argv[1]).resolve().parent)); sys.argv=sys.argv[1:]; runpy.run_path(sys.argv[0],run_name="__main__")'
+        & $PythonExecutable -c $pythonBootstrap (Join-Path $PSScriptRoot 'verify_release.py') --package $taskStage --architectures x64 --output $temporaryReceipt | Out-Null
+        Require ($LASTEXITCODE -eq 0) 'Experimental component/dependency verification failed.'
+        $experimentalReceipt = Read-Json $temporaryReceipt
+        Require ($experimentalReceipt.success -and $experimentalReceipt.version -eq $Version) 'Invalid experimental static verification receipt.'
+    } finally {
+        if (Test-Path -LiteralPath $temporaryReceipt -PathType Leaf) { Remove-Item -LiteralPath $temporaryReceipt }
+    }
+}
 $expectedMachines = @{ x86 = 0x14C; x64 = 0x8664; arm64 = 0xAA64 }
 $criticalPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
 [void]$criticalPaths.Add('manifest.json')
@@ -220,6 +238,33 @@ foreach ($architecture in $targetArchitectures) {
     $build = @($manifest.builds | Where-Object { $_.architecture -eq $architecture })
     Require ($build.Count -eq 1 -and $build[0].rid -eq ('win-' + $architecture) -and $build[0].selfContained) ('Invalid architecture manifest: ' + $architecture)
     $build = $build[0]
+    if ($compilationMode -eq 'AotExperimental') {
+        $buildChecks += $experimentalReceipt.builds[0]
+        $resourceChecks += $experimentalReceipt.builds[0].resourceBundles
+        # The mixed package has no App/Host managed entry assemblies. Bind every
+        # remaining R2R dependency, native binary, evidence file and license to ZIP.
+        foreach ($file in Get-ChildItem -LiteralPath $appDirectory -File -Recurse) { Add-CriticalFile $file.FullName }
+        if ($VerifyDeviceArtwork) {
+            $guiExecutablePath = Checked-File $appDirectory 'HeyMelody.exe'
+            $guiExecutableBytes = [IO.File]::ReadAllBytes($guiExecutablePath)
+            foreach ($asset in $sourceArtwork) {
+                $offset = [HeyMelody.ReleaseVerification.DeviceArtwork]::Find($guiExecutableBytes, $asset.bytes)
+                Require ($offset -ge 0) ('Native AOT GUI is missing complete source artwork bytes: ' + $asset.path)
+                $artworkChecks += [ordered]@{
+                    architecture = $architecture; sourcePath = $asset.path; sourceSha256 = $asset.sha256
+                    sourceSize = $asset.bytes.Length; guiExecutable = [IO.Path]::GetRelativePath($taskStage, $guiExecutablePath).Replace('\', '/')
+                    guiSha256 = (Hash-File $guiExecutablePath); embeddedOffset = $offset; completeSourceBytesVerified = $true
+                }
+            }
+        }
+        Write-Output 'PASS x64: Native AOT App/Host, R2R auxiliary components, dependency evidence and licenses'
+        continue
+    }
+    if ($build.componentCompilation) {
+        $roles = @('gui', 'host', 'deviceManager', 'fitTest', 'hearingSetup')
+        Require (@($build.componentCompilation.PSObject.Properties).Count -eq 5) 'Incomplete component compilation declaration.'
+        foreach ($role in $roles) { Require ($build.componentCompilation.$role -eq 'ready-to-run') ('Unexpected component compilation: ' + $role) }
+    }
     Require (-not $build.hardwareExecutionVerified) ('Unexpected hardware execution claim: ' + $architecture)
     Require ($build.gui -eq ($architecture + '/HeyMelody.exe') -and $build.deviceManager -eq ($architecture + '/HeyMelody.DeviceManager.exe') -and $build.host -eq ($architecture + '/backend/HeyMelody.Host.exe')) ('Unexpected entrypoint manifest paths: ' + $architecture)
     # Older Windows packages used the portable GUI TFM; current GUI projects target Windows explicitly.
@@ -434,7 +479,7 @@ foreach ($architecture in $targetArchitectures) {
 }
 if ($VerifyDeviceArtwork) {
     Require ($artworkChecks.Count -eq ($sourceArtwork.Count * $targetArchitectures.Count)) 'Expected all source artwork bytes in every published GUI architecture.'
-    Write-Output ('PASS device artwork: ' + $artworkChecks.Count + ' complete source artwork matches in published GUI assemblies')
+    Write-Output ('PASS device artwork: ' + $artworkChecks.Count + ' complete source artwork matches in published GUI binaries')
 }
 
 foreach ($rootFile in @('README.md', 'README-使用说明.md', 'SOURCE-NOTES.md', 'Start-HeyMelody.cmd', 'Start-HeyMelody.ps1')) {
@@ -496,7 +541,7 @@ $receipt = [ordered]@{
         verificationScope = 'all file paths/sizes plus hashes of manifest, apphosts, managed entry assemblies, dependency/runtime configs, native DLLs, package notices/metadata/license files, runtime notices and root package instructions/launchers'
     }
     limitations = @('Static checks do not execute released programs or validate Bluetooth hardware.',
-        'Managed assembly hashes supplement apphost hashes; apphost hashes alone do not bind application behavior.',
+        'R2R managed dependency hashes supplement apphost hashes; Native AOT behavior is bound to its executable hash.',
         'No exact-release hardware execution receipt is claimed.')
 }
 $receipt | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $taskReceipt -Encoding UTF8

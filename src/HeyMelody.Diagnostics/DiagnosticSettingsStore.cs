@@ -46,7 +46,9 @@ public static class DiagnosticSettingsStore
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            File.WriteAllText(temporary, JsonSerializer.Serialize(value));
+            var typeInfo = DiagnosticJsonContext.Default.GetTypeInfo(typeof(T))
+                ?? throw new NotSupportedException($"Unregistered diagnostic document: {typeof(T).FullName}");
+            File.WriteAllText(temporary, JsonSerializer.Serialize(value, typeInfo));
             File.Move(temporary, path, overwrite: true);
         }
         finally { try { File.Delete(temporary); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
@@ -56,7 +58,7 @@ public static class DiagnosticSettingsStore
     {
         try
         {
-            var settings = JsonSerializer.Deserialize<DiagnosticSettings>(File.ReadAllText(DiagnosticPaths.SettingsFile));
+            var settings = JsonSerializer.Deserialize(File.ReadAllText(DiagnosticPaths.SettingsFile), DiagnosticJsonContext.Default.DiagnosticSettings);
             if (settings is not { SchemaVersion: 1 }) throw new InvalidDataException("不支持的诊断日志设置版本。");
             settings.SelectedComponents = DiagnosticComponents.Normalize(settings.SelectedComponents ?? []);
             return settings;

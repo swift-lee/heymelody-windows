@@ -222,7 +222,7 @@ internal sealed partial class BackendSupervisor
         catch (Exception error)
         {
             // BLE artwork metadata must not interrupt an active device session.
-            DiagnosticLog.Warning("host.resources", "artworkMetadataFailed", "Observed BLE artwork metadata could not be forwarded to the worker", error, new { productId, color });
+            DiagnosticLog.Warning("host.resources", "artworkMetadataFailed", "Observed BLE artwork metadata could not be forwarded to the worker", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("productId", productId), ("color", color)));
         }
     }
     public async Task<UiArtwork?> AcquireArtworkAsync(string owner, string productId, int? color, string role, CancellationToken token)

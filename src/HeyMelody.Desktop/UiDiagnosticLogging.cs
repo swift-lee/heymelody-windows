@@ -78,7 +78,7 @@ internal static class UiDiagnosticLogging
                 _ => DiagnosticLevel.Debug
             };
             DiagnosticLog.Write(mapped, "Avalonia." + area, "framework.log", messageTemplate,
-                new { source = source?.GetType().FullName, values });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("source", source?.GetType().FullName), ("values", values)));
         }
     }
 }

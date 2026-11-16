@@ -192,6 +192,28 @@ dotnet run --project tests/HeyMelody.Calibration.UI.Tests -c Release -- --native
 
 2026-11-14 查找耳机轮原生检查仅覆盖当前本机 Windows x64 Build 26300.9974。macOS 桥接仅检查托管构建和打包配置，未验证 macOS 原生编译、TCC 或后台位置读取；本机权限未允许，实际定位成功路径仍以模拟测试验证。完整 App 验收中的模型帧复制断言失败另记入优化待办，不以定位定向通过替代完整套件通过。
 
+## Windows Native AOT 试验
+
+`Build-Client.ps1 -CompilationMode AotExperimental -Architectures x64` 将主窗口和 Host 编译为 Native AOT，设备管理、贴合度及黄金听感三个入口仍使用自包含 ReadyToRun + JIT。默认 `ReadyToRun` 发布方式保持不变。实验包的 GUI 目录仍需 CoreCLR，纯 AOT 的 `backend` 目录不携带 CoreCLR；不能按主窗口的编译方式删除共享运行时。实验模式目前只接受 x64，可交付目录、ZIP 和本地 Inno Setup 安装器。
+
+构建使用 .NET SDK 10.0.401、Visual Studio C++ 工具链以及已准备并校验的 win-x64 Filament 运行时。实验发布会在子进程 PATH 中定位 `vswhere.exe`，不会修改持久环境。可使用 `tools/filament/Prepare-FilamentRuntime.ps1` 生成运行时，然后从 `artifacts/filament-prepared/win-x64/preparation-receipt.json` 的 `RuntimeRoot` 获取输入目录。两套发布使用不同输出目录与中间目录，合并重名原生文件时必须摘要一致。
+
+```powershell
+$env:DOTNET_ROOT = (Resolve-Path artifacts/tools/dotnet-10.0.401).Path
+$env:PATH = "$env:DOTNET_ROOT;$env:PATH"
+dotnet --version # 必须为 10.0.401；或使用已安装的同版 SDK
+$native = (Get-Content artifacts/filament-prepared/win-x64/preparation-receipt.json -Raw | ConvertFrom-Json).RuntimeRoot
+.\Build-Client.ps1 -CompilationMode ReadyToRun -Architectures x64 -OutputRoot release/r2r -FilamentRuntimeRoot $native
+.\Build-Client.ps1 -CompilationMode AotExperimental -Architectures x64 -OutputRoot release/aot-experimental -FilamentRuntimeRoot $native
+.\tools\Measure-AotComparison.ps1 -BaselineDirectory release/r2r/HeyMelody_Windows_0.9.2 -AotDirectory release/aot-experimental/HeyMelody_Windows_0.9.2 -OutputRoot research/native-aot/comparison-new
+```
+
+性能工具直接运行发布 EXE，核对 manifest、全部发布文件摘要和进程身份，使用隔离管道、临时偏好、真实窗口及一个模拟控制 worker。默认比较每类 20 次启动，并自动调用 `Measure-AotHostStartup.ps1` 另测 20 次 Host IPC 与 worker 控制就绪；每个稳态场景 5 次 30 秒，两个模型各 10 个新进程、每进程 5 次热重载。可用 `StartupRuns`、`SteadyRuns`、`Seconds`、`WarmupSeconds`、`ModelProcessRuns` 缩小冒烟检查。正常矩阵关闭诊断；手动执行 `--performance-benchmark ... --diagnostics true` 可单独验收临时诊断日志，不纳入性能数据。
+
+完成测量后，PowerShell 7.5+ 可用 `tools/Measure-AotComparisonSummary.ps1 -ResultDirectory <矩阵结果目录> -OutputDirectory <尚不存在的新目录>` 从回执复算各角色、`tray+worker` 和 `app+tray+worker` 的外部 CPU、Private Working Set、Private Bytes、观测峰值及 primary 进程的分配/GC。它生成 `analysis.json`、`run-metrics.csv`、`summary.csv`，进程组内存按同一外部样本先求和；正式分析仍须另核对默认样本数量。重复分析使用新目录以保留已有证据。
+
+首次模型加载不代表清空 Windows 文件缓存，UI 回调及位图复制间隔不代表 DWM 屏显 FPS。无耳机模拟不证明真实设备、试听或校准效果。测量方法、结果与第三方裁剪警告的具体边界见 [Native AOT 对比](research/native-aot-comparison.md)。
+
 ## 发布与包校验
 
 仅在任务涉及构建发布包时执行。脚本默认版本为 0.9.2，`-Version` 同时选择程序集与包版本，本 Filament 试验默认生成自包含 Windows x64 目录和 ZIP；本地生成产物不等于向 GitHub 发布：
@@ -200,11 +222,14 @@ dotnet run --project tests/HeyMelody.Calibration.UI.Tests -c Release -- --native
 pwsh -NoProfile -File .\Build-Client.ps1 -Version 0.9.2
 ```
 
-已有客户端目录可通过独立的 `Build-Installer.ps1` 封装为 Inno Setup 安装器；脚本读取包内 `manifest.json` 的版本，不重新编译客户端。需要本机安装 Inno Setup，默认包装 x64，可用 `-Architectures x64,arm64` 选择包内已有的架构，`-OutputRoot` 默认指向 `release/installers`，`-InnoCompilerPath` 可指定 `ISCC.exe`。例如在 PowerShell 7 中运行：
+已有客户端目录可通过独立的 `Build-Installer.ps1` 封装为 Inno Setup 安装器；脚本读取包内 `manifest.json` 的版本和编译模式，不重新编译客户端。需要 Inno Setup 6.6+（也可使用便携编译器），默认包装 x64；常规包可用 `-Architectures x64,arm64` 选择包内已有的架构，AOT 实验包仅支持 x64。`-OutputRoot` 默认指向 `release/installers`，`-InnoCompilerPath` 可指定 `ISCC.exe`。例如在选好 .NET SDK 10.0.401 的 PowerShell 7 中运行：
 
 ```powershell
 .\Build-Installer.ps1 -PackageRoot .\release\HeyMelody_Windows_0.9.2 -Architectures x64,arm64
+.\Build-Installer.ps1 -PackageRoot .\release\aot-experimental\HeyMelody_Windows_0.9.2 -Architectures x64 -OutputRoot .\release
 ```
+
+常规文件名仍为 `HeyMelody_Windows_<版本>_<架构>_Setup.exe`，AOT 为 `HeyMelody_Windows_<版本>_x64_AOT_Setup.exe`，并各带 JSON 回执和逐文件 SHA256 清单。AOT 安装支持工具从保留的 DeviceManager 运行时配置选择 .NET 版本。两种安装器共用应用身份和用户数据；更换编译模式时先通过已注册卸载器清理旧载荷，再安装新文件，避免在 AOT 后台遗留 CoreCLR；缺少模式登记的旧安装按 R2R 处理。同模式升级保留原有覆盖行为。
 
 安装器面向当前用户，支持自定义安装目录；开始菜单仅写入当前用户 Programs 根目录的 `HeyMelody.lnk`，卸载登记仍保留在 HKCU。安装器为特定旧 Qualcomm GPU 设置 Basic Render 兼容模式；检测范围、桌面快捷方式选择的保留方式、设置保全和验证边界见[安装器说明](installer.md)。该脚本不接入 `Build-Client.ps1` 或 GitHub Actions，也不创建 GitHub Release；CI 继续构建、校验目录及 ZIP。
 

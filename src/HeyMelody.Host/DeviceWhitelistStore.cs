@@ -10,7 +10,6 @@ namespace HeyMelodyWindows.Host;
 internal sealed class DeviceWhitelistStore(string path)
 {
     private const int MaximumDevices = 4096;
-    private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     internal string FilePath => path;
 
@@ -30,7 +29,7 @@ internal sealed class DeviceWhitelistStore(string path)
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             if (stream.Length > 1024 * 1024) throw new InvalidDataException("设备白名单文件过大。请重新选择设备。");
-            var document = JsonSerializer.Deserialize<WhitelistDocument>(stream, Json);
+            var document = JsonSerializer.Deserialize(stream, HostStoreJsonContext.Default.WhitelistDocument);
             if (document is null || document.SchemaVersion != 1 || document.DeviceKeys is null
                 || document.DeviceKeys.Length > MaximumDevices || document.DeviceKeys.Any(key => !IsValidKey(key)))
                 throw new InvalidDataException("设备白名单文件无效。请重新选择设备。");
@@ -40,7 +39,7 @@ internal sealed class DeviceWhitelistStore(string path)
         catch (DirectoryNotFoundException) { return new(StringComparer.Ordinal); }
         catch (JsonException error)
         {
-            DiagnosticLog.Warning("Settings", "whitelist.loadFailed", "Device whitelist file is not valid JSON", error, new { path });
+            DiagnosticLog.Warning("Settings", "whitelist.loadFailed", "Device whitelist file is not valid JSON", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", path)));
             throw new InvalidDataException("设备白名单文件无效。请重新选择设备。", error);
         }
     }
@@ -59,7 +58,7 @@ internal sealed class DeviceWhitelistStore(string path)
             using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write,
                 FileShare.None, 4096, FileOptions.WriteThrough))
             {
-                JsonSerializer.Serialize(stream, new WhitelistDocument(1, allowed), Json);
+                JsonSerializer.Serialize(stream, new WhitelistDocument(1, allowed), HostStoreJsonContext.Default.WhitelistDocument);
                 stream.Flush(flushToDisk: true);
             }
             File.Move(temporaryPath, absolutePath, overwrite: true);
@@ -68,12 +67,12 @@ internal sealed class DeviceWhitelistStore(string path)
         {
             try { File.Delete(temporaryPath); }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-            { DiagnosticLog.Debug("Settings", "whitelist.tempDeleteFailed", "Temporary whitelist file could not be deleted", new { path = temporaryPath, failure = error.Message }); }
+            { DiagnosticLog.Debug("Settings", "whitelist.tempDeleteFailed", "Temporary whitelist file could not be deleted", global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", temporaryPath), ("failure", error.Message))); }
         }
     }
 
     private static bool IsValidKey(string? key) => key is { Length: 64 }
         && key.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
-    private sealed record WhitelistDocument(int SchemaVersion, string[] DeviceKeys);
+    internal sealed record WhitelistDocument(int SchemaVersion, string[] DeviceKeys);
 }

@@ -21,9 +21,9 @@ public static class ThemePreferenceReader
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
         {
             if (error is FileNotFoundException or DirectoryNotFoundException)
-                DiagnosticLog.Debug("Settings", "theme.missing", "Preferences file does not exist; system theme applies", new { path });
+                DiagnosticLog.Debug("Settings", "theme.missing", "Preferences file does not exist; system theme applies", global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", path)));
             else
-                DiagnosticLog.Warning("Settings", "theme.loadFailed", "Theme preference could not be read; system theme applies", error, new { path });
+                DiagnosticLog.Warning("Settings", "theme.loadFailed", "Theme preference could not be read; system theme applies", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", path)));
             return "system";
         }
     }

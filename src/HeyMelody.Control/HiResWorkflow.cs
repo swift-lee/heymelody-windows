@@ -13,7 +13,8 @@ public static class HiResWorkflow
     public static async Task<HiResWorkflowResult> EnableAsync(IControlConnector connector, HiResWorkflowOptions options, CancellationToken token)
     {
         using var operation = DiagnosticLog.BeginOperation(DiagnosticLog.CurrentCorrelationId);
-        DiagnosticLog.Info("Control", "hires.started", "The explicitly requested Hi-Res workflow started.", options);
+        DiagnosticLog.Info("Control", "hires.started", "The explicitly requested Hi-Res workflow started.",
+            DiagnosticData.From(options, ControlDiagnosticJsonContext.Default.HiResWorkflowOptions));
         ArgumentNullException.ThrowIfNull(connector);
         ArgumentNullException.ThrowIfNull(options);
         if (options.RequestTimeout <= TimeSpan.Zero || options.VerificationBudget <= TimeSpan.Zero
@@ -86,7 +87,7 @@ public static class HiResWorkflow
                 catch (OperationCanceledException) when (budget.IsCancellationRequested) { throw; }
                 catch (Exception error)
                 {
-                    DiagnosticLog.Warning("Control", "hires.verification-read-failed", "Fresh GET verification was unavailable.", error, new { connectionNumber, result.Phase });
+                    DiagnosticLog.Warning("Control", "hires.verification-read-failed", "Fresh GET verification was unavailable.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("connectionNumber", connectionNumber), ("Phase", result.Phase)));
                     result.Warnings.Add("Fresh control session or GET verification was unavailable; retrying GETs on a new session only.");
                 }
                 await Task.Delay(options.RetryInterval, budget.Token);
@@ -94,11 +95,11 @@ public static class HiResWorkflow
         }
         catch (OperationCanceledException error)
         {
-            DiagnosticLog.Warning("Control", "hires.cancelled", "The Hi-Res workflow was cancelled or reached its verification deadline.", error, new { connectionNumber, result.Phase });
+            DiagnosticLog.Warning("Control", "hires.cancelled", "The Hi-Res workflow was cancelled or reached its verification deadline.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("connectionNumber", connectionNumber), ("Phase", result.Phase)));
             result.Error = token.IsCancellationRequested ? "Workflow cancelled; submitted settings may have taken effect." : "Fresh-session verification budget expired; submitted settings may have taken effect.";
         }
-        catch (InvalidDataException exception) { DiagnosticLog.Error("Control", "hires.invalid-response", "The Hi-Res workflow received invalid state.", exception, new { connectionNumber, result.Phase }); result.Error = exception.Message; }
-        catch (Exception error) { DiagnosticLog.Error("Control", "hires.failed", "The Hi-Res workflow failed with possibly submitted settings.", error, new { connectionNumber, result.Phase }); result.Error = "Control workflow failed; submitted settings may have taken effect."; }
+        catch (InvalidDataException exception) { DiagnosticLog.Error("Control", "hires.invalid-response", "The Hi-Res workflow received invalid state.", exception, global::HeyMelody.Diagnostics.DiagnosticData.Object(("connectionNumber", connectionNumber), ("Phase", result.Phase))); result.Error = exception.Message; }
+        catch (Exception error) { DiagnosticLog.Error("Control", "hires.failed", "The Hi-Res workflow failed with possibly submitted settings.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("connectionNumber", connectionNumber), ("Phase", result.Phase))); result.Error = "Control workflow failed; submitted settings may have taken effect."; }
         result.Success = false;
         return result;
     }

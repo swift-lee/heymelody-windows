@@ -1,5 +1,6 @@
 """Static Avalonia release checks; hardware evidence is explicit and hash-bound."""
 import argparse
+import base64
 import datetime
 import hashlib
 import json
@@ -7,6 +8,7 @@ import pathlib
 import re
 from pathlib import Path
 import struct
+import xml.etree.ElementTree as ET
 
 if __package__:
     from .verify_ui_assets import verify_packaged_ui_assets
@@ -96,6 +98,8 @@ class PE:
         optional = base + 24
         magic = struct.unpack_from("<H", self.data, optional)[0]
         directories = optional + {0x10b: 96, 0x20b: 112}[magic]
+        self.subsystem = struct.unpack_from("<H", self.data, optional + 68)[0]
+        self.managed = struct.unpack_from("<I", self.data, directories + 14 * 8)[0] != 0
         self.resources, _ = struct.unpack_from("<II", self.data, directories + 16)
         self.export_rva, _ = struct.unpack_from("<II", self.data, directories)
         self.sections = []
@@ -129,7 +133,7 @@ class PE:
             result.add(self.data[start:end].decode("ascii"))
         return result
 
-    def icons(self):
+    def icons(self, kinds=(3, 14)):
         root = self.offset(self.resources, 16)
         found = {}
 
@@ -140,7 +144,7 @@ class PE:
             named, ids = struct.unpack_from("<HH", self.data, directory + 12)
             for index in range(named + ids):
                 name, target = struct.unpack_from("<II", self.data, directory + 16 + index * 8)
-                if not route and name not in (3, 14):
+                if not route and name not in kinds:
                     continue
                 if name & 0x80000000:
                     raise ValueError("Unexpected named icon resource")
@@ -184,6 +188,220 @@ def checked_file(directory, relative):
     path = (directory / relative).resolve()
     assert path.is_relative_to(directory.resolve()) and path.is_file(), str(path)
     return path
+
+
+COMPONENT_NAMES = {
+    "gui": "HeyMelody", "host": "HeyMelody.Host",
+    "deviceManager": "HeyMelody.DeviceManager", "fitTest": "HeyMelody.FitTest",
+    "hearingSetup": "HeyMelody.HearingSetup",
+}
+EXPERIMENTAL_COMPILATION = {
+    role: "native-aot" if role in ("gui", "host") else "ready-to-run"
+    for role in COMPONENT_NAMES
+}
+
+
+def component_compilation(build, mode="ReadyToRun"):
+    assert mode in ("ReadyToRun", "AotExperimental"), "Unknown compilation mode"
+    expected = EXPERIMENTAL_COMPILATION if mode == "AotExperimental" else {
+        role: "ready-to-run" for role in COMPONENT_NAMES
+    }
+    actual = build.get("componentCompilation", expected if mode == "ReadyToRun" else None)
+    assert actual == expected, "Incomplete or invalid component compilation declaration"
+    if mode == "AotExperimental":
+        assert build["architecture"] == "x64" and build["rid"] == "win-x64", \
+            "AotExperimental supports only win-x64"
+    return actual
+
+
+def verify_compilation_layout(folder, compilation):
+    checked_file(folder, "coreclr.dll")
+    backend = folder / "backend"
+    for role, name in COMPONENT_NAMES.items():
+        directory = backend if role == "host" else folder
+        if compilation[role] == "native-aot":
+            for suffix in (".dll", ".runtimeconfig.json", ".deps.json"):
+                assert not (directory / (name + suffix)).exists(), \
+                    "Unexpected managed AOT entry artifact: " + name + suffix
+        else:
+            for suffix in (".dll", ".runtimeconfig.json", ".deps.json"):
+                checked_file(directory, name + suffix)
+    if compilation["host"] == "native-aot":
+        for name in ("coreclr.dll", "hostfxr.dll", "hostpolicy.dll"):
+            assert not (backend / name).exists(), "AOT backend contains CoreCLR: " + name
+    else:
+        checked_file(backend, "coreclr.dll")
+
+
+def pe_file_version(pe):
+    versions = [blob for route, blob in pe.icons((16,)).items() if route[0] == 16]
+    assert len(versions) == 1, "Missing or ambiguous executable version resource"
+    blob = versions[0]
+    end = 6
+    while end + 2 <= len(blob) and blob[end:end + 2] != b"\0\0":
+        end += 2
+    assert blob[6:end].decode("utf-16-le") == "VS_VERSION_INFO"
+    fixed = (end + 2 + 3) & ~3
+    signature, _, most, least = struct.unpack_from("<IIII", blob, fixed)
+    assert signature == 0xFEEF04BD, "Invalid executable version resource"
+    return ".".join(str(value) for value in (most >> 16, most & 0xffff, least >> 16, least & 0xffff))
+
+
+def package_license_identity(path):
+    metadata = ET.parse(path).getroot().find("{*}metadata")
+    assert metadata is not None, "Missing runtime package metadata"
+    license_node = metadata.find("{*}license")
+    repository = metadata.find("{*}repository")
+    assert license_node is not None and repository is not None, "Missing runtime license/repository identity"
+    return (license_node.get("type"), license_node.text.strip(), repository.get("url"), repository.get("commit"))
+
+
+def package_sha512(value):
+    assert isinstance(value, str), "Missing NuGet package SHA512"
+    # .deps.json prefixes the algorithm; project.assets.json stores bare Base64.
+    digest = base64.b64decode(value.removeprefix("sha512-"), validate=True)
+    assert len(digest) == 64, "Invalid NuGet package SHA512 length"
+    return digest
+
+
+def verify_experimental_build(root, package, manifest, build, receipt=None):
+    compilation = component_compilation(build, manifest.get("compilationMode"))
+    folder = package / "x64"
+    backend = folder / "backend"
+    assert build["selfContained"] is True and build["hardwareExecutionVerified"] is False
+    verify_compilation_layout(folder, compilation)
+    toolchain = build["toolchain"]
+    assert re.fullmatch(r"10\.\d+\.\d+", toolchain["sdkVersion"]), "Unexpected SDK version"
+    assert re.fullmatch(r"10\.\d+\.\d+", toolchain["runtimeVersion"]), "Unexpected runtime version"
+    assert toolchain["ilCompilerPackages"], "Native AOT compiler identity is missing"
+    for compiler in toolchain["ilCompilerPackages"]:
+        assert "ilcompiler" in compiler["package"].lower()
+        assert compiler["version"] == toolchain["runtimeVersion"], "Compiler/runtime version mismatch"
+    assert build["dependencyEvidence"] == "x64/BUILD-DEPENDENCIES.json"
+    evidence_path = checked_file(package, build["dependencyEvidence"])
+    assert sha(evidence_path) == build["dependencyEvidenceSha256"], "Dependency evidence hash mismatch"
+    evidence = json.loads(evidence_path.read_text("utf-8-sig"))
+    assert evidence["schemaVersion"] == 1
+    assert evidence["sdkVersion"] == toolchain["sdkVersion"] and evidence["runtimeVersion"] == toolchain["runtimeVersion"]
+    license_sources = evidence["runtimeLicenseSources"]
+    assert set(license_sources) == {"gui", "host"}, "Missing runtime license provenance"
+    for role, package_name in (("gui", "Microsoft.NETCore.App.Runtime.win-x64"),
+                               ("host", "runtime.win-x64.Microsoft.DotNet.ILCompiler")):
+        source = license_sources[role]
+        assert source["package"] == package_name and source["version"] == toolchain["runtimeVersion"]
+        assert {item["path"] for item in source["files"]} == {"LICENSE.txt", "THIRD-PARTY-NOTICES.txt"}
+        directory = backend if role == "host" else folder
+        represented_metadata = next(item for item in source["files"] if item["path"] == "THIRD-PARTY-NOTICES.txt")
+        assert represented_metadata["sourcePackage"] == package_name and represented_metadata["basis"] == "own-package"
+        represented_identity = package_license_identity(checked_file(directory, represented_metadata["sourceMetadata"]))
+        for item in source["files"]:
+            assert sha(checked_file(directory, item["path"])) == item["sha256"]
+            metadata_path = checked_file(directory, item["sourceMetadata"])
+            assert sha(metadata_path) == item["sourceMetadataSha256"], "Runtime notice metadata hash mismatch"
+            assert item["sourceVersion"] == toolchain["runtimeVersion"]
+            expected_source_name = "LICENSE.TXT" if item["path"] == "LICENSE.txt" else "THIRD-PARTY-NOTICES.TXT"
+            assert item["sourcePath"] == expected_source_name
+            identity = package_license_identity(metadata_path)
+            if item["basis"] == "matching-MIT-and-source-revision":
+                assert role == "host" and item["path"] == "LICENSE.txt"
+                assert item["sourcePackage"] == "Microsoft.NETCore.App.Runtime.win-x64"
+                assert identity == represented_identity and identity[:2] == ("expression", "MIT")
+                assert identity[2] and identity[3], "Missing shared license source revision"
+            else:
+                assert item["basis"] == "own-package" and item["sourcePackage"] == package_name
+    components = {item["role"]: item for item in evidence["components"]}
+    assert len(evidence["components"]) == len(components) == 5 and set(components) == set(COMPONENT_NAMES)
+    notices_by_directory = {}
+    for directory in (folder, backend):
+        notices = json.loads(checked_file(directory, "PACKAGE-NOTICES.json").read_text("utf-8-sig"))
+        assert notices["schemaVersion"] == 1 and notices["supplementalNotices"]
+        declared = {(item["package"].lower(), item["version"]) for item in notices["packages"]}
+        assert {"avalonia", "fluentavaloniaui", "skiasharp", "harfbuzzsharp"}.issubset({name for name, _ in declared})
+        assert len(declared) == len(notices["packages"]), "Duplicate package notice"
+        for item in notices["packages"]:
+            checked_file(directory, item["metadata"])
+            for notice in item["files"]:
+                assert sha(checked_file(directory, notice["path"])) == notice["sha256"], "Package notice hash mismatch"
+        for notice in notices["supplementalNotices"]:
+            assert sha(checked_file(directory, notice["path"])) == notice["sha256"], "Supplemental notice hash mismatch"
+        for filename in ("LICENSE.txt", "THIRD-PARTY-NOTICES.txt"):
+            assert checked_file(directory, filename).stat().st_size > 0
+        verify_packaged_ui_assets(manifest, directory, directory / "licenses/upstream")
+        notices_by_directory[directory] = declared
+    executables = []
+    for role, name in COMPONENT_NAMES.items():
+        directory = backend if role == "host" else folder
+        relative = "x64/" + ("backend/" if role == "host" else "") + name + ".exe"
+        assert build[role] == relative and build[role + "Framework"] == "net10.0-windows10.0.19041.0"
+        executable = checked_file(package, relative)
+        pe = PE(executable)
+        assert pe.machine == 0x8664 and pe.subsystem == 2 and not pe.managed, "Wrong executable PE: " + role
+        assert pe_file_version(pe) == manifest["version"] + ".0", "Wrong executable file version: " + role
+        digest = sha(executable)
+        assert digest == build[role + "Sha256"], "Executable hash mismatch: " + role
+        component = components[role]
+        assert component["compilation"] == compilation[role]
+        assert component["executable"] == relative.removeprefix("x64/") and component["executableSha256"] == digest
+        assert re.fullmatch(r"[0-9a-f]{64}", component["sourceAssetsSha256"]), "Invalid source assets digest"
+        packages = {(item["package"].lower(), item["version"]): item for item in component["packages"]}
+        assert len(packages) == len(component["packages"]), "Duplicate dependency package"
+        assert {"avalonia", "fluentavaloniaui"}.issubset({key[0] for key in packages})
+        assert any(name.startswith("HeyMelody.Desktop/") for name in component["projects"]), "Missing shared desktop build dependency"
+        for key in packages:
+            if not key[0].startswith("microsoft.netcore.app.runtime."):
+                assert key in notices_by_directory[directory], "Missing dependency license: " + "/".join(key)
+        if compilation[role] == "ready-to-run":
+            config = json.loads(checked_file(directory, name + ".runtimeconfig.json").read_text("utf-8-sig"))["runtimeOptions"]
+            assert config["includedFrameworks"] == [{"name": "Microsoft.NETCore.App", "version": toolchain["runtimeVersion"]}]
+            dependencies = json.loads(checked_file(directory, name + ".deps.json").read_text("utf-8-sig"))
+            assert dependencies["runtimeTarget"]["name"].endswith("/win-x64")
+            for library, item in dependencies["libraries"].items():
+                if item["type"] == "package":
+                    package_name, version = library.split("/", 1)
+                    expected = packages[(package_name.lower(), version)]
+                    assert package_sha512(item["sha512"]) == package_sha512(expected["sha512"]), \
+                        "Runtime/build package identity mismatch: " + library
+            for dependency in ("HeyMelody.Desktop", "HeyMelody.Diagnostics"):
+                assert any(key.startswith(dependency + "/") for key in dependencies["libraries"])
+                assert PE(checked_file(directory, dependency + ".dll")).managed
+            assert PE(checked_file(directory, name + ".dll")).managed
+        executables.append(dict(role=role, path=relative, sha256=digest, compilation=compilation[role]))
+    for directory in (folder, backend):
+        for path in directory.glob("*.dll"):
+            pe = PE(path)
+            if directory == backend:
+                assert not pe.managed, "AOT backend contains a managed dependency: " + path.name
+            if not pe.managed:
+                assert pe.machine == 0x8664, "Wrong native DLL architecture: " + str(path)
+        for name in ("libSkiaSharp.dll", "libHarfBuzzSharp.dll", "av_libglesv2.dll"):
+            assert PE(checked_file(directory, name)).machine == 0x8664
+        for name in ("PresentationCore.dll", "PresentationFramework.dll", "System.Windows.Forms.dll", "wpfgfx_cor3.dll"):
+            assert not (directory / name).exists(), "Unexpected WindowsDesktop dependency"
+    assert build["hostResourceBundles"] == "gui" and not (backend / "ResourceBundles").exists()
+    resources = verify_resource_bundle(folder)
+    assert resources["indexSha256"] == build["resourceIndexSha256"]
+    assert manifest["modelRenderer"] == "Filament"
+    renderer = verify_filament(folder, "win-x64", require_current=True, check_managed=False)
+    declared_renderer = build["modelRenderer"]
+    for key in ("sha256", "manifestSha256", "abiVersion", "filamentCommit", "library",
+                "supportedBackends", "defaultBackend", "probe", "probeSha256", "materials"):
+        assert declared_renderer[key] == renderer[key], "Filament release metadata mismatch: " + key
+    nested = folder / "runtimes/win-x64/native"
+    if (nested / "filament-runtime.json").exists():
+        assert verify_filament(nested, "win-x64", require_current=True, check_managed=False)["manifestSha256"] == renderer["manifestSha256"]
+    assert not (folder / "Ava3D.dll").exists()
+    icon = verify_icon(folder / "HeyMelody.exe", root / "src/HeyMelody.App/Assets/HeyMelody.ico")
+    if receipt:
+        for role in COMPONENT_NAMES:
+            assert receipt[role + "Sha256"] == build[role + "Sha256"], "Execution evidence hash mismatch"
+    return dict(architecture="x64", peMachine="0x8664", selfContained=True,
+                compilationMode="AotExperimental", componentCompilation=compilation, toolchain=toolchain,
+                executables=executables, modelRenderer=renderer, icon=icon,
+                guiSha256=build["guiSha256"], hostSha256=build["hostSha256"],
+                deviceManagerSha256=build["deviceManagerSha256"], fitTestSha256=build["fitTestSha256"],
+                hearingSetupSha256=build["hearingSetupSha256"], resourceBundles=dict(gui=resources, host=dict(sharedWith="gui")),
+                packageNoticesVerified=True, readOnlyBluetoothExecutionVerified=False,
+                realNativeArmHardwareVerified=False, liveGuiPreviewVerified=False)
 
 
 def verify_shared_desktop(entrypoints):
@@ -261,6 +479,11 @@ def verify(root, package, evidence=None, architectures=("x64", "x86", "arm64")):
         assert set(receipts).issubset(expected)
     builds = []
     for arch, machine in expected.items():
+        compilation = component_compilation(declared[arch], manifest.get("compilationMode", "ReadyToRun"))
+        if manifest.get("compilationMode") == "AotExperimental":
+            assert set(expected) == {"x64"}, "AotExperimental supports only one x64 package"
+            builds.append(verify_experimental_build(root, package, manifest, declared[arch], receipts.get(arch)))
+            continue
         folder = package / arch
         gui, host = folder / "HeyMelody.exe", folder / "backend" / "HeyMelody.Host.exe"
         manager = checked_file(folder, "HeyMelody.DeviceManager.exe")

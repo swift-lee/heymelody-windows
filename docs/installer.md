@@ -1,6 +1,6 @@
 # Windows Inno Setup 安装器
 
-安装器是现有自包含客户端目录之外的本地可选产物，使用与 [VS Code 官方 Windows 安装脚本](https://github.com/microsoft/vscode/blob/main/build/win32/code.iss)相同的 Inno Setup 技术，采用 `WizardStyle=modern`。目前支持 Windows x64 与 ARM64，每个安装器包含一种架构；应选择与系统原生架构一致的安装器。GitHub Actions 继续生成目录与 ZIP，不编译或上传安装器。本轮不调整应用版本，也不发布 GitHub Release。
+安装器是现有自包含客户端目录之外的本地可选产物，使用与 [VS Code 官方 Windows 安装脚本](https://github.com/microsoft/vscode/blob/main/build/win32/code.iss)相同的 Inno Setup 技术，采用 `WizardStyle=modern`。`ReadyToRun` 包支持 Windows x64 与 ARM64；`AotExperimental` 混合包仅支持 Windows x64。每个安装器包含一种架构，应选择与系统原生架构一致的安装器。GitHub Actions 继续生成目录与 ZIP，不编译或上传安装器。本轮不调整应用版本，也不发布 GitHub Release。
 
 ## 本地打包
 
@@ -13,13 +13,24 @@
 
 `-PackageRoot` 必填，指向含 schema-2 `manifest.json` 和架构子目录的完整客户端目录；版本取自清单。`-Architectures` 默认 `x64`，也可选择 `arm64`。`-OutputRoot` 默认 `release/installers`。可用 `-InnoCompilerPath` 显式指定 `ISCC.exe` 的路径。多架构参数请在 PowerShell 会话内传入数组，避免 `pwsh -File` 把逗号列表当成单个字符串。
 
-每个架构输出 `HeyMelody_Windows_<版本>_<架构>_Setup.exe` 和 `.exe.json` 收据。当前收据为 `schemaVersion: 2`、`installerFormat: "inno-setup"`，记录输入清单及安装器 SHA256、文件清单和验证边界，并以仓库相对的 `helperPath` 与 `helperSha256` 标识构建时保留的独立辅助工具。已有产物会被拒绝，不自动覆盖。每次构建在 `artifacts` 下新的独立工作目录保留中间文件，便于复核。客户端输入目录不被修改；安装器保留选定架构的完整运行时、资源、许可和来源说明，并把载荷清单缩减为实际包含的一种架构。
+脚本从输入清单判断编译模式。`ReadyToRun` 沿用 `HeyMelody_Windows_<版本>_<架构>_Setup.exe`，`AotExperimental` 输出 `HeyMelody_Windows_<版本>_x64_AOT_Setup.exe`；各有对应 `.exe.json` 收据，因此两种模式可放在同一个输出目录。当前收据为 `schemaVersion: 2`、`installerFormat: "inno-setup"`，记录编译模式、输入清单及安装器 SHA256、文件清单和验证边界，并以仓库相对的 `helperPath` 与 `helperSha256` 标识构建时保留的独立辅助工具。已有产物会被拒绝，不自动覆盖。每次构建在 `artifacts` 下新的独立工作目录保留中间文件，便于复核。客户端输入目录不被修改；安装器保留选定架构的完整运行时、资源、许可和来源说明，并把载荷清单缩减为实际包含的一种架构。
 
-独立的 `HeyMelody.InstallerSupport` 工具以相同架构的裁剪、自包含单文件构建，临时解压后用于安装与卸载检查，不要求电脑预装 .NET，也不依赖正在删除的客户端运行时。打包脚本不调用 GitHub，不将安装器加入 `Build-Client.ps1` 或 Actions。
+独立的 `HeyMelody.InstallerSupport` 工具以相同架构的裁剪、自包含单文件构建，临时解压后用于安装与卸载检查，不要求电脑预装 .NET，也不依赖正在删除的客户端运行时。R2R 包从 `HeyMelody.runtimeconfig.json` 读取匹配的 .NET 10 runtime 版本；AOT App 没有该文件，改从保留的 `HeyMelody.DeviceManager.runtimeconfig.json` 读取。混合包的 App 与 Host 为 Native AOT，DeviceManager、FitTest 和 HearingSetup 仍为 R2R + JIT，客户端 CoreCLR 与托管依赖留在 GUI 目录供这些辅助入口使用；`backend` 保持纯 AOT Host 目录。打包脚本不调用 GitHub，不将安装器加入 `Build-Client.ps1` 或 Actions。
+
+本轮两份 x64 安装包复用性能报告中的最终发布目录，可在报告完成后构建到 `release`：
+
+```powershell
+.\Build-Installer.ps1 -PackageRoot release/native-aot-comparison/2026-11-16/final-v2/r2r/HeyMelody_Windows_0.9.2 -OutputRoot release
+.\Build-Installer.ps1 -PackageRoot release/native-aot-comparison/2026-11-16/final-v2/aot/HeyMelody_Windows_0.9.2 -OutputRoot release
+```
 
 ## 安装、更新与卸载
 
 仅提供当前用户安装：Inno Setup 使用 `PrivilegesRequired=lowest`，默认 `%LOCALAPPDATA%\Programs\HeyMelody`，目录页允许自定义当前用户有写权限的位置。卸载登记写入 HKCU 的 32 位视图 `Software\Microsoft\Windows\CurrentVersion\Uninstall\HeyMelody_is1`，可从 Windows“应用和功能”移除程序，不添加开机自启。
+
+两种编译模式使用同一个 `AppId=HeyMelody`、安装目录、快捷方式和用户数据，供顺序切换体验。AOT 安装向导及卸载项名称带“Native AOT 实验版”。正常运行的管道与 Host 互斥体也由当前用户共享；另选安装目录不能隔离两套后台。体验另一种模式前，关闭所有 HeyMelody 窗口并从托盘退出 Host，再运行对应安装器。
+
+安装器在上述卸载键登记 `CompilationMode`，缺少此字段的旧安装按 `ReadyToRun` 处理。同模式、同目录更新继续覆盖安装；目录改变或编译模式改变时，先调用已登记的旧 Inno 卸载器并等待清理结束，再安装新载荷。因此 R2R 与 AOT 即使切换到同一目录，也会先删除旧安装登记的程序文件，避免 AOT `backend` 遗留 CoreCLR。此过程保留用户数据及安装目录内未登记的额外文件，沿用保存的桌面选项。
 
 界面使用 Inno Setup 的 [modern 安装向导](https://jrsoftware.org/ishelp/topic_setup_wizardstyle.htm)，目录页可直接编辑完整路径或浏览文件夹，完成页集中显示桌面快捷方式与启动选项。实际布局、缩放和复选框交互仍须对应版本的运行验收。
 
@@ -79,7 +90,15 @@ x64 真实静默验收通过：中文与空格自定义目录、注册项和当�
 
 此前 NSIS 试验采用平铺的单一开始菜单入口、三页原生安装界面，以及独立保存的桌面快捷方式选择。安全 UI 预览使用当时的 `InstallerUi.nsh` 和桌面偏好读写源码，但只操作本地 fixture，不安装应用或访问真实用户偏好；该预览已编译，未启动。Computer Use 运行时的 native pipe 缺失，重置后仍无法连接，因此停止 UI 操作，未完成这些页面的视觉布局、缩放或复选框交互验收。测试脚本的语法与五组隔离桌面偏好读取输入检查已通过。该 NSIS 界面方案现已由 Inno Setup 替换。
 
-## Inno Setup 当前验证边界
+## Native AOT 双安装包的验证边界（2026-11-16）
+
+本轮使用 Inno Setup 6.7.4，为同一组最终 x64 发布目录提供 R2R 与混合 AOT 安装包；构建摘要和文件清单以各自 `.exe.json` 收据为准。[AOT 对比报告](research/native-aot-comparison.md)中的性能来自直接运行发布 EXE，不代表执行了安装器。
+
+两份完整安装器已成功编译，常规版为 191,369,912 字节，AOT 版为 161,926,524 字节，位于 `release/` 根目录。17 份封装输入及归档副本摘要一致，全部 2,404 个暂存载荷文件与旁置库存匹配；原始客户端目录和 ZIP 保持不变。另通过最终脚本的 13 项隔离预检、5 项真实 ISCC 合成编译检查及安装支持工具的 28 项离线检查。操作步骤和校验文件见本机 `release/NativeAOT-体验说明.md`。
+
+新增双安装包的验证范围应区分安装器编译、载荷结构与摘要检查、离线辅助工具测试，以及真实安装运行。此次没有执行新双包的实际安装、卸载、双向模式切换或向导交互验收；下述历史静默验收不能替代这些检查。未通过安装后的程序连接耳机或验证实际音频效果。
+
+## Inno Setup 历史验证（6.7.3）
 
 客户端载荷取自 `52c9c82bed94e32bd24eaa415a6c29327e5d6cfe` 的成功 [Windows packages CI（run 39986991886）](https://github.com/swift-lee/heymelody-windows/actions/runs/39986991886)，应用版本仍为 `0.9.2`。最终 x64、ARM64 安装器均使用 Inno Setup 6.7.3 和 `WizardStyle=modern` 编译，schema-2 收据各列出 1,288 个载荷文件，独立辅助工具的实际 SHA256 与各自收据匹配。最终安装器 SHA256：
 
@@ -90,4 +109,4 @@ x64 真实静默验收通过：中文与空格自定义目录、注册项和当�
 
 验收脚本增加有界等待以覆盖 Inno 卸载器的异步自清理，并规范化注册目录及快捷方式路径比较；产品修正了带尾斜杠的旧安装目录传入辅助工具时的命令行引用。最终迁移验收已覆盖该修复，其余已通过选项未重复执行。回执、完整日志与失败现场保留在本机 `artifacts/inno-validation/`。
 
-Computer Use 的 native pipe 仍不可用，未完成新 Inno 向导的视觉、缩放或复选框交互验收；当前验证限于编译、静默执行和静态检查。未在 ARM64 或旧 GPU 硬件执行安装器，未进行蓝牙操作，也未重跑全套无关 UI 测试。
+该轮 Computer Use 的 native pipe 仍不可用，未完成新 Inno 向导的视觉、缩放或复选框交互验收；验证限于编译、静默执行和静态检查。未在 ARM64 或旧 GPU 硬件执行安装器，未进行蓝牙操作，也未重跑全套无关 UI 测试。

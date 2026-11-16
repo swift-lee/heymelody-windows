@@ -15,13 +15,13 @@ public sealed partial class ClientBridge : IFindHeadphonesService
         RequestAsync<UiFindHeadphonesState>(new()
         {
             Operation = "setFindHeadphones",
-            Action = JsonSerializer.SerializeToElement(new FindHeadphonesEnabledArgs(enabled), RpcWire.Json)
+            Action = JsonSerializer.SerializeToElement(new FindHeadphonesEnabledArgs(enabled), RpcWire.TypeInfo<FindHeadphonesEnabledArgs>())
         }, TimeSpan.FromSeconds(15), token);
 
     public Task<UiFindHeadphonesState> SetDeviceLocationRecordingAsync(string identity, bool enabled, CancellationToken token) =>
         RequestAsync<UiFindHeadphonesState>(new()
         {
             Operation = "setDeviceLocationRecording", Identity = identity,
-            Action = JsonSerializer.SerializeToElement(new FindHeadphonesEnabledArgs(enabled), RpcWire.Json)
+            Action = JsonSerializer.SerializeToElement(new FindHeadphonesEnabledArgs(enabled), RpcWire.TypeInfo<FindHeadphonesEnabledArgs>())
         }, TimeSpan.FromSeconds(15), token);
 }

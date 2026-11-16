@@ -144,7 +144,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
             var result = await RequestAsync<UiApplyResult>(new()
             {
                 Operation = "apply", Identity = identity, DeviceGeneration = deviceGeneration,
-                Action = JsonSerializer.SerializeToElement(action, RpcWire.Json)
+                Action = JsonSerializer.SerializeToElement(action, RpcWire.TypeInfo<UiAction>())
             }, TimeSpan.FromSeconds(120), cancellationToken);
             if (result.After is { } snapshot) lock (_stateGate) Remember(snapshot);
             return result;
@@ -204,9 +204,9 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                 linked.Token.ThrowIfCancellationRequested();
                 // IDs follow wire order even when callers race for the write lock.
                 request.Id = Interlocked.Increment(ref _nextId);
-                string record = JsonSerializer.Serialize(request, RpcWire.Json);
+                string record = JsonSerializer.Serialize(request, RpcWire.TypeInfo<BackendRequest>());
                 if (record.Length > RpcWire.MaximumLineCharacters) throw new InvalidDataException("后台请求过大。");
-                DiagnosticLog.Info("client.ipc", "send", "Sending backend RPC record", new { record });
+                DiagnosticLog.Info("client.ipc", "send", "Sending backend RPC record", global::HeyMelody.Diagnostics.DiagnosticData.Object(("record", record)));
                 connection.Pending[request.Id] = new(pending, request.DiagnosticCorrelationId);
                 submitted = true;
                 await connection.Writer.WriteLineAsync(record.AsMemory(), linked.Token);
@@ -225,13 +225,13 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                 throw new BackendOperationException(response.Error ?? "后台操作未完成，请重新读取耳机状态。");
             }
             if (response.Data is not { } data) throw new InvalidDataException("后台返回了无效结果。");
-            var result = data.Deserialize<T>(RpcWire.Json) ?? throw new InvalidDataException("后台返回了无效结果。");
+            var result = data.Deserialize(RpcWire.TypeInfo<T>()) ?? throw new InvalidDataException("后台返回了无效结果。");
             onResult?.Invoke(result, connection);
             return result;
         }
         catch (BackendOperationException failure)
         {
-            DiagnosticLog.Warning("client.ipc", "rejected", "Backend operation failed", failure, new { request.Id, request.Operation });
+            DiagnosticLog.Warning("client.ipc", "rejected", "Backend operation failed", failure, global::HeyMelody.Diagnostics.DiagnosticData.Object(("Id", request.Id), ("Operation", request.Operation)));
             throw;
         }
         catch (Exception failure) when (failure is IOException or InvalidDataException or TimeoutException
@@ -239,7 +239,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
             or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         {
             DiagnosticLog.Error("client.ipc", "unavailable", "Backend RPC did not complete", failure,
-                new { request.Id, request.Operation, submitted, recordWritten });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("Id", request.Id), ("Operation", request.Operation), ("submitted", submitted), ("recordWritten", recordWritten)));
             if (submitted && !recordWritten) connection?.Close(failure);
             throw new BackendUnavailableException(submitted && request.Operation == "apply",
                 _versionMismatch ? "后台与界面版本不一致，请从托盘退出后台后重新打开完整客户端。" : "蓝牙后台暂时不可用，请等待重连。", failure);
@@ -274,7 +274,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
             bool launchNow = _startBackend is not null && _backendRunning?.Invoke() == false
                 && DateTimeOffset.UtcNow - _lastStart > TimeSpan.FromSeconds(10);
             DiagnosticLog.Debug("client.ipc", "connectAttempt", "Connecting to the shared backend",
-                new { pipe = _pipeName, launchingBackend = launchNow, canLaunch = _startBackend is not null, allowExitPending });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("pipe", _pipeName), ("launchingBackend", launchNow), ("canLaunch", _startBackend is not null), ("allowExitPending", allowExitPending)));
             // Without the tray's singleton mutex nothing can answer the 300 ms probe: launch at once. A tray that is
             // still starting or already exiting holds the mutex and keeps the probe-then-launch order.
             if (_startBackend is not null && _backendRunning?.Invoke() == false
@@ -284,7 +284,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                 try { StartBackendIfAllowed(); await pipe.ConnectAsync(15000, token); }
                 catch (Exception failure)
                 {
-                    DiagnosticLog.Warning("client.ipc", "connectFailed", "Connecting after a backend launch failed", failure, new { pipe = _pipeName, stage = "launchConnect" });
+                    DiagnosticLog.Warning("client.ipc", "connectFailed", "Connecting after a backend launch failed", failure, global::HeyMelody.Diagnostics.DiagnosticData.Object(("pipe", _pipeName), ("stage", "launchConnect")));
                     pipe.Dispose(); throw;
                 }
             }
@@ -296,7 +296,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                     pipe.Dispose();
                     bool launching = _startBackend is not null && DateTimeOffset.UtcNow - _lastStart > TimeSpan.FromSeconds(10);
                     DiagnosticLog.Debug("client.ipc", "probeTimeout", "Backend probe timed out",
-                        new { pipe = _pipeName, canLaunch = _startBackend is not null, launchingBackend = launching, probeMilliseconds = 300, error = probeTimeout.Message });
+                        global::HeyMelody.Diagnostics.DiagnosticData.Object(("pipe", _pipeName), ("canLaunch", _startBackend is not null), ("launchingBackend", launching), ("probeMilliseconds", 300), ("error", probeTimeout.Message)));
                     if (_startBackend is null) throw;
                     if (DateTimeOffset.UtcNow - _lastStart > TimeSpan.FromSeconds(10))
                     { _lastStart = DateTimeOffset.UtcNow; StartBackendIfAllowed(); }
@@ -304,13 +304,13 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                     try { await pipe.ConnectAsync(15000, token); }
                     catch (Exception failure)
                     {
-                        DiagnosticLog.Warning("client.ipc", "connectFailed", "Backend did not accept the connection after the probe timed out", failure, new { pipe = _pipeName, stage = "afterProbe", launched = launching });
+                        DiagnosticLog.Warning("client.ipc", "connectFailed", "Backend did not accept the connection after the probe timed out", failure, global::HeyMelody.Diagnostics.DiagnosticData.Object(("pipe", _pipeName), ("stage", "afterProbe"), ("launched", launching)));
                         pipe.Dispose(); throw;
                     }
                 }
                 catch (Exception failure)
                 {
-                    DiagnosticLog.Warning("client.ipc", "connectFailed", "Backend probe failed", failure, new { pipe = _pipeName, stage = "probe" });
+                    DiagnosticLog.Warning("client.ipc", "connectFailed", "Backend probe failed", failure, global::HeyMelody.Diagnostics.DiagnosticData.Object(("pipe", _pipeName), ("stage", "probe")));
                     pipe.Dispose(); throw;
                 }
             }
@@ -321,7 +321,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                 { connection.Close(new IOException("后台正在退出。")); throw new IOException("后台正在退出。"); }
                 _connection = connection;
             }
-            DiagnosticLog.Info("client.ipc", "connected", "Connected to the shared backend", new { _pipeName });
+            DiagnosticLog.Info("client.ipc", "connected", "Connected to the shared backend", global::HeyMelody.Diagnostics.DiagnosticData.Object(("_pipeName", _pipeName)));
             _ = RunBackground(() => ReadMessagesAsync(connection));
             return connection;
         }
@@ -340,16 +340,16 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                 string? record = await connection.Reader.ReadLineAsync(_lifetime.Token);
                 if (record is null) break;
                 BackendMessage message;
-                try { message = JsonSerializer.Deserialize<BackendMessage>(record, RpcWire.Json) ?? throw new InvalidDataException(); }
+                try { message = JsonSerializer.Deserialize(record, RpcWire.TypeInfo<BackendMessage>()) ?? throw new InvalidDataException(); }
                 catch (Exception parseError)
                 {
-                    DiagnosticLog.Error("client.ipc", "invalidRecord", "Received an invalid backend RPC record", parseError, new { record });
+                    DiagnosticLog.Error("client.ipc", "invalidRecord", "Received an invalid backend RPC record", parseError, global::HeyMelody.Diagnostics.DiagnosticData.Object(("record", record)));
                     throw;
                 }
                 string? correlation = message.Kind == "response" && connection.Pending.TryGetValue(message.Id, out var matching)
                     ? matching.CorrelationId : null;
                 using var operation = correlation is { } id ? DiagnosticLog.BeginOperation(id) : DiagnosticLog.SuspendOperation();
-                DiagnosticLog.Info("client.ipc", "receive", "Received backend RPC record", new { record });
+                DiagnosticLog.Info("client.ipc", "receive", "Received backend RPC record", global::HeyMelody.Diagnostics.DiagnosticData.Object(("record", record)));
                 if (message.SchemaVersion != 5)
                 { _versionMismatch = true; throw new InvalidDataException("后台通信版本不一致。"); }
                 if (message.Kind == "response" && message.Id > 0 && message.Id <= Interlocked.Read(ref _nextId))
@@ -431,16 +431,16 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                         foreach (var snapshot in subscription.Snapshots)
                             QueueStateLocked(new BackendEvent { Kind = "snapshot", BackendInstanceId = subscription.BackendInstanceId, Snapshot = snapshot }, connection);
                     }
-                    DiagnosticLog.Info("client.ipc", "reconnected", "Reconnected to the shared backend", new { attempt });
+                    DiagnosticLog.Info("client.ipc", "reconnected", "Reconnected to the shared backend", global::HeyMelody.Diagnostics.DiagnosticData.Object(("attempt", attempt)));
                     return;
                 }
                 catch (BackendOperationException failure) when (_versionMismatch)
                 {
-                    DiagnosticLog.Warning("client.ipc", "reconnectStopped", "Reconnect stopped because the backend version differs", failure, new { attempt });
+                    DiagnosticLog.Warning("client.ipc", "reconnectStopped", "Reconnect stopped because the backend version differs", failure, global::HeyMelody.Diagnostics.DiagnosticData.Object(("attempt", attempt)));
                     return;
                 }
                 catch (Exception failure) when (!_lifetime.IsCancellationRequested)
-                { DiagnosticLog.Warning("client.ipc", "reconnectFailed", "Reconnect attempt failed", failure, new { attempt }); }
+                { DiagnosticLog.Warning("client.ipc", "reconnectFailed", "Reconnect attempt failed", failure, global::HeyMelody.Diagnostics.DiagnosticData.Object(("attempt", attempt))); }
             }
         }
         catch (OperationCanceledException) { }
@@ -479,7 +479,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
                     catch (Exception handlerError)
                     {
                         // Subscribers cannot stop the receive pump.
-                        DiagnosticLog.Warning("client.ipc", "subscriberFailed", "A backend event subscriber threw", handlerError, new { kind = notification.Kind });
+                        DiagnosticLog.Warning("client.ipc", "subscriberFailed", "A backend event subscriber threw", handlerError, global::HeyMelody.Diagnostics.DiagnosticData.Object(("kind", notification.Kind)));
                     }
             }
         }
@@ -516,7 +516,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
     {
         try { await EnsureConnectionAsync(_lifetime.Token).ConfigureAwait(false); }
         catch (Exception failure)
-        { DiagnosticLog.Debug("client.ipc", "beginConnectFailed", "Background pre-connect failed; the first request will retry", new { failure = failure.Message, type = failure.GetType().Name }); }
+        { DiagnosticLog.Debug("client.ipc", "beginConnectFailed", "Background pre-connect failed; the first request will retry", global::HeyMelody.Diagnostics.DiagnosticData.Object(("failure", failure.Message), ("type", failure.GetType().Name))); }
     });
 
     private static bool BackendRunning() => DiagnosticBackendLauncher.IsRunning();

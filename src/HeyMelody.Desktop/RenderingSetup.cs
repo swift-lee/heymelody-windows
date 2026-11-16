@@ -8,6 +8,7 @@ using Avalonia.Rendering.Composition;
 using Avalonia.Win32;
 using SkiaSharp;
 using HeyMelody.Diagnostics;
+using System.Text.Json.Nodes;
 
 namespace HeyMelodyWindows.Ui;
 
@@ -79,26 +80,24 @@ internal static class RenderingSetup
             // D3D11AngleWin32PlatformGraphics.TryCreate catches this and the next RenderingMode is Software.
             // Returning 0 here would silently select hardware despite the user's Basic Render preference.
             DiagnosticLog.Warning("Avalonia.GPU", "warpNotEnumerated", "WARP was absent from ANGLE's adapter list; the existing software fallback is used.",
-                data: new { expectedLuid = Convert.ToHexString(expectedLuid), adapters = adapters.Select(DescribeCandidate).ToArray() });
+                data: global::HeyMelody.Diagnostics.DiagnosticData.Object(("expectedLuid", Convert.ToHexString(expectedLuid)), ("adapters", adapters.Select(DescribeCandidate).ToArray())));
             throw new InvalidOperationException("Basic Render was requested, but the WARP adapter is absent from " +
                 "the ANGLE adapter list. Falling back to software rendering.");
         };
         return options;
     }
 
-    private static object DescribeCandidate(PlatformGraphicsDeviceAdapterDescription adapter) => new
-    {
-        adapter.Description,
-        luid = adapter.DeviceLuid is { } luid ? Convert.ToHexString(luid) : null,
-        uuid = adapter.DeviceUuid is { } uuid ? Convert.ToHexString(uuid) : null
-    };
+    private static JsonObject DescribeCandidate(PlatformGraphicsDeviceAdapterDescription adapter)
+        => DiagnosticData.Object(
+            ("Description", adapter.Description),
+            ("luid", adapter.DeviceLuid is { } luid ? Convert.ToHexString(luid) : null),
+            ("uuid", adapter.DeviceUuid is { } uuid ? Convert.ToHexString(uuid) : null));
 
     private static void LogSelectedAdapter(IReadOnlyList<PlatformGraphicsDeviceAdapterDescription> adapters, int index, bool basicRenderMode)
     {
         if (!DiagnosticLog.IsEnabled) return;
         DiagnosticLog.Info("Avalonia.GPU", "adapterSelected", "ANGLE adapter selection callback completed; device creation can still fall back.",
-            new { basicRenderMode, selectedIndex = index, adapters = adapters.Select(DescribeCandidate).ToArray(),
-                selected = index >= 0 && index < adapters.Count ? WindowsWarpAdapterResolver.DescribeAdapter(adapters[index].DeviceLuid) : null });
+            global::HeyMelody.Diagnostics.DiagnosticData.Object(("basicRenderMode", basicRenderMode), ("selectedIndex", index), ("adapters", adapters.Select(DescribeCandidate).ToArray()), ("selected", index >= 0 && index < adapters.Count ? WindowsWarpAdapterResolver.DescribeAdapter(adapters[index].DeviceLuid) : null)));
     }
 
     internal static AppBuilder UseHeyMelodyRendering(this AppBuilder builder, bool basicRenderMode)
@@ -106,8 +105,7 @@ internal static class RenderingSetup
         var requestedBasicRenderMode = basicRenderMode;
         SKGraphics.SetFontCacheLimit(FontCacheLimitBytes);
         DiagnosticLog.Debug("Avalonia.GPU", "configuration", "Applying the existing GUI render configuration.",
-            new { basicRenderMode = requestedBasicRenderMode, FontCacheLimitBytes, GpuResourceLimitBytes,
-                platform = Environment.OSVersion.Platform.ToString() });
+            global::HeyMelody.Diagnostics.DiagnosticData.Object(("basicRenderMode", requestedBasicRenderMode), ("FontCacheLimitBytes", FontCacheLimitBytes), ("GpuResourceLimitBytes", GpuResourceLimitBytes), ("platform", Environment.OSVersion.Platform.ToString())));
         builder = builder.With(new SkiaOptions { MaxGpuResourceSizeBytes = GpuResourceLimitBytes });
         // Avalonia's default merges every dirty rect of a frame into one union, so the hero animation on the left and any
         // change on the right pane repaint nearly the whole window together. Region tracking keeps them separate.
@@ -130,9 +128,7 @@ internal static class RenderingSetup
             try
             {
                 DiagnosticLog.Info("Avalonia.GPU", "platformInitialized", "Avalonia bootstrap completed; concrete graphics services are not exposed by this public bootstrap API.",
-                    new { application = Application.Current?.GetType().FullName,
-                        graphicsService = (string?)null, renderInterface = (string?)null,
-                        detailsAvailable = false });
+                    global::HeyMelody.Diagnostics.DiagnosticData.Object(("application", Application.Current?.GetType().FullName), ("graphicsService", (string?)null), ("renderInterface", (string?)null), ("detailsAvailable", false)));
             }
             catch (Exception error)
             {

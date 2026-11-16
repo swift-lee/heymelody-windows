@@ -32,7 +32,7 @@ public sealed class VendorResourceClient : IDisposable
         if (productId is not null)
         { values["productId"] = productId; values["color"] = color?.ToString(CultureInfo.InvariantCulture) ?? throw new ArgumentException("Artwork requires a known protocol color."); }
         if (model) values["moduleId"] = "14";
-        return JsonSerializer.SerializeToUtf8Bytes(values);
+        return JsonSerializer.SerializeToUtf8Bytes(values, ResourceWireJsonContext.Default.DictionaryStringString);
     }
 
     public static string Sign(string key, ReadOnlySpan<byte> body) => Convert.ToHexStringLower(HMACSHA1.HashData(new UTF8Encoding(false, true).GetBytes(key), body));
@@ -94,17 +94,17 @@ public sealed class VendorResourceClient : IDisposable
     private async Task<HttpResponseMessage> OpenDownloadAsync(string url, CancellationToken token)
     {
         Uri uri = ValidateDownloadUri(url);
-        DiagnosticLog.Debug("Resources", "http.download-request", "Opening a resource download.", new { url });
+        DiagnosticLog.Debug("Resources", "http.download-request", "Opening a resource download.", global::HeyMelody.Diagnostics.DiagnosticData.Object(("url", url)));
         var response = await _client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
         DiagnosticLog.Debug("Resources", "http.download-response", "Received resource download headers.",
-            new { url, response.StatusCode, contentLength = response.Content.Headers.ContentLength, headers = response.Headers.ToString() });
+            global::HeyMelody.Diagnostics.DiagnosticData.Object(("url", url), ("StatusCode", response.StatusCode), ("contentLength", response.Content.Headers.ContentLength), ("headers", response.Headers.ToString())));
         try
         {
             response.EnsureSuccessStatusCode();
             if (response.RequestMessage?.RequestUri != uri) throw new InvalidDataException("Unexpected resource redirect.");
             return response;
         }
-        catch (Exception error) { DiagnosticLog.Error("Resources", "http.download-failed", "The resource download response was rejected.", error, new { url }); response.Dispose(); throw; }
+        catch (Exception error) { DiagnosticLog.Error("Resources", "http.download-failed", "The resource download response was rejected.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("url", url))); response.Dispose(); throw; }
     }
 
     public static Uri ValidateDownloadUri(string url)
@@ -123,14 +123,14 @@ public sealed class VendorResourceClient : IDisposable
         request.Headers.Add("nonce", Guid.NewGuid().ToString()); request.Headers.Add("sign", Sign(key, body));
         DiagnosticLog.Bytes("Resources", "http.metadata-request", body,
             // Structured headers let the central redactor replace the request signature by name.
-            new { uri = request.RequestUri, headers = request.Headers.ToDictionary(header => header.Key, header => string.Join(", ", header.Value)) });
+            global::HeyMelody.Diagnostics.DiagnosticData.Object(("uri", request.RequestUri), ("headers", request.Headers.ToDictionary(header => header.Key, header => string.Join(", ", header.Value)))));
         using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
         DiagnosticLog.Debug("Resources", "http.metadata-response", "Received resource metadata headers.",
-            new { uri = request.RequestUri, response.StatusCode, contentLength = response.Content.Headers.ContentLength, headers = response.Headers.ToString() });
+            global::HeyMelody.Diagnostics.DiagnosticData.Object(("uri", request.RequestUri), ("StatusCode", response.StatusCode), ("contentLength", response.Content.Headers.ContentLength), ("headers", response.Headers.ToString())));
         response.EnsureSuccessStatusCode();
         if (response.RequestMessage?.RequestUri != request.RequestUri) throw new InvalidDataException("Unexpected metadata redirect.");
         var bytes = await BoundedReadAsync(response, ResourceLimits.MetadataBytes, token).ConfigureAwait(false);
-        DiagnosticLog.Bytes("Resources", "http.metadata-body", bytes, new { uri = request.RequestUri });
+        DiagnosticLog.Bytes("Resources", "http.metadata-body", bytes, global::HeyMelody.Diagnostics.DiagnosticData.Object(("uri", request.RequestUri)));
         JsonDocument? document = null;
         try
         {
@@ -138,7 +138,7 @@ public sealed class VendorResourceClient : IDisposable
             ResourceJson.ValidateUniqueProperties(document.RootElement); return document;
         }
         catch (Exception error)
-        { DiagnosticLog.Error("Resources", "http.metadata-invalid", "Resource metadata parsing failed.", error, new { uri = request.RequestUri, bodyLength = bytes.Length }); document?.Dispose(); throw; }
+        { DiagnosticLog.Error("Resources", "http.metadata-invalid", "Resource metadata parsing failed.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("uri", request.RequestUri), ("bodyLength", bytes.Length))); document?.Dispose(); throw; }
     }
 
     private static JsonElement Data(JsonElement root)

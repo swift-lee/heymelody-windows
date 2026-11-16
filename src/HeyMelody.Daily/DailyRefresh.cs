@@ -17,7 +17,7 @@ public sealed partial class DailyClient
     private byte? _color;
     private DateTimeOffset? _colorObservedAtUtc;
     private int _freshReadDepth;
-    private sealed record CodecRecoveryIdentity(string ProductId, SourceProvenance Provenance);
+    internal sealed record CodecRecoveryIdentity(string ProductId, SourceProvenance Provenance);
     private sealed record CodecRecovery(CodecRecoveryIdentity Identity, string Warning);
 
     private async Task DropSessionAsync()
@@ -138,19 +138,19 @@ public sealed partial class DailyClient
             catch (Exception) when (_calibrationActive) { throw; }
             catch (Exception ex) when (!token.IsCancellationRequested)
             {
-                DiagnosticLog.Error("Daily", "refresh.failed", "A daily refresh attempt failed.", ex, new { phase, attempt, scope, verifiedIdentity });
+                DiagnosticLog.Error("Daily", "refresh.failed", "A daily refresh attempt failed.", ex, global::HeyMelody.Diagnostics.DiagnosticData.Object(("phase", phase), ("attempt", attempt), ("scope", scope), ("verifiedIdentity", DiagnosticData.From(verifiedIdentity, DailyDiagnosticJsonContext.Default.CodecRecoveryIdentity))));
                 failure = DescribeReadFailure(ex, phase);
                 if (attempt == 0 && verifiedIdentity is not null && ex is DailyReadException read && read.CanRecoverCodec)
                 {
                     DiagnosticLog.Warning("Daily", "codec.recovery-planned", "The codec query qualifies for one fresh verified read without repeating the codec query.", ex,
-                        new { phase, attempt, scope, verifiedIdentity, read.Reason });
+                        global::HeyMelody.Diagnostics.DiagnosticData.Object(("phase", phase), ("attempt", attempt), ("scope", scope), ("verifiedIdentity", DiagnosticData.From(verifiedIdentity, DailyDiagnosticJsonContext.Default.CodecRecoveryIdentity)), ("Reason", read.Reason)));
                     codecRecovery = new(verifiedIdentity,
                         $"音频编码查询 0x0114 暂不可用（{read.Reason}），已跳过该查询；其他功能按各自能力和状态使用。重新连接可重试。");
                 }
                 await DropSessionAsync();
                 if (attempt == 0) continue;
             }
-            catch (Exception error) { DiagnosticLog.Warning("Daily", "refresh.cancelled", "The daily refresh was cancelled.", error, new { phase, attempt, scope }); failure = "设备状态读取已取消"; await DropSessionAsync(); break; }
+            catch (Exception error) { DiagnosticLog.Warning("Daily", "refresh.cancelled", "The daily refresh was cancelled.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("phase", phase), ("attempt", attempt), ("scope", scope))); failure = "设备状态读取已取消"; await DropSessionAsync(); break; }
         }
         return PublishReadFailure(failure);
     }
@@ -277,9 +277,9 @@ public sealed partial class DailyClient
             try { parse(payload); }
             catch (Exception ex) when (ex is FormatException or ArgumentException or OverflowException)
             {
-                DiagnosticLog.Bytes("Daily", "query.invalid-fields.payload", payload, new { command = $"0x{command:X4}", scope });
+                DiagnosticLog.Bytes("Daily", "query.invalid-fields.payload", payload, global::HeyMelody.Diagnostics.DiagnosticData.Object(("command", $"0x{command:X4}"), ("scope", scope)));
                 DiagnosticLog.Error("Daily", "query.invalid-fields", "The decoded response fields did not pass their query parser.", ex,
-                    new { command = $"0x{command:X4}", scope, payloadLength = payload.Length });
+                    global::HeyMelody.Diagnostics.DiagnosticData.Object(("command", $"0x{command:X4}"), ("scope", scope), ("payloadLength", payload.Length)));
                 s.Warnings.Add($"查询 0x{command:X4} 的布局未通过校验，状态保留未知。");
             }
         }

@@ -5,6 +5,7 @@
     <SupportedOSPlatformVersion Condition="'$(HeyMelodyDesktopPlatform)' == 'Windows'">10.0.19041.0</SupportedOSPlatformVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <AssemblyName>HeyMelody.Host</AssemblyName>
     <Version>0.9.2</Version>

@@ -15,12 +15,11 @@ public sealed class CalibrationHistoryStore(string directory)
 {
     private readonly string _directory = Path.GetFullPath(directory);
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
     public async Task<IReadOnlyList<CalibrationHistoryEntry>> ReadAsync(string stableKey, CancellationToken token = default)
     {
         await _gate.WaitAsync(token);
-        try { var entries = await ReadCoreAsync(stableKey, token); DiagnosticLog.Debug("Calibration.History", "history.read", "Read calibration history.", new { stableKey, directory = _directory, entries }); return entries; }
-        catch (Exception error) { DiagnosticLog.Error("Calibration.History", "history.read-failed", "Calibration history read failed.", error, new { stableKey, directory = _directory }); throw; }
+        try { var entries = await ReadCoreAsync(stableKey, token); DiagnosticLog.Debug("Calibration.History", "history.read", "Read calibration history.", global::HeyMelody.Diagnostics.DiagnosticData.Object(("stableKey", stableKey), ("directory", _directory), ("entries", DiagnosticData.From(entries, CalibrationJsonContext.Default.HistoryEntries)))); return entries; }
+        catch (Exception error) { DiagnosticLog.Error("Calibration.History", "history.read-failed", "Calibration history read failed.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("stableKey", stableKey), ("directory", _directory))); throw; }
         finally { _gate.Release(); }
     }
     public async Task CheckSaveAsync(CalibrationHistoryEntry entry, int? replacementUid = null, CancellationToken token = default)
@@ -31,17 +30,17 @@ public sealed class CalibrationHistoryStore(string directory)
     }
     public async Task SaveAsync(CalibrationHistoryEntry entry, CancellationToken token = default, int? replacementUid = null)
     {
-        DiagnosticLog.Debug("Calibration.History", "history.save-requested", "Saving a calibration profile history entry.", new { entry, replacementUid, directory = _directory });
+        DiagnosticLog.Debug("Calibration.History", "history.save-requested", "Saving a calibration profile history entry.", global::HeyMelody.Diagnostics.DiagnosticData.Object(("entry", DiagnosticData.From(entry, CalibrationJsonContext.Default.CalibrationHistoryEntry)), ("replacementUid", replacementUid), ("directory", _directory)));
         Validate(entry); await _gate.WaitAsync(token);
         try
         {
             var entries = Prepare(await ReadCoreAsync(entry.StableKey, token), entry, replacementUid);
             Directory.CreateDirectory(_directory); string path = GetPath(entry.StableKey), temporary = path + ".tmp";
-            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(entries, Json), new UTF8Encoding(false), token);
+            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(entries, CalibrationJsonContext.Default.CalibrationHistoryEntryArray), new UTF8Encoding(false), token);
             File.Move(temporary, path, true);
-            DiagnosticLog.Info("Calibration.History", "history.saved", "Calibration history was saved.", new { entry.StableKey, entry.Uid, replacementUid, path });
+            DiagnosticLog.Info("Calibration.History", "history.saved", "Calibration history was saved.", global::HeyMelody.Diagnostics.DiagnosticData.Object(("StableKey", entry.StableKey), ("Uid", entry.Uid), ("replacementUid", replacementUid), ("path", path)));
         }
-        catch (Exception error) { DiagnosticLog.Error("Calibration.History", "history.save-failed", "Calibration history save failed.", error, new { entry.StableKey, entry.Uid, replacementUid, directory = _directory }); throw; }
+        catch (Exception error) { DiagnosticLog.Error("Calibration.History", "history.save-failed", "Calibration history save failed.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("StableKey", entry.StableKey), ("Uid", entry.Uid), ("replacementUid", replacementUid), ("directory", _directory))); throw; }
         finally { _gate.Release(); }
     }
     private static CalibrationHistoryEntry[] Prepare(IReadOnlyList<CalibrationHistoryEntry> existing, CalibrationHistoryEntry entry, int? replacementUid)
@@ -60,17 +59,17 @@ public sealed class CalibrationHistoryStore(string directory)
             var entries = (await ReadCoreAsync(stableKey, token)).Where(x => x.Uid != uid).ToArray();
             if (!File.Exists(GetPath(stableKey))) return;
             string path = GetPath(stableKey), temporary = path + ".tmp";
-            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(entries, Json), new UTF8Encoding(false), token);
+            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(entries, CalibrationJsonContext.Default.CalibrationHistoryEntryArray), new UTF8Encoding(false), token);
             File.Move(temporary, path, true);
-            DiagnosticLog.Info("Calibration.History", "history.deleted", "Deleted the requested calibration history entry.", new { stableKey, uid, path });
+            DiagnosticLog.Info("Calibration.History", "history.deleted", "Deleted the requested calibration history entry.", global::HeyMelody.Diagnostics.DiagnosticData.Object(("stableKey", stableKey), ("uid", uid), ("path", path)));
         }
-        catch (Exception error) { DiagnosticLog.Error("Calibration.History", "history.delete-failed", "Calibration history delete failed.", error, new { stableKey, uid, directory = _directory }); throw; }
+        catch (Exception error) { DiagnosticLog.Error("Calibration.History", "history.delete-failed", "Calibration history delete failed.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("stableKey", stableKey), ("uid", uid), ("directory", _directory))); throw; }
         finally { _gate.Release(); }
     }
     private async Task<IReadOnlyList<CalibrationHistoryEntry>> ReadCoreAsync(string stableKey, CancellationToken token)
     {
         string path = GetPath(stableKey); if (!File.Exists(path)) return [];
-        var entries = JsonSerializer.Deserialize<CalibrationHistoryEntry[]>(await File.ReadAllTextAsync(path, token), Json) ?? [];
+        var entries = JsonSerializer.Deserialize(await File.ReadAllTextAsync(path, token), CalibrationJsonContext.Default.CalibrationHistoryEntryArray) ?? [];
         if (entries.Length > 10 || entries.Any(x => x.StableKey != stableKey) || entries.Select(x => x.Uid).Distinct().Count() != entries.Length)
             throw new InvalidDataException("方案历史数据无效。");
         foreach (var entry in entries) Validate(entry);

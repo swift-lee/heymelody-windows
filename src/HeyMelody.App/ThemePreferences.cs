@@ -84,7 +84,7 @@ internal static class ThemePreferences
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
-            DiagnosticLog.Warning("Settings", "preferences.saveFailed", "Preferences could not be saved", error, new { path = SettingsPath });
+            DiagnosticLog.Warning("Settings", "preferences.saveFailed", "Preferences could not be saved", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", SettingsPath)));
             return false;
         }
         finally
@@ -92,7 +92,7 @@ internal static class ThemePreferences
             if (temporary is not null)
                 try { File.Delete(temporary); }
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-                { DiagnosticLog.Debug("Settings", "preferences.tempDeleteFailed", "Temporary preferences file could not be deleted", new { path = temporary, failure = error.Message }); }
+                { DiagnosticLog.Debug("Settings", "preferences.tempDeleteFailed", "Temporary preferences file could not be deleted", global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", temporary), ("failure", error.Message))); }
         }
     }
 
@@ -102,9 +102,9 @@ internal static class ThemePreferences
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
         {
             if (error is FileNotFoundException or DirectoryNotFoundException)
-                DiagnosticLog.Debug("Settings", "preferences.missing", "Preferences file does not exist; defaults apply", new { path = SettingsPath });
+                DiagnosticLog.Debug("Settings", "preferences.missing", "Preferences file does not exist; defaults apply", global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", SettingsPath)));
             else
-                DiagnosticLog.Warning("Settings", "preferences.loadFailed", "Preferences could not be read; defaults apply", error, new { path = SettingsPath });
+                DiagnosticLog.Warning("Settings", "preferences.loadFailed", "Preferences could not be read; defaults apply", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", SettingsPath)));
             return new();
         }
     }

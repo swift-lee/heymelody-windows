@@ -14,6 +14,7 @@
 
 | 文档入口 | 内容 |
 | --- | --- |
+| [Windows x64 Native AOT 与 R2R + JIT 对比](native-aot-comparison.md) | App／Host 原生编译、三个 R2R 辅助入口的混合包、JSON／COM 兼容性、最终发布 EXE 的无耳机性能实验与工具链限制 |
 | [渲染快速优化（2026-11-07）](rendering-quick-optimization-arm64-2026-11-07.md) | 全平台默认 800px 模型长边上限与空锁前 probe；本机 CPU 指标下降，原 10% 新帧交付门槛未满足，用户接受 CPU 收益放行；Windows ARM64 实测不等于其它平台已实测 |
 | [ARM64 渲染性能审计（2026-11-07）](rendering-performance-arm64-2026-11-07.md) | 同机有／无 3D、静态／动画与滚动对照，Filament 后端及离屏链路审计；区分 UI 回调、位图观测、CPU／GPU 采样与屏显验证边界 |
 | [本机 ARM64 UI 卡顿调查](ui-lag-arm64-2026-10-23.md) | 预构建的默认 WARP 选卡、Adreno 单变量对照、X4 WebP 持续更新成本，以及回调节拍和真实上屏 FPS 的验证边界 |

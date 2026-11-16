@@ -81,7 +81,6 @@ internal sealed class DeviceStateStore
     private const int MaximumEntries = 128;
     private const int MaximumPresentationBytes = 64 * 1024;
     private const int MaximumFileBytes = 16 * 1024 * 1024;
-    private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private readonly string _path;
     private readonly object _gate = new();
     private readonly Dictionary<string, Entry> _entries = [];
@@ -120,7 +119,7 @@ internal sealed class DeviceStateStore
         presentation = NormalizeAncToggles(presentation);
         if (!ValidKey(key) || !ValidPresentation(presentation)) return;
         // A re-read that changes nothing but the time would rewrite the whole file for a timestamp.
-        var content = JsonSerializer.SerializeToUtf8Bytes(presentation with { SampleTime = default }, Json);
+        var content = JsonSerializer.SerializeToUtf8Bytes(presentation with { SampleTime = default }, HostStoreJsonContext.Default.DevicePresentation);
         lock (_gate)
         {
             _entries[key] = new(key, presentation);
@@ -168,7 +167,7 @@ internal sealed class DeviceStateStore
             bool saved = false;
             try { Write(document); saved = true; }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-            { DiagnosticLog.Warning("Settings", "deviceState.saveFailed", "Device state cache could not be saved; it will be retried", error, new { path = _path, entries = document.Devices.Length }); }
+            { DiagnosticLog.Warning("Settings", "deviceState.saveFailed", "Device state cache could not be saved; it will be retried", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", _path), ("entries", document.Devices.Length))); }
             lock (_gate)
             {
                 if (saved) _savedVersion = version;
@@ -202,13 +201,13 @@ internal sealed class DeviceStateStore
             Document? document;
             if (version == 1)
             {
-                var legacy = json.RootElement.Deserialize<LegacyDocument>(Json);
+                var legacy = json.RootElement.Deserialize(HostStoreJsonContext.Default.LegacyStateDocument);
                 if (legacy?.Devices is not { Length: <= MaximumEntries }) return;
                 document = new(2, legacy.PreferredDeviceKey, legacy.Devices
                     .Where(e => e is not null && e.Source == "HeyMelody")
                     .Select(e => new Entry(e.Key, e.Presentation)).ToArray());
             }
-            else if (version == 2) document = json.RootElement.Deserialize<Document>(Json);
+            else if (version == 2) document = json.RootElement.Deserialize(HostStoreJsonContext.Default.StateDocument);
             else return;
             if (document is not { SchemaVersion: 2, Devices: { Length: <= MaximumEntries } devices }
                 || document.PreferredDeviceKey is not null && !ValidKey(document.PreferredDeviceKey)) return;
@@ -222,8 +221,8 @@ internal sealed class DeviceStateStore
                     // The file already holds this sample: seed Remember's throttle so an identical re-read within 60 s of it
                     // is not rewritten. Only when the file needs no migration or repair, so the seed matches what is on disk.
                     if (version != 2) continue;
-                    var content = JsonSerializer.SerializeToUtf8Bytes(presentation with { SampleTime = default }, Json);
-                    if (content.AsSpan().SequenceEqual(JsonSerializer.SerializeToUtf8Bytes(entry.Presentation with { SampleTime = default }, Json)))
+                    var content = JsonSerializer.SerializeToUtf8Bytes(presentation with { SampleTime = default }, HostStoreJsonContext.Default.DevicePresentation);
+                    if (content.AsSpan().SequenceEqual(JsonSerializer.SerializeToUtf8Bytes(entry.Presentation with { SampleTime = default }, HostStoreJsonContext.Default.DevicePresentation)))
                         _queued[entry.Key] = (content, presentation.SampleTime);
                 }
             if (version == 1) _version++;
@@ -231,9 +230,9 @@ internal sealed class DeviceStateStore
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
         {
             if (error is FileNotFoundException or DirectoryNotFoundException)
-                DiagnosticLog.Debug("Settings", "deviceState.missing", "Settings file does not exist; defaults apply", new { path = _path });
+                DiagnosticLog.Debug("Settings", "deviceState.missing", "Settings file does not exist; defaults apply", global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", _path)));
             else
-                DiagnosticLog.Warning("Settings", "deviceState.loadFailed", "Settings file could not be read; defaults apply", error, new { path = _path });
+                DiagnosticLog.Warning("Settings", "deviceState.loadFailed", "Settings file could not be read; defaults apply", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", _path)));
         }
     }
 
@@ -245,14 +244,14 @@ internal sealed class DeviceStateStore
         try
         {
             using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
-            { JsonSerializer.Serialize(stream, document, Json); stream.Flush(flushToDisk: true); }
+            { JsonSerializer.Serialize(stream, document, HostStoreJsonContext.Default.StateDocument); stream.Flush(flushToDisk: true); }
             File.Move(temporaryPath, absolutePath, overwrite: true);
         }
         finally
         {
             try { File.Delete(temporaryPath); }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-            { DiagnosticLog.Debug("Settings", "deviceState.tempDeleteFailed", "Temporary settings file could not be deleted", new { path = temporaryPath, failure = error.Message }); }
+            { DiagnosticLog.Debug("Settings", "deviceState.tempDeleteFailed", "Temporary settings file could not be deleted", global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", temporaryPath), ("failure", error.Message))); }
         }
     }
 
@@ -306,12 +305,12 @@ internal sealed class DeviceStateStore
             || p.FeatureSections.Select(s => s.Id).Distinct().Count() != p.FeatureSections.Length) return false;
         var controls = p.FeatureSections.SelectMany(s => s.Controls).ToArray();
         return controls.Length <= 512 && controls.Select(c => c.Id).Distinct().Count() == controls.Length
-            && JsonSerializer.SerializeToUtf8Bytes(p, Json).Length <= MaximumPresentationBytes;
+            && JsonSerializer.SerializeToUtf8Bytes(p, HostStoreJsonContext.Default.DevicePresentation).Length <= MaximumPresentationBytes;
     }
 
-    private sealed record Entry(string Key, DevicePresentation Presentation);
-    private sealed record Document(int SchemaVersion, string? PreferredDeviceKey, Entry[] Devices);
+    internal sealed record Entry(string Key, DevicePresentation Presentation);
+    internal sealed record Document(int SchemaVersion, string? PreferredDeviceKey, Entry[] Devices);
     // Read-only schema-1 migration: never relabel an unsupported source's presentation.
-    private sealed record LegacyEntry(string Key, string Source, DevicePresentation Presentation);
-    private sealed record LegacyDocument(int SchemaVersion, string? PreferredDeviceKey, LegacyEntry[] Devices);
+    internal sealed record LegacyEntry(string Key, string Source, DevicePresentation Presentation);
+    internal sealed record LegacyDocument(int SchemaVersion, string? PreferredDeviceKey, LegacyEntry[] Devices);
 }

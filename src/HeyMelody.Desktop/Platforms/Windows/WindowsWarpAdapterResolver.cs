@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using HeyMelody.Diagnostics;
+using System.Text.Json.Nodes;
 
 namespace HeyMelodyWindows.Ui;
 
@@ -36,7 +37,7 @@ internal static unsafe class WindowsWarpAdapterResolver
             AdapterDescription1 description = default;
             Marshal.ThrowExceptionForHR(getDescription(adapter, &description));
             DiagnosticLog.Debug("Avalonia.GPU", "warpCandidate", "DXGI resolved the WARP adapter LUID.",
-                new { description.VendorId, description.DeviceId, luid = Convert.ToHexString(description.AdapterLuid.ToBytes()) });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("VendorId", description.VendorId), ("DeviceId", description.DeviceId), ("luid", Convert.ToHexString(description.AdapterLuid.ToBytes()))));
             return description.AdapterLuid.ToBytes();
         }
         finally
@@ -48,7 +49,7 @@ internal static unsafe class WindowsWarpAdapterResolver
         }
     }
 
-    internal static object? DescribeAdapter(byte[]? luid)
+    internal static JsonObject? DescribeAdapter(byte[]? luid)
     {
         if (!OperatingSystem.IsWindows() || luid is not { Length: 8 }) return null;
         nint factory = 0, adapter = 0;
@@ -76,24 +77,23 @@ internal static unsafe class WindowsWarpAdapterResolver
             long driver = 0;
             var driverResult = checkInterface(adapter, &dxgiDevice, &driver);
             var version = unchecked((ulong)driver);
-            return new
-            {
-                description = new string(description.Description, 0, 128).TrimEnd('\0'),
-                description.VendorId, description.DeviceId, description.SubSystemId, description.Revision,
-                dedicatedVideoMemory = (ulong)description.DedicatedVideoMemory,
-                dedicatedSystemMemory = (ulong)description.DedicatedSystemMemory,
-                sharedSystemMemory = (ulong)description.SharedSystemMemory,
-                description.Flags, software = (description.Flags & 2) != 0,
-                luid = Convert.ToHexString(description.AdapterLuid.ToBytes()),
-                driverVersion = driverResult >= 0
-                    ? FormattableString.Invariant($"{version >> 48}.{(version >> 32) & 65535}.{(version >> 16) & 65535}.{version & 65535}") : null,
-                driverVersionHResult = $"0x{driverResult:X8}", driverVersionInterface = "IDXGIDevice"
-            };
+            return DiagnosticData.Object(
+                ("description", new string(description.Description, 0, 128).TrimEnd('\0')),
+                ("VendorId", description.VendorId), ("DeviceId", description.DeviceId),
+                ("SubSystemId", description.SubSystemId), ("Revision", description.Revision),
+                ("dedicatedVideoMemory", (ulong)description.DedicatedVideoMemory),
+                ("dedicatedSystemMemory", (ulong)description.DedicatedSystemMemory),
+                ("sharedSystemMemory", (ulong)description.SharedSystemMemory),
+                ("Flags", description.Flags), ("software", (description.Flags & 2) != 0),
+                ("luid", Convert.ToHexString(description.AdapterLuid.ToBytes())),
+                ("driverVersion", driverResult >= 0
+                    ? FormattableString.Invariant($"{version >> 48}.{(version >> 32) & 65535}.{(version >> 16) & 65535}.{version & 65535}") : null),
+                ("driverVersionHResult", $"0x{driverResult:X8}"), ("driverVersionInterface", "IDXGIDevice"));
         }
         catch (Exception error)
         {
             DiagnosticLog.Warning("Avalonia.GPU", "adapterDetailsUnavailable", "DXGI could not describe the selected adapter; selection is unchanged.",
-                error, new { luid = Convert.ToHexString(luid) });
+                error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("luid", Convert.ToHexString(luid))));
             return null;
         }
         finally

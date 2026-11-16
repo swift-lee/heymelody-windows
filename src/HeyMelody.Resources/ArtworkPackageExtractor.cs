@@ -146,7 +146,7 @@ internal static class ArtworkPackageExtractor
                 try { using var glb = OpenRead(path); ValidateGlb(glb, 0, glb.Length); }
                 catch (Exception error) when (error is InvalidDataException or JsonException)
                 {
-                    DiagnosticLog.Warning("Resources", "cache.invalid", "A package GLB model failed validation and was skipped.", error, new { path, reason = "invalid glb" });
+                    DiagnosticLog.Warning("Resources", "cache.invalid", "A package GLB model failed validation and was skipped.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", path), ("reason", "invalid glb")));
                     return;
                 }
                 kind = "model";
@@ -171,14 +171,14 @@ internal static class ArtworkPackageExtractor
         {
             Span<byte> head = stackalloc byte[16];
             if (source.Length < 40 || !TryRead(source, 0, head))
-            { DiagnosticLog.Warning("Resources", "cache.invalid", "A vfxms container is too short to contain a model.", null, new { path = container, reason = "vfxms header", length = source.Length }); return null; }
+            { DiagnosticLog.Warning("Resources", "cache.invalid", "A vfxms container is too short to contain a model.", null, global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", container), ("reason", "vfxms header"), ("length", source.Length))); return null; }
             start = BinaryPrimitives.ReadInt32BigEndian(head.Slice(8, 4)); length = BinaryPrimitives.ReadInt32BigEndian(head.Slice(12, 4));
             Span<byte> magic = stackalloc byte[4];
             if (start < 40 || length < 12 || start + length > source.Length || !TryRead(source, start, magic) || !magic.SequenceEqual("glTF"u8))
-            { DiagnosticLog.Warning("Resources", "cache.invalid", "A vfxms container does not hold a valid embedded glTF.", null, new { path = container, reason = "vfxms glTF bounds", start, length }); return null; }
+            { DiagnosticLog.Warning("Resources", "cache.invalid", "A vfxms container does not hold a valid embedded glTF.", null, global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", container), ("reason", "vfxms glTF bounds"), ("start", start), ("length", length))); return null; }
             try { ValidateGlb(source, start, length); }
             catch (Exception error) when (error is InvalidDataException or JsonException)
-            { DiagnosticLog.Warning("Resources", "cache.invalid", "The glTF embedded in a vfxms container failed validation.", error, new { path = container, reason = "embedded glb" }); return null; }
+            { DiagnosticLog.Warning("Resources", "cache.invalid", "The glTF embedded in a vfxms container failed validation.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", container), ("reason", "embedded glb"))); return null; }
             string path = UniquePath(root, "model", ".glb");
             byte[] buffer = ArrayPool<byte>.Shared.Rent(65536);
             try
@@ -249,7 +249,7 @@ internal static class ArtworkPackageExtractor
             try { package.Add(IndexAnimation(package, animation, folders, out string? original) with
                 { Role = role, Kind = "lottie", Order = index, Title = listName + "[" + index + "]", Metadata = Scalars(item) }, animation, original); }
             catch (Exception error) when (error is JsonException or InvalidDataException or IOException or ArgumentException)
-            { DiagnosticLog.Warning("Resources", "cache.invalid", "A package animation could not be indexed and was skipped.", error, new { path = animation, reason = "animation index", role, index }); }
+            { DiagnosticLog.Warning("Resources", "cache.invalid", "A package animation could not be indexed and was skipped.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", animation), ("reason", "animation index"), ("role", role), ("index", index))); }
         }
     }
 
@@ -279,7 +279,7 @@ internal static class ArtworkPackageExtractor
             }
         if (!rewritten) return new();
         string derived = UniquePath(directory, Path.GetFileNameWithoutExtension(animation) + ".heymelody", ".json");
-        File.WriteAllBytes(derived, JsonSerializer.SerializeToUtf8Bytes(node));
+        File.WriteAllBytes(derived, JsonSerializer.SerializeToUtf8Bytes(node, ResourceWireJsonContext.Default.JsonNode));
         original = animation;
         return new() { Path = derived };
     }
@@ -306,7 +306,7 @@ internal static class ArtworkPackageExtractor
                 && root.TryGetProperty("op", out var op) && op.TryGetDouble(out double end) && end > start;
         }
         catch (Exception error) when (error is JsonException or IOException or InvalidOperationException)
-        { DiagnosticLog.Debug("Resources", "animation.rejected", "A candidate file is not a readable Lottie animation.", new { path, failure = error.Message }); return false; }
+        { DiagnosticLog.Debug("Resources", "animation.rejected", "A candidate file is not a readable Lottie animation.", global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", path), ("failure", error.Message))); return false; }
         static bool Positive(JsonElement root, string name) => root.TryGetProperty(name, out var value) && value.TryGetDouble(out double number) && number > 0;
     }
 

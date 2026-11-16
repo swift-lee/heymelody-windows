@@ -78,7 +78,7 @@ internal sealed class DiagnosticWriter : IDisposable
                 if (lost != 0)
                     await WriteEntryAsync(new(DateTimeOffset.UtcNow, DiagnosticLevel.Warning, "Diagnostics", "logging.dropped",
                         "Diagnostic events were rejected after the writer closed", null, Environment.CurrentManagedThreadId,
-                        JsonSerializer.SerializeToElement(new { lostEvents = lost }), null)).ConfigureAwait(false);
+                        DiagnosticData.Element(DiagnosticData.Object(("lostEvents", lost))), null)).ConfigureAwait(false);
                 while (_queue.Reader.TryRead(out var entry))
                 {
                     await ReportBacklogAsync().ConfigureAwait(false);
@@ -113,19 +113,18 @@ internal sealed class DiagnosticWriter : IDisposable
         Interlocked.Exchange(ref _backlogReportedAt, peak);
         await WriteEntryAsync(new(DateTimeOffset.UtcNow, DiagnosticLevel.Warning, "Diagnostics", "logging.backlog",
             "Diagnostic writer is behind; events are retained in memory", null, Environment.CurrentManagedThreadId,
-            JsonSerializer.SerializeToElement(new { pendingEvents = peak, warningThreshold = _backlogWarning }), null)).ConfigureAwait(false);
+            DiagnosticData.Element(DiagnosticData.Object(("pendingEvents", peak), ("warningThreshold", _backlogWarning))), null)).ConfigureAwait(false);
     }
 
     private async Task WriteEntryAsync(DiagnosticEntry entry)
     {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(new
-        {
-            schemaVersion = 1, timeUtc = entry.TimeUtc, sequence = ++_sequence, level = entry.Level.ToString(),
-            component = _component, role = _role, pid = Environment.ProcessId, processInstanceId = _instance,
-            sessionId = _session.SessionId, ownerEpoch = _session.OwnerEpoch, source = entry.Source,
-            eventName = entry.EventName, message = entry.Message, correlationId = entry.CorrelationId,
-            threadId = entry.ThreadId, data = entry.Data, exception = entry.Exception
-        });
+        var payload = DiagnosticData.Object(
+            ("schemaVersion", 1), ("timeUtc", entry.TimeUtc), ("sequence", ++_sequence), ("level", entry.Level.ToString()),
+            ("component", _component), ("role", _role), ("pid", Environment.ProcessId), ("processInstanceId", _instance),
+            ("sessionId", _session.SessionId), ("ownerEpoch", _session.OwnerEpoch), ("source", entry.Source),
+            ("eventName", entry.EventName), ("message", entry.Message), ("correlationId", entry.CorrelationId),
+            ("threadId", entry.ThreadId), ("data", entry.Data), ("exception", entry.Exception));
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(payload, DiagnosticJsonContext.Default.JsonNode);
         if (_length != 0 && _length + bytes.Length + 1 > _rotationBytes)
         {
             await _file.DisposeAsync().ConfigureAwait(false);

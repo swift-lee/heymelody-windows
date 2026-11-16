@@ -78,7 +78,7 @@ public static partial class DiagnosticRuntime
                     _joinedOwner = session;
                     if (session.Failure is not null) DiagnosticLog.ReportExternalFailure(session.Failure);
                     DiagnosticLog.Info("Runtime", "bootstrap.completed", "Logging initialized before UI/rendering",
-                        new { startedAtUtc = started, elapsedMilliseconds = timer.Elapsed.TotalMilliseconds });
+                        global::HeyMelody.Diagnostics.DiagnosticData.Object(("startedAtUtc", started), ("elapsedMilliseconds", timer.Elapsed.TotalMilliseconds)));
                     return pendingLease;
                 }
                 if (!ensureBackend) break;
@@ -107,7 +107,7 @@ public static partial class DiagnosticRuntime
     {
         try
         {
-            var session = JsonSerializer.Deserialize<DiagnosticSessionInfo>(File.ReadAllText(DiagnosticPaths.ReadyFile));
+            var session = JsonSerializer.Deserialize(File.ReadAllText(DiagnosticPaths.ReadyFile), DiagnosticJsonContext.Default.DiagnosticSessionInfo);
             return session is { SchemaVersion: 1 } && session.UserSessionKey == DiagnosticPaths.UserSessionKey ? session : null;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return null; }

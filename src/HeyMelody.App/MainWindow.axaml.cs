@@ -169,7 +169,7 @@ public partial class MainWindow : FAAppWindow
         catch (OperationCanceledException) when (_closing) { }
         catch (Exception error)
         {
-            DiagnosticLog.Warning("ui.lifetime", "backendEventFailed", "Main window could not handle a backend event", error, new { notification.Kind, notification.ExitRequestId });
+            DiagnosticLog.Warning("ui.lifetime", "backendEventFailed", "Main window could not handle a backend event", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("Kind", notification.Kind), ("ExitRequestId", notification.ExitRequestId)));
             if (!_closing && !_backendStopping)
             {
                 _viewModel.CancelBackendExit();
@@ -183,7 +183,7 @@ public partial class MainWindow : FAAppWindow
         if (previous is not null)
         {
             try { await previous; }
-            catch (Exception error) { DiagnosticLog.Debug("ui.lifetime", "previousVoteFailed", "The previous exit vote had failed", new { error = error.Message, requestId }); }
+            catch (Exception error) { DiagnosticLog.Debug("ui.lifetime", "previousVoteFailed", "The previous exit vote had failed", global::HeyMelody.Diagnostics.DiagnosticData.Object(("error", error.Message), ("requestId", requestId))); }
         }
         if (_exitRequestId == requestId && !_closed && !_backendStopping)
             await VoteForBackendExitAsync(requestId);
@@ -336,12 +336,12 @@ public partial class MainWindow : FAAppWindow
         catch (OperationCanceledException) when (_managerLifetime.IsCancellationRequested) { }
         catch (Exception error)
         {
-            DiagnosticLog.Warning("ui.lifetime", "calibrationLaunchFailed", "The calibration window did not start or complete", error, new { kind });
+            DiagnosticLog.Warning("ui.lifetime", "calibrationLaunchFailed", "The calibration window did not start or complete", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("kind", kind)));
             if (!_closing) await _viewModel.Dialogs.RunAsync(token => _confirmations.AlertAsync("无法打开测试", "测试组件未能正常启动或完成，请检查耳机连接及客户端文件后重试。", token), _managerLifetime.Token);
         }
         finally
         {
-            if (state is not null) { try { await service.CancelCalibrationAsync(state.Handle, CancellationToken.None); } catch (Exception error) { DiagnosticLog.Debug("ui.lifetime", "calibrationCancelFailed", "Final calibration cancel failed", new { error = error.Message }); } }
+            if (state is not null) { try { await service.CancelCalibrationAsync(state.Handle, CancellationToken.None); } catch (Exception error) { DiagnosticLog.Debug("ui.lifetime", "calibrationCancelFailed", "Final calibration cancel failed", global::HeyMelody.Diagnostics.DiagnosticData.Object(("error", error.Message))); } }
         }
     }
 
@@ -432,7 +432,7 @@ public partial class MainWindow : FAAppWindow
             }
             else await work;
         }
-        catch (Exception error) { DiagnosticLog.Warning("ui.lifetime", "closeCleanupFailed", "Main window cleanup failed after close was approved.", error, new { stage }); }
+        catch (Exception error) { DiagnosticLog.Warning("ui.lifetime", "closeCleanupFailed", "Main window cleanup failed after close was approved.", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("stage", stage))); }
     }
 
     private void MarkBackendStopping()

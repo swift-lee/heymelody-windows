@@ -107,11 +107,11 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
 
     public async Task<UiSnapshot> ConnectAsync(string identity, CancellationToken token)
     {
-        DiagnosticLog.Info("host.connection", "connectRequested", "Connection to a device was requested", new { identity });
+        DiagnosticLog.Info("host.connection", "connectRequested", "Connection to a device was requested", global::HeyMelody.Diagnostics.DiagnosticData.Object(("identity", identity)));
         if (!_devices.TryGetValue(identity, out var peer))
         {
             var unknown = new InvalidOperationException("重新刷新设备列表后再连接。");
-            DiagnosticLog.Warning("host.connection", "connectFailed", "Requested device is not in the current device list", unknown, new { identity, reason = "unknownIdentity" });
+            DiagnosticLog.Warning("host.connection", "connectFailed", "Requested device is not in the current device list", unknown, global::HeyMelody.Diagnostics.DiagnosticData.Object(("identity", identity), ("reason", "unknownIdentity")));
             throw unknown;
         }
         token.ThrowIfCancellationRequested();
@@ -120,7 +120,7 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
         {
             var rejected = new InvalidOperationException("所选耳机未启用或已解除配对，请重新选择设备。");
             DiagnosticLog.Warning("host.connection", "connectFailed", "Requested device was rejected by the whitelist or is no longer a paired audio device", rejected,
-                new { identity, name = peer.Name, reason = "whitelistOrUnpaired" });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("identity", identity), ("name", peer.Name), ("reason", "whitelistOrUnpaired")));
             throw rejected;
         }
         try
@@ -130,12 +130,12 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
             _getSubmissions = _setSubmissions = _otherSubmissions = 0;
             _client = CreateDailyClient(peer.Address);
             var snapshot = Map(await _client.RefreshAsync(token));
-            DiagnosticLog.Info("host.connection", "connected", "Device connection established", new { identity, name = peer.Name, snapshot.ControlReady });
+            DiagnosticLog.Info("host.connection", "connected", "Device connection established", global::HeyMelody.Diagnostics.DiagnosticData.Object(("identity", identity), ("name", peer.Name), ("ControlReady", snapshot.ControlReady)));
             return snapshot;
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
-            DiagnosticLog.Warning("host.connection", "connectFailed", "Device connection failed", error, new { identity, name = peer.Name, reason = "refreshFailed" });
+            DiagnosticLog.Warning("host.connection", "connectFailed", "Device connection failed", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("identity", identity), ("name", peer.Name), ("reason", "refreshFailed")));
             throw;
         }
     }
@@ -144,11 +144,11 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
     // The address arrives through its private redirected stdin, never a command line.
     internal async Task<UiSnapshot> InitializePeerAsync(string identity, string name, ulong address, CancellationToken token)
     {
-        DiagnosticLog.Info("host.connection", "connectRequested", "Peer worker initialization was requested", new { identity, name });
+        DiagnosticLog.Info("host.connection", "connectRequested", "Peer worker initialization was requested", global::HeyMelody.Diagnostics.DiagnosticData.Object(("identity", identity), ("name", name)));
         if (string.IsNullOrWhiteSpace(identity) || address is 0 or > 0xFFFFFFFFFFFFUL)
         {
             var invalid = new InvalidDataException();
-            DiagnosticLog.Warning("host.connection", "connectFailed", "Peer worker initialization carried an invalid identity or address", invalid, new { hasIdentity = !string.IsNullOrWhiteSpace(identity), reason = "invalidRequest" });
+            DiagnosticLog.Warning("host.connection", "connectFailed", "Peer worker initialization carried an invalid identity or address", invalid, global::HeyMelody.Diagnostics.DiagnosticData.Object(("hasIdentity", !string.IsNullOrWhiteSpace(identity)), ("reason", "invalidRequest")));
             throw invalid;
         }
         try
@@ -161,12 +161,12 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
             if (snapshot.ControlReady) await _client.StartMonitoringAsync(token);
             await InitializeCalibrationAsync(token);
             snapshot = Map(_last!);
-            DiagnosticLog.Info("host.connection", "connected", "Peer worker initialized", new { identity, name, snapshot.ControlReady });
+            DiagnosticLog.Info("host.connection", "connected", "Peer worker initialized", global::HeyMelody.Diagnostics.DiagnosticData.Object(("identity", identity), ("name", name), ("ControlReady", snapshot.ControlReady)));
             return snapshot;
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
-            DiagnosticLog.Warning("host.connection", "connectFailed", "Peer worker initialization failed", error, new { identity, name, reason = "initializeFailed" });
+            DiagnosticLog.Warning("host.connection", "connectFailed", "Peer worker initialization failed", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("identity", identity), ("name", name), ("reason", "initializeFailed")));
             throw;
         }
     }
@@ -180,7 +180,7 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
         var client = _client; _client = null; _selected = null; _selectedName = ""; _selectedAddress = null;
         if (client is not null) { client.SnapshotChanged -= OnDailySnapshot; await client.DisposeAsync(); }
         lock (_snapshotGate) { _lastDailyRevision = 0; _uiRevisions.Clear(); _last = null; }
-        if (client is not null) DiagnosticLog.Info("host.connection", "disconnected", "Device connection closed", new { identity = previous });
+        if (client is not null) DiagnosticLog.Info("host.connection", "disconnected", "Device connection closed", global::HeyMelody.Diagnostics.DiagnosticData.Object(("identity", previous)));
     }
 
     public async Task<UiSnapshot> RefreshAsync(CancellationToken token)
@@ -283,7 +283,7 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
         catch (Exception error)
         {
             DiagnosticLog.Debug("host.connection", "evidenceUnknown", "Connection evidence could not be read",
-                new { exceptionType = error.GetType().FullName, error.HResult, error.Message });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("exceptionType", error.GetType().FullName), ("HResult", error.HResult), ("Message", error.Message)));
             return ConnectionState.Unknown;
         }
     }
@@ -416,26 +416,16 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
         finally { _bluetooth.Dispose(); }
     }
 
-    public object Diagnostics() => new
-    {
-        observedAtUtc = _last?.ObservedAtUtc, productId = _last?.ProductId,
-        profileVerified = _last?.ProfileVerified, connected = _last?.Connected,
-        capabilities = _last?.Capabilities, features = _last?.RawFeatures,
-        battery = _last?.Battery, anc = _last?.Anc,
-        presetId = _last?.PresetId, customEqualizersRead = _last?.CustomEqualizersRead,
-        customEqualizerIds = _last?.CustomEqualizers.Select(entry => (int)entry.Id).ToArray(),
-        customEqualizerLayouts = _last?.CustomEqualizers.Select(entry => new
-        {
-            id = entry.Id, entry.MinimumGain, entry.MaximumGain,
-            frequencies = entry.Bands.Select(band => (int)band.Frequency).ToArray()
-        }).ToArray(),
-        equalizerFrequencies = _last?.EqualizerFrequencies, hiRes = _last?.HiRes,
-        spatialMode = _last?.SpatialMode, gameMode = _last?.GameMode,
-        dualConnection = _last?.DualConnection, warnings = _last?.Warnings,
-        applicationGetSubmissions = _getSubmissions, applicationSetSubmissions = _setSubmissions,
-        applicationOtherSubmissions = _otherSubmissions,
-        evidenceScope = "application-submission-and-peer-readback"
-    };
+    public object Diagnostics() => new WorkerDiagnostics(
+        _last?.ObservedAtUtc, _last?.ProductId, _last?.ProfileVerified, _last?.Connected,
+        _last?.Capabilities, _last?.RawFeatures, _last?.Battery, _last?.Anc,
+        _last?.PresetId, _last?.CustomEqualizersRead,
+        _last?.CustomEqualizers.Select(entry => (int)entry.Id).ToArray(),
+        _last?.CustomEqualizers.Select(entry => new WorkerEqualizerLayout(entry.Id, entry.MinimumGain, entry.MaximumGain,
+            entry.Bands.Select(band => (int)band.Frequency).ToArray())).ToArray(),
+        _last?.EqualizerFrequencies, _last?.HiRes, _last?.SpatialMode, _last?.GameMode,
+        _last?.DualConnection, _last?.Warnings, _getSubmissions, _setSubmissions, _otherSubmissions,
+        "application-submission-and-peer-readback");
 
     private void RecordSubmission(ReadOnlyMemory<byte> bytes)
     {

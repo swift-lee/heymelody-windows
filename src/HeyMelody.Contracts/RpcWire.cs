@@ -1,4 +1,5 @@
 using System.Text;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
@@ -33,9 +34,18 @@ public static class RpcWire
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = false,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        // Set here: options lock on first use. The reflection resolver stays as the fallback for unlisted types.
-        TypeInfoResolver = JsonTypeInfoResolver.Combine(RpcJsonContext.Default, new DefaultJsonTypeInfoResolver())
+        TypeInfoResolver = CreateResolver()
     };
+
+    public static JsonTypeInfo<T> TypeInfo<T>() => (JsonTypeInfo<T>)Json.GetTypeInfo(typeof(T));
+
+    [UnconditionalSuppressMessage("Trimming", "IL2026",
+        Justification = "Native AOT sets IsReflectionEnabledByDefault=false and removes this reflection-only JIT compatibility branch.")]
+    [UnconditionalSuppressMessage("Aot", "IL3050",
+        Justification = "Native AOT sets IsReflectionEnabledByDefault=false and removes this reflection-only JIT compatibility branch.")]
+    private static IJsonTypeInfoResolver CreateResolver() => JsonSerializer.IsReflectionEnabledByDefault
+        ? JsonTypeInfoResolver.Combine(RpcJsonContext.Default, new DefaultJsonTypeInfoResolver())
+        : RpcJsonContext.Default;
 }
 
 /// <summary>

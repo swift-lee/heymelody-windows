@@ -42,14 +42,14 @@ public sealed partial class NativeHeadsetService
                 SelectedPreviewAudioOutputToken = (_auditionPlayer as ISelectableCalibrationAuditionPlayer)?.SelectedOutputToken,
                 PreviewAudioError = error, Revision = ++_calibrationRevision };
             DiagnosticLog.Debug("host.audio", "state", "Audition state changed",
-                new { epoch = _previewEpoch, playing, error, state.Handle, state.Stage, state.PreviewMode });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("epoch", _previewEpoch), ("playing", playing), ("error", error), ("Handle", state.Handle), ("Stage", state.Stage), ("PreviewMode", state.PreviewMode)));
             CalibrationChanged?.Invoke(_calibrationState);
         }
     }
     private async Task PreviewAuditionAsync(CalibrationPreviewMode mode, CancellationToken token)
     {
         long epoch = InvalidateAudition();
-        DiagnosticLog.Info("host.audio", "previewRequested", "Changing audition playback mode", new { epoch, mode });
+        DiagnosticLog.Info("host.audio", "previewRequested", "Changing audition playback mode", global::HeyMelody.Diagnostics.DiagnosticData.Object(("epoch", epoch), ("mode", mode)));
         using var run = CancellationTokenSource.CreateLinkedTokenSource(token);
         CancellationToken runToken = run.Token;
         await _auditionGate.WaitAsync(token);
@@ -78,7 +78,7 @@ public sealed partial class NativeHeadsetService
                 catch (Exception error)
                 {
                     if (error is not OperationCanceledException)
-                        DiagnosticLog.Error("host.audio", "pauseFailed", "Audition could not pause", error, new { epoch, mode, stopSubmitted });
+                        DiagnosticLog.Error("host.audio", "pauseFailed", "Audition could not pause", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("epoch", epoch), ("mode", mode), ("stopSubmitted", stopSubmitted)));
                     if (_auditionPlayer is { } failed)
                     {
                         if (error is OperationCanceledException) await StopPlayerAsync(failed);
@@ -86,7 +86,7 @@ public sealed partial class NativeHeadsetService
                     }
                     if (!stopSubmitted)
                         try { await engine.PreviewAsync(mode, CancellationToken.None); }
-                        catch (Exception stopError) { DiagnosticLog.Debug("host.audio", "previewStopFailed", "Fallback preview stop after a failed start was not confirmed", new { failure = stopError.Message, type = stopError.GetType().Name }); }
+                        catch (Exception stopError) { DiagnosticLog.Debug("host.audio", "previewStopFailed", "Fallback preview stop after a failed start was not confirmed", global::HeyMelody.Diagnostics.DiagnosticData.Object(("failure", stopError.Message), ("type", stopError.GetType().Name))); }
                     if (epoch == Interlocked.Read(ref _previewEpoch)) PublishAuditionState(false, "试听已停止，请检查耳机音频连接后重试。");
                     if (error is OperationCanceledException) throw;
                     throw new InvalidOperationException("试听未能暂停，请检查耳机音频连接后重试。");
@@ -128,7 +128,7 @@ public sealed partial class NativeHeadsetService
             {
                 if (error is not OperationCanceledException)
                     DiagnosticLog.Error("host.audio", "previewFailed", "Audition playback or DSP transition failed", error,
-                        new { epoch, mode, dspStarted, keepPlaying });
+                        global::HeyMelody.Diagnostics.DiagnosticData.Object(("epoch", epoch), ("mode", mode), ("dspStarted", dspStarted), ("keepPlaying", keepPlaying)));
                 // Still inside the gate: a later epoch can cancel this operation but cannot start a newer stream yet.
                 await _auditionTransitionStop;
                 if (error is OperationCanceledException) await StopPlayerAsync(player);
@@ -138,7 +138,7 @@ public sealed partial class NativeHeadsetService
                     catch (Exception stopError)
                     {
                         // Engine preserves unconfirmed STOP ownership and the calibration lease.
-                        DiagnosticLog.Debug("host.audio", "previewStopFailed", "Preview stop after a failed start was not confirmed", new { failure = stopError.Message, type = stopError.GetType().Name });
+                        DiagnosticLog.Debug("host.audio", "previewStopFailed", "Preview stop after a failed start was not confirmed", global::HeyMelody.Diagnostics.DiagnosticData.Object(("failure", stopError.Message), ("type", stopError.GetType().Name)));
                     }
                 if (epoch == Interlocked.Read(ref _previewEpoch))
                     PublishAuditionState(false, "试听未能播放，请检查耳机音频连接后重试。");
@@ -204,7 +204,7 @@ public sealed partial class NativeHeadsetService
             await StopPlayerAsync(player);
             if (dispose)
                 try { await player.DisposeAsync(); }
-                catch (Exception disposeError) { DiagnosticLog.Debug("host.audio", "playerDisposeFailed", "Audition player dispose failed", new { failure = disposeError.Message, type = disposeError.GetType().Name }); }
+                catch (Exception disposeError) { DiagnosticLog.Debug("host.audio", "playerDisposeFailed", "Audition player dispose failed", global::HeyMelody.Diagnostics.DiagnosticData.Object(("failure", disposeError.Message), ("type", disposeError.GetType().Name))); }
         }
         finally { _auditionGate.Release(); }
     }
@@ -217,7 +217,7 @@ public sealed partial class NativeHeadsetService
             DiagnosticLog.Error("host.audio", "stopFailed", "Local audition player could not stop and will be discarded", error);
             Interlocked.CompareExchange(ref _auditionPlayer, null, player);
             try { await player.DisposeAsync(); }
-            catch (Exception disposeError) { DiagnosticLog.Debug("host.audio", "playerDisposeFailed", "Audition player dispose failed after stop failure", new { failure = disposeError.Message, type = disposeError.GetType().Name }); }
+            catch (Exception disposeError) { DiagnosticLog.Debug("host.audio", "playerDisposeFailed", "Audition player dispose failed after stop failure", global::HeyMelody.Diagnostics.DiagnosticData.Object(("failure", disposeError.Message), ("type", disposeError.GetType().Name))); }
         }
     }
     private async Task DiscardPlayerAsync(ICalibrationAuditionPlayer player)
@@ -225,7 +225,7 @@ public sealed partial class NativeHeadsetService
         await StopPlayerAsync(player);
         Interlocked.CompareExchange(ref _auditionPlayer, null, player);
         try { await player.DisposeAsync(); }
-        catch (Exception disposeError) { DiagnosticLog.Debug("host.audio", "playerDisposeFailed", "Discarded audition player dispose failed", new { failure = disposeError.Message, type = disposeError.GetType().Name }); }
+        catch (Exception disposeError) { DiagnosticLog.Debug("host.audio", "playerDisposeFailed", "Discarded audition player dispose failed", global::HeyMelody.Diagnostics.DiagnosticData.Object(("failure", disposeError.Message), ("type", disposeError.GetType().Name))); }
     }
     private void ThrowIfAuditionTransitionFailed(long epoch)
     {
@@ -251,7 +251,7 @@ public sealed partial class NativeHeadsetService
             await DiscardPlayerAsync(player);
             if (_calibration is { } engine)
                 try { await engine.PreviewAsync(CalibrationPreviewMode.Stopped); }
-                catch (Exception stopError) { DiagnosticLog.Debug("host.audio", "previewStopFailed", "Preview stop after discarding the player was not confirmed", new { failure = stopError.Message, type = stopError.GetType().Name }); }
+                catch (Exception stopError) { DiagnosticLog.Debug("host.audio", "previewStopFailed", "Preview stop after discarding the player was not confirmed", global::HeyMelody.Diagnostics.DiagnosticData.Object(("failure", stopError.Message), ("type", stopError.GetType().Name))); }
             if (epoch == Interlocked.Read(ref _previewEpoch))
                 PublishAuditionState(false, "试听已停止，耳机音频输出不可用，请检查连接后重试。");
         }

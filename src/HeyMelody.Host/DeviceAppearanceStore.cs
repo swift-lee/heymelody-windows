@@ -15,7 +15,6 @@ internal sealed record DeviceAppearance(string ProductId, byte? Color, bool Colo
 internal sealed partial class DeviceAppearanceStore(string path)
 {
     private const int MaximumDevices = 4096;
-    private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private readonly object _gate = new();
     private Dictionary<string, Entry>? _entries;
 
@@ -44,7 +43,7 @@ internal sealed partial class DeviceAppearanceStore(string path)
                 entries.Remove(stale.Key);
             try { Write(entries.Values.OrderBy(entry => entry.Key, StringComparer.Ordinal).ToArray()); }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-            { DiagnosticLog.Warning("Settings", "appearance.saveFailed", "Device appearance cache could not be saved", error, new { path }); }
+            { DiagnosticLog.Warning("Settings", "appearance.saveFailed", "Device appearance cache could not be saved", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", path))); }
             return true;
         }
     }
@@ -57,7 +56,7 @@ internal sealed partial class DeviceAppearanceStore(string path)
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             if (stream.Length > 4 * 1024 * 1024) return _entries;
-            var document = JsonSerializer.Deserialize<Document>(stream, Json);
+            var document = JsonSerializer.Deserialize(stream, HostStoreJsonContext.Default.AppearanceDocument);
             if (document is not { SchemaVersion: 1, Devices: { } devices }) return _entries;
             foreach (var entry in devices.Take(MaximumDevices))
                 if (IsValidKey(entry.Key) && ProductPattern().IsMatch(entry.ProductId ?? "")
@@ -67,9 +66,9 @@ internal sealed partial class DeviceAppearanceStore(string path)
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
         {
             if (error is FileNotFoundException or DirectoryNotFoundException)
-                DiagnosticLog.Debug("Settings", "appearance.missing", "Settings file does not exist; defaults apply", new { path = path });
+                DiagnosticLog.Debug("Settings", "appearance.missing", "Settings file does not exist; defaults apply", global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", path)));
             else
-                DiagnosticLog.Warning("Settings", "appearance.loadFailed", "Settings file could not be read; defaults apply", error, new { path = path });
+                DiagnosticLog.Warning("Settings", "appearance.loadFailed", "Settings file could not be read; defaults apply", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", path)));
         }
         // A damaged or missing file is only a cache; the next observation rewrites it.
         return _entries;
@@ -84,7 +83,7 @@ internal sealed partial class DeviceAppearanceStore(string path)
         {
             using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
             {
-                JsonSerializer.Serialize(stream, new Document(1, entries), Json);
+                JsonSerializer.Serialize(stream, new Document(1, entries), HostStoreJsonContext.Default.AppearanceDocument);
                 stream.Flush(flushToDisk: true);
             }
             File.Move(temporaryPath, absolutePath, overwrite: true);
@@ -93,7 +92,7 @@ internal sealed partial class DeviceAppearanceStore(string path)
         {
             try { File.Delete(temporaryPath); }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-            { DiagnosticLog.Debug("Settings", "appearance.tempDeleteFailed", "Temporary settings file could not be deleted", new { path = temporaryPath, failure = error.Message }); }
+            { DiagnosticLog.Debug("Settings", "appearance.tempDeleteFailed", "Temporary settings file could not be deleted", global::HeyMelody.Diagnostics.DiagnosticData.Object(("path", temporaryPath), ("failure", error.Message))); }
         }
     }
 
@@ -102,6 +101,6 @@ internal sealed partial class DeviceAppearanceStore(string path)
     [GeneratedRegex("^[0-9A-F]{6}$")]
     private static partial Regex ProductPattern();
 
-    private sealed record Entry(string Key, string ProductId, byte? Color, string? ColorSource, DateTimeOffset UpdatedAt);
-    private sealed record Document(int SchemaVersion, Entry[] Devices);
+    internal sealed record Entry(string Key, string ProductId, byte? Color, string? ColorSource, DateTimeOffset UpdatedAt);
+    internal sealed record Document(int SchemaVersion, Entry[] Devices);
 }

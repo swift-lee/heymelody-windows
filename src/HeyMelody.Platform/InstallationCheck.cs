@@ -38,15 +38,14 @@ public static class InstallationCheck
             var assembly = Assembly.GetEntryAssembly()!;
             var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0]
                 ?? assembly.GetName().Version?.ToString(3);
-            Console.WriteLine(JsonSerializer.Serialize(new { success = true, component = assembly.GetName().Name, version,
-                runtimeIdentifier = "osx-arm64", resourceBundles = true, nativeLibrariesLoaded = true,
-                nativeBluetoothCalls = 0, audioPlaybackCalls = 0 }));
+            Console.WriteLine(JsonSerializer.Serialize(new InstallationSuccess(true, assembly.GetName().Name, version,
+                "osx-arm64", true, true, 0, 0), InstallationJsonContext.Default.InstallationSuccess));
         }
         catch (Exception error)
         {
             exitCode = 1;
-            Console.WriteLine(JsonSerializer.Serialize(new { success = false, error = error.GetType().Name, message = error.Message,
-                nativeBluetoothCalls = 0, audioPlaybackCalls = 0 }));
+            Console.WriteLine(JsonSerializer.Serialize(new InstallationFailure(false, error.GetType().Name, error.Message,
+                0, 0), InstallationJsonContext.Default.InstallationFailure));
         }
         return true;
     }

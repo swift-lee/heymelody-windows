@@ -263,11 +263,9 @@ internal static partial class NativePerformanceAudit
             var desktop = (IClassicDesktopStyleApplicationLifetime)ApplicationLifetime!;
             ApplyTheme(_state.Theme);
             ProductArtwork.TransitionsEnabled = false;
-            var window = new MainWindow(_state.Service, preview: true)
-            {
-                StartWithDemo = true, Width = 1280, Height = 900, CanResize = false,
-                WindowStartupLocation = WindowStartupLocation.CenterScreen, ShowActivated = true, Topmost = true
-            };
+            var window = PerformanceBenchmarkScene.Create(_state.Service,
+                _state.Scenario.StartsWith("model", StringComparison.Ordinal));
+            window.Topmost = true;
             var page = window.FindControl<MainView>("Page")!;
             if (!_state.Scenario.StartsWith("model", StringComparison.Ordinal))
                 page.FindControl<ProductArtwork>("HeroArt")!.VisualTemplate = new AuditArtworkTemplate();

@@ -7,7 +7,7 @@ namespace HeyMelody.Diagnostics;
 public static partial class DiagnosticRuntime
 {
     private const string LaunchOwnerVariable = "HEYMELODY_COMPONENT_OWNER";
-    private sealed class LaunchOwner
+    internal sealed class LaunchOwner
     {
         public int Pid { get; set; }
         public long StartTicks { get; set; }
@@ -19,7 +19,7 @@ public static partial class DiagnosticRuntime
     {
         var raw = Environment.GetEnvironmentVariable(LaunchOwnerVariable);
         if (raw is null) return (false, null);
-        try { return (true, JsonSerializer.Deserialize<LaunchOwner>(raw)); }
+        try { return (true, JsonSerializer.Deserialize(raw, DiagnosticJsonContext.Default.LaunchOwner)); }
         catch (JsonException) { return (true, null); }
     });
 
@@ -57,7 +57,7 @@ public static partial class DiagnosticRuntime
         {
             Pid = owner?.OwnerProcessId ?? 0, StartTicks = owner?.OwnerStartTimeUtcTicks ?? 0,
             SessionKey = owner?.UserSessionKey ?? ""
-        });
+        }, DiagnosticJsonContext.Default.LaunchOwner);
     }
 
     private static bool MatchesLaunchOwner(DiagnosticSessionInfo session)

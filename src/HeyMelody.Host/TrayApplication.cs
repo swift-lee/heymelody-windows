@@ -44,19 +44,25 @@ internal sealed class TrayApplication : Application
             // Eco applies when no window is connected: this process and its workers drop to EcoQoS and idle priority.
             _energyPolicy = new(TimeProvider.System); _energy = new(_energyPolicy, new WindowsProcessEnergy());
             HostEnergy.Controller = _energy; _selfEnergy = _energy.Attach(_self = Process.GetCurrentProcess());
-            _supervisor = new(locationProvider: HostPlatformFactory.CreateLocation());
-            _server = new(_supervisor, energy: _energyPolicy); _monitor = new(_supervisor);
+            var benchmark = PerformanceBenchmarkHost.Options;
+            _supervisor = benchmark is null ? new(locationProvider: HostPlatformFactory.CreateLocation())
+                : PerformanceBenchmarkHost.CreateSupervisor();
+            _server = new(_supervisor, benchmark?.PipeName, energy: _energyPolicy);
+            // Do not even construct the platform monitor in the isolated benchmark: its
+            // field initializer creates the native Bluetooth platform.
+            if (benchmark is null) _monitor = new(_supervisor);
             _supervisor.AttachDiagnostics();
             var menu = new NativeMenu();
             var open = new NativeMenuItem("打开主界面");
             void OpenMain()
             {
+                if (benchmark is not null) return;
                 try { _server.ActivateMain(true); }
                 catch (Exception error)
                 {
                     if (_exiting || _server.IsStopping)
                     {
-                        DiagnosticLog.Debug("host.lifecycle", "openMainIgnored", "Open main ignored because the Host is exiting", new { error = error.Message });
+                        DiagnosticLog.Debug("host.lifecycle", "openMainIgnored", "Open main ignored because the Host is exiting", global::HeyMelody.Diagnostics.DiagnosticData.Object(("error", error.Message)));
                         return;
                     }
                     DiagnosticLog.Error("host.lifecycle", "openMainFailed", "The tray could not open the main GUI", error);
@@ -83,7 +89,7 @@ internal sealed class TrayApplication : Application
             {
                 _exiting = true;
                 StartForcedExitWatchdog();
-                try { await Dispatcher.UIThread.InvokeAsync(() => _monitor.Dispose()); }
+                try { await Dispatcher.UIThread.InvokeAsync(() => _monitor?.Dispose()); }
                 catch (Exception error) { DiagnosticLog.Error("host.lifecycle", "monitorDisposeFailed", "Platform observers could not finish cleanup", error); }
                 try { await _server.DisposeAsync(); }
                 catch (Exception error) { DiagnosticLog.Error("host.lifecycle", "pipeDisposeFailed", "Backend pipe could not finish cleanup", error); }
@@ -107,11 +113,12 @@ internal sealed class TrayApplication : Application
             };
             desktop.Exit += (_, _) =>
             {
-                _monitor.Dispose(); _tray.Dispose();
+                _monitor?.Dispose(); _tray.Dispose();
                 HostEnergy.Controller = null; _selfEnergy?.Dispose(); _energy?.Dispose(); _energyPolicy?.Dispose(); _self?.Dispose();
             };
             _server.Start();
-            _ = StartAsync();
+            if (benchmark is null) _ = StartAsync();
+            else _ = PerformanceBenchmarkHost.MeasureAsync(_supervisor, _server, _energyPolicy, desktop);
         }
         base.OnFrameworkInitializationCompleted();
     }
@@ -124,22 +131,16 @@ internal sealed class TrayApplication : Application
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             var permission = await provider.RequestPermissionAsync(timeout.Token).WaitAsync(timeout.Token);
             string access = permission.Access.ToString();
-            Console.WriteLine(JsonSerializer.Serialize(new
-            {
-                status = char.ToLowerInvariant(access[0]) + access[1..],
-                message = permission.Message,
-                hresult = (int?)null
-            }));
+            Console.WriteLine(JsonSerializer.Serialize(new LocationPermissionCheckResult(
+                char.ToLowerInvariant(access[0]) + access[1..], permission.Message, null),
+                HostCommandLineJson.Default.LocationPermissionCheckResult));
         }
         catch (Exception error)
         {
             exitCode = 1;
-            Console.WriteLine(JsonSerializer.Serialize(new
-            {
-                status = "failed",
-                message = error is OperationCanceledException ? "系统定位权限检查超时或已取消。" : "系统定位权限检查未完成。",
-                hresult = (int?)error.HResult
-            }));
+            Console.WriteLine(JsonSerializer.Serialize(new LocationPermissionCheckResult("failed",
+                error is OperationCanceledException ? "系统定位权限检查超时或已取消。" : "系统定位权限检查未完成。",
+                error.HResult), HostCommandLineJson.Default.LocationPermissionCheckResult));
         }
         finally { desktop.Shutdown(exitCode); }
     }

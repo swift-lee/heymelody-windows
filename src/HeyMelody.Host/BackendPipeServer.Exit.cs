@@ -35,7 +35,7 @@ internal sealed partial class BackendPipeServer
         {
             client.SendEvent(ExitEvent("requestExit"));
             DiagnosticLog.Debug("host.lifecycle", "requestExitPrepared", "Sent requestExit to a client",
-                new { _exitId, client.Key, client.Role, votes = IsVotingRole(client.Role) });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("_exitId", _exitId), ("Key", client.Key), ("Role", client.Role), ("votes", IsVotingRole(client.Role))));
         }
     }
 
@@ -69,7 +69,7 @@ internal sealed partial class BackendPipeServer
         {
             if (_exitPhase == ExitPhase.Idle || _exitPhase == ExitPhase.Voting && request.Operation is "subscribe" or "cancelCalibration") return false;
             DiagnosticLog.Debug("host.lifecycle", "operationRejectedDuringExit", "Rejected an operation while exiting",
-                new { _exitId, client.Key, client.Role, request.Operation, phase = _exitPhase.ToString() });
+                global::HeyMelody.Diagnostics.DiagnosticData.Object(("_exitId", _exitId), ("Key", client.Key), ("Role", client.Role), ("Operation", request.Operation), ("phase", _exitPhase.ToString())));
             if (_exitPhase == ExitPhase.Voting)
             {
                 PrepareClientLocked(client); client.Reply(request.Id, null, "exitPending", "后台正在确认退出，暂时不能开始新操作。");
@@ -90,7 +90,7 @@ internal sealed partial class BackendPipeServer
                 || request.ExitRequestId != _exitId || request.Approved is not { } approved || !_votes.TryGetValue(client.Key, out var vote))
                 throw new InvalidOperationException("退出请求已变化。");
             client.Reply(request.Id, true); vote.TrySetResult(approved); ExitChangedLocked();
-            DiagnosticLog.Info("host.lifecycle", "exitVoteReceived", "Client voted on Host exit", new { _exitId, client.Key, client.Role, approved });
+            DiagnosticLog.Info("host.lifecycle", "exitVoteReceived", "Client voted on Host exit", global::HeyMelody.Diagnostics.DiagnosticData.Object(("_exitId", _exitId), ("Key", client.Key), ("Role", client.Role), ("approved", approved)));
         }
     }
 
@@ -102,7 +102,7 @@ internal sealed partial class BackendPipeServer
                 || request.ExitRequestId != _exitId || !_stoppingClients.TryGetValue(client.Key, out var stopping))
                 throw new InvalidOperationException("退出请求已变化。");
             stopping.Acknowledged.TrySetResult(); ExitChangedLocked();
-            DiagnosticLog.Debug("host.lifecycle", "stoppingAckReceived", "Client acknowledged stopping", new { _exitId, client.Key, client.Role });
+            DiagnosticLog.Debug("host.lifecycle", "stoppingAckReceived", "Client acknowledged stopping", global::HeyMelody.Diagnostics.DiagnosticData.Object(("_exitId", _exitId), ("Key", client.Key), ("Role", client.Role)));
         }
         // One-way acknowledgement: the client receive pump must never wait for a response to itself.
     }
@@ -112,7 +112,7 @@ internal sealed partial class BackendPipeServer
         if (client.Lifetime.IsCancellationRequested || _stoppingClients.ContainsKey(client.Key)) return;
         var flushed = client.SendFlushedAsync(ExitEvent("stopping"));
         _stoppingClients[client.Key] = new(client, flushed, NewSignal());
-        DiagnosticLog.Debug("host.lifecycle", "stoppingSent", "Sent stopping to a client", new { _exitId, client.Key, client.Role });
+        DiagnosticLog.Debug("host.lifecycle", "stoppingSent", "Sent stopping to a client", global::HeyMelody.Diagnostics.DiagnosticData.Object(("_exitId", _exitId), ("Key", client.Key), ("Role", client.Role)));
         _ = ObserveTerminalWriteAsync(client, flushed);
         ExitChangedLocked();
     }
@@ -122,7 +122,7 @@ internal sealed partial class BackendPipeServer
         catch (Exception error)
         {
             if (!client.Lifetime.IsCancellationRequested)
-                DiagnosticLog.Warning("host.lifecycle", "stoppingWriteFailed", "Could not deliver terminal backend state", error, new { client.Key });
+                DiagnosticLog.Warning("host.lifecycle", "stoppingWriteFailed", "Could not deliver terminal backend state", error, global::HeyMelody.Diagnostics.DiagnosticData.Object(("Key", client.Key)));
             client.Dispose();
         }
         finally { lock (_voteSync) ExitChangedLocked(); }
@@ -132,9 +132,9 @@ internal sealed partial class BackendPipeServer
         lock (_voteSync)
         {
             if (_votes.TryGetValue(client.Key, out var vote) && vote.TrySetResult(true))
-                DiagnosticLog.Info("host.lifecycle", "exitVoteDetached", "Client pipe detached before voting; counted as approval", new { _exitId, client.Key, client.Role });
+                DiagnosticLog.Info("host.lifecycle", "exitVoteDetached", "Client pipe detached before voting; counted as approval", global::HeyMelody.Diagnostics.DiagnosticData.Object(("_exitId", _exitId), ("Key", client.Key), ("Role", client.Role)));
             if (_stoppingClients.TryGetValue(client.Key, out var stopping) && stopping.Acknowledged.TrySetResult())
-                DiagnosticLog.Debug("host.lifecycle", "stoppingAckDetached", "Client pipe detached before acknowledging; counted as acknowledged", new { _exitId, client.Key, client.Role });
+                DiagnosticLog.Debug("host.lifecycle", "stoppingAckDetached", "Client pipe detached before acknowledging; counted as acknowledged", global::HeyMelody.Diagnostics.DiagnosticData.Object(("_exitId", _exitId), ("Key", client.Key), ("Role", client.Role)));
             ExitChangedLocked();
         }
     }
@@ -179,7 +179,7 @@ internal sealed partial class BackendPipeServer
                     if (pending.Length == 0)
                     {
                         DiagnosticLog.Info("host.lifecycle", "drainCompleted", "Terminal delivery completed",
-                            new { _exitId, elapsedMs = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, clients = _stoppingClients.Count });
+                            global::HeyMelody.Diagnostics.DiagnosticData.Object(("_exitId", _exitId), ("elapsedMs", (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds), ("clients", _stoppingClients.Count)));
                         return;
                     }
                     changed = _exitChanged.Task;
@@ -190,7 +190,7 @@ internal sealed partial class BackendPipeServer
         catch (OperationCanceledException)
         {
             DiagnosticLog.Warning("host.lifecycle", "stoppingDeadline", "Terminal delivery deadline reached; disconnecting remaining clients",
-                data: new { _exitId, elapsedMs = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds, pendingCount = pending.Length, pending = pending.Select(value => new { value.Client.Key, value.Client.Role, flushed = value.Flushed.IsCompletedSuccessfully }).ToArray() });
+                data: global::HeyMelody.Diagnostics.DiagnosticData.Object(("_exitId", _exitId), ("elapsedMs", (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds), ("pendingCount", pending.Length), ("pending", pending.Select(value => global::HeyMelody.Diagnostics.DiagnosticData.Object(("Key", value.Client.Key), ("Role", value.Client.Role), ("flushed", value.Flushed.IsCompletedSuccessfully))).ToArray())));
             foreach (var value in pending) value.Client.Dispose();
         }
     }
@@ -207,11 +207,11 @@ internal sealed partial class BackendPipeServer
                 _votes.Clear(); _preparedClients.Clear();
                 foreach (var client in _clients.Values.Where(client => !client.Lifetime.IsCancellationRequested)) PrepareClientLocked(client);
             }
-            DiagnosticLog.Info("host.lifecycle", "exitRequested", "Host exit requested", new { _exitId });
+            DiagnosticLog.Info("host.lifecycle", "exitRequested", "Host exit requested", global::HeyMelody.Diagnostics.DiagnosticData.Object(("_exitId", _exitId)));
             var (approved, reason) = await WaitForExitVotesAsync();
             if (!approved)
             {
-                DiagnosticLog.Info("host.lifecycle", "exitCancelled", "Host exit cancelled", new { _exitId, reason });
+                DiagnosticLog.Info("host.lifecycle", "exitCancelled", "Host exit cancelled", global::HeyMelody.Diagnostics.DiagnosticData.Object(("_exitId", _exitId), ("reason", reason)));
                 Task[] deliveries;
                 lock (_voteSync)
                 {
@@ -223,10 +223,10 @@ internal sealed partial class BackendPipeServer
                 catch (Exception error) { DiagnosticLog.Warning("host.lifecycle", "cancellationDeliveryFailed", "Exit cancellation could not reach every client", error); }
                 return;
             }
-            DiagnosticLog.Info("host.lifecycle", "exitApproved", "Host exit approved", new { _exitId });
+            DiagnosticLog.Info("host.lifecycle", "exitApproved", "Host exit approved", global::HeyMelody.Diagnostics.DiagnosticData.Object(("_exitId", _exitId)));
             await DrainStoppingClientsAsync();
-            DiagnosticLog.Info("host.lifecycle", "stopGracefullyStarted", "Stopping the backend gracefully", new { _exitId });
-            try { await supervisor.StopGracefullyAsync(); DiagnosticLog.Info("host.lifecycle", "stopGracefullyCompleted", "Backend stopped gracefully", new { _exitId }); }
+            DiagnosticLog.Info("host.lifecycle", "stopGracefullyStarted", "Stopping the backend gracefully", global::HeyMelody.Diagnostics.DiagnosticData.Object(("_exitId", _exitId)));
+            try { await supervisor.StopGracefullyAsync(); DiagnosticLog.Info("host.lifecycle", "stopGracefullyCompleted", "Backend stopped gracefully", global::HeyMelody.Diagnostics.DiagnosticData.Object(("_exitId", _exitId))); }
             catch (Exception error)
             {
                 DiagnosticLog.Error("host.lifecycle", "stopFailed", "Graceful backend cleanup failed; finishing Host exit", error);
@@ -236,9 +236,9 @@ internal sealed partial class BackendPipeServer
             foreach (Func<Task> handler in ExitApproved?.GetInvocationList() ?? [])
                 try
                 {
-                    DiagnosticLog.Info("host.lifecycle", "exitCallbackStarted", "Running Host exit callback", new { _exitId });
+                    DiagnosticLog.Info("host.lifecycle", "exitCallbackStarted", "Running Host exit callback", global::HeyMelody.Diagnostics.DiagnosticData.Object(("_exitId", _exitId)));
                     await handler();
-                    DiagnosticLog.Info("host.lifecycle", "exitCallbackCompleted", "Host exit callback completed", new { _exitId });
+                    DiagnosticLog.Info("host.lifecycle", "exitCallbackCompleted", "Host exit callback completed", global::HeyMelody.Diagnostics.DiagnosticData.Object(("_exitId", _exitId)));
                 }
                 catch (Exception error) { DiagnosticLog.Error("host.lifecycle", "exitCallbackFailed", "Host exit callback failed", error); }
         }
@@ -249,13 +249,13 @@ internal sealed partial class BackendPipeServer
                 if (_exitPhase == ExitPhase.Voting)
                 {
                     // Something threw before the vote concluded: do not stay in Voting forever.
-                    DiagnosticLog.Warning("host.lifecycle", "exitAborted", "Host exit aborted unexpectedly while voting; returning to idle", data: new { _exitId });
+                    DiagnosticLog.Warning("host.lifecycle", "exitAborted", "Host exit aborted unexpectedly while voting; returning to idle", data: global::HeyMelody.Diagnostics.DiagnosticData.Object(("_exitId", _exitId)));
                     _exitPhase = ExitPhase.Idle;
                     var cancelled = ExitEvent("exitCancelled"); cancelled.Message = "退出已取消。";
                     // Best-effort and non-blocking so clients leave their exit-pending state.
                     foreach (var client in _clients.Values)
                         try { client.SendEvent(cancelled); }
-                        catch (Exception error) { DiagnosticLog.Debug("host.lifecycle", "exitAbortNotifyFailed", "Could not notify a client of the aborted exit", new { client.Key, error = error.Message }); }
+                        catch (Exception error) { DiagnosticLog.Debug("host.lifecycle", "exitAbortNotifyFailed", "Could not notify a client of the aborted exit", global::HeyMelody.Diagnostics.DiagnosticData.Object(("Key", client.Key), ("error", error.Message))); }
                 }
                 if (_exitPhase != ExitPhase.Stopping) { _votes.Clear(); _preparedClients.Clear(); _exitId = null; }
             }

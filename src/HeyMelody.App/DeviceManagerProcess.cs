@@ -33,13 +33,13 @@ internal sealed class DeviceManagerProcess : IDeviceManagerProcess
         start.RedirectStandardError = true;
         using var process = StartPreparedProcess(start, token);
         DiagnosticLog.Info("ui.process", "launched", "Launched the device manager process",
-            new { component = "HeyMelody.DeviceManager", start.FileName, args = start.ArgumentList.ToArray(), processId = TryId(process) });
+            global::HeyMelody.Diagnostics.DiagnosticData.Object(("component", "HeyMelody.DeviceManager"), ("FileName", start.FileName), ("args", start.ArgumentList.ToArray()), ("processId", TryId(process))));
         var errors = DrainAsync(process.StandardError);
         try
         {
             await process.WaitForExitAsync(token);
             await errors;
-            DiagnosticLog.Info("ui.process", "exited", "Device manager process exited", new { component = "HeyMelody.DeviceManager", exitCode = process.ExitCode });
+            DiagnosticLog.Info("ui.process", "exited", "Device manager process exited", global::HeyMelody.Diagnostics.DiagnosticData.Object(("component", "HeyMelody.DeviceManager"), ("exitCode", process.ExitCode)));
             return process.ExitCode switch
             {
                 0 => DeviceManagerOutcome.Saved,
@@ -65,7 +65,7 @@ internal sealed class DeviceManagerProcess : IDeviceManagerProcess
         try
         {
             while (await reader.ReadLineAsync() is { } line)
-                DiagnosticLog.Debug("ui.process", "stderr", "Child stderr", new { component = "HeyMelody.DeviceManager", line = line.Length <= 2000 ? line : line[..2000] });
+                DiagnosticLog.Debug("ui.process", "stderr", "Child stderr", global::HeyMelody.Diagnostics.DiagnosticData.Object(("component", "HeyMelody.DeviceManager"), ("line", line.Length <= 2000 ? line : line[..2000])));
         }
         catch (IOException) { }
     }
@@ -85,6 +85,6 @@ internal sealed class DeviceManagerProcess : IDeviceManagerProcess
             await process.WaitForExitAsync();
         }
         catch (InvalidOperationException error)
-        { DiagnosticLog.Debug("ui.process", "stopRaced", "The component process ended while it was being stopped", new { error = error.Message }); }
+        { DiagnosticLog.Debug("ui.process", "stopRaced", "The component process ended while it was being stopped", global::HeyMelody.Diagnostics.DiagnosticData.Object(("error", error.Message))); }
     }
 }

@@ -14,7 +14,6 @@ internal interface IPreparedLocationWrite : IDisposable
 internal class FindHeadphonesStore(string path)
 {
     private const int MaximumDevices = 4096;
-    private static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     internal static FindHeadphonesStore NextTo(DeviceWhitelistStore whitelist) =>
         new(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(whitelist.FilePath))!, "find-headphones.json"));
 
@@ -24,7 +23,7 @@ internal class FindHeadphonesStore(string path)
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             if (stream.Length > 2 * 1024 * 1024) throw new InvalidDataException("位置记录文件过大。");
-            var document = JsonSerializer.Deserialize<Document>(stream, Json);
+            var document = JsonSerializer.Deserialize(stream, HostStoreJsonContext.Default.LocationDocument);
             if (document is null || document.SchemaVersion != 1 || document.Devices is null
                 || document.Devices.Length > MaximumDevices) throw new InvalidDataException("位置记录文件无效。");
             var devices = new Dictionary<string, DeviceLocationPreference>(StringComparer.Ordinal);
@@ -61,7 +60,7 @@ internal class FindHeadphonesStore(string path)
             using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None,
                 4096, FileOptions.WriteThrough))
             {
-                JsonSerializer.Serialize(stream, new Document(1, enabled, entries), Json);
+                JsonSerializer.Serialize(stream, new Document(1, enabled, entries), HostStoreJsonContext.Default.LocationDocument);
                 stream.Flush(flushToDisk: true);
             }
             token.ThrowIfCancellationRequested();
@@ -100,6 +99,6 @@ internal class FindHeadphonesStore(string path)
         && value.DisconnectedAt != default && value.PositionTimestamp != default);
     private static bool ValidKey(string key) => key is { Length: 64 }
         && key.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
-    private sealed record Entry(string Key, bool Enabled, UiRecordedLocation? Location);
-    private sealed record Document(int SchemaVersion, bool Enabled, Entry[] Devices);
+    internal sealed record Entry(string Key, bool Enabled, UiRecordedLocation? Location);
+    internal sealed record Document(int SchemaVersion, bool Enabled, Entry[] Devices);
 }

@@ -184,7 +184,7 @@ public sealed partial class NativeHeadsetService
             catch (Exception actionError)
             {
                 // The engine publishes the failure and stops its own audio.
-                DiagnosticLog.Debug("host.calibration", "backgroundActionFailed", "A background calibration action failed", new { failure = actionError.Message, type = actionError.GetType().Name });
+                DiagnosticLog.Debug("host.calibration", "backgroundActionFailed", "A background calibration action failed", global::HeyMelody.Diagnostics.DiagnosticData.Object(("failure", actionError.Message), ("type", actionError.GetType().Name)));
             }
         }
     }
@@ -351,7 +351,7 @@ public sealed partial class NativeHeadsetService
         }
         if (_client is not null) _client.Notification -= OnHearingNotification;
         try { await refresh; }
-        catch (Exception refreshError) { DiagnosticLog.Debug("host.calibration", "hearingRefreshEnded", "Hearing refresh task ended with an error during disposal", new { failure = refreshError.Message, type = refreshError.GetType().Name }); }
+        catch (Exception refreshError) { DiagnosticLog.Debug("host.calibration", "hearingRefreshEnded", "Hearing refresh task ended with an error during disposal", global::HeyMelody.Diagnostics.DiagnosticData.Object(("failure", refreshError.Message), ("type", refreshError.GetType().Name))); }
         _hearingRefreshLifetime?.Dispose(); _hearingRefreshLifetime = null;
         if (_calibration is null) return;
         var engine = _calibration; _calibration = null;
@@ -360,7 +360,7 @@ public sealed partial class NativeHeadsetService
         engine.Changed -= EngineChanged; await engine.DisposeAsync();
         _client?.SetCalibrationActive(false);
         try { await _calibrationBackground; }
-        catch (Exception backgroundError) { DiagnosticLog.Debug("host.calibration", "backgroundEnded", "Calibration background task ended with an error during disposal", new { failure = backgroundError.Message, type = backgroundError.GetType().Name }); }
+        catch (Exception backgroundError) { DiagnosticLog.Debug("host.calibration", "backgroundEnded", "Calibration background task ended with an error during disposal", global::HeyMelody.Diagnostics.DiagnosticData.Object(("failure", backgroundError.Message), ("type", backgroundError.GetType().Name))); }
         _calibrationState = null; _calibrationContext = null; _hearingProfiles = [];
     }
 }

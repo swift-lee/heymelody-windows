@@ -44,6 +44,7 @@ try
     }
     if (args is ["--audition-tests"])
     {
+        await GeneratedWasapiInteropTests.RunAsync(Test);
         await CalibrationAuditionTests.RunAsync(Test, scratch);
         await MacCalibrationAuditionTests.RunAsync(Test);
         Console.WriteLine(JsonSerializer.Serialize(new { passed, success = true, nativeBluetoothCalls = 0 }));
@@ -231,6 +232,7 @@ try
     await SupervisorDiagnosticsTests.RunAsync(Test, scratch);
     await CalibrationBackendTests.RunAsync(Test, scratch);
     await NativeCalibrationDescriptionTests.RunAsync(Test, scratch);
+    await GeneratedWasapiInteropTests.RunAsync(Test);
     await CalibrationAuditionTests.RunAsync(Test, scratch);
     await MacCalibrationAuditionTests.RunAsync(Test);
     await ResourceBackendTests.RunAsync(Test, scratch);

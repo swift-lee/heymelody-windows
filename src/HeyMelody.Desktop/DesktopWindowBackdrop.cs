@@ -91,8 +91,7 @@ internal sealed class DesktopWindowBackdrop : IDisposable
             {
                 Applied = applied; Changed?.Invoke();
                 DiagnosticLog.Info("ui.backdrop", "negotiated", "Window background effect negotiated",
-                    new { provider = _capabilities.Provider, requested = _capabilities.Effect.ToString(), actual = _window.ActualTransparencyLevel.ToString(), applied,
-                        tint = (isMacOS ? _macTint : MacBackdropTint.Standard).ToString() });
+                    global::HeyMelody.Diagnostics.DiagnosticData.Object(("provider", _capabilities.Provider), ("requested", _capabilities.Effect.ToString()), ("actual", _window.ActualTransparencyLevel.ToString()), ("applied", applied), ("tint", (isMacOS ? _macTint : MacBackdropTint.Standard).ToString())));
             }
         }
         finally { _updating = false; }
