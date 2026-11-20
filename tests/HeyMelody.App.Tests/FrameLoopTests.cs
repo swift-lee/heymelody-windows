@@ -66,64 +66,119 @@ internal static class FrameLoopTests
 
     private static async Task LoopAsync()
     {
-        var model = new EncoFree4DynaudioModelView();
+        var pending = new Queue<Action<TimeSpan>>();
+        var timestamp = TimeSpan.Zero;
+        var factory = new RecordingFilamentRendererFactory();
+        var model = new DeviceModelView(new DeviceModelVisual(new ArtworkFile(
+            new Uri("avares://HeyMelody/Assets/Devices/EncoFree4Dynaudio/model.glb"), "", EncoFree4DynaudioModelView.ModelSha256),
+            DeviceVisuals.GenericProduct), factory, pending.Enqueue);
         var ancestor = new Border { Child = model };
         var window = new Window { Content = ancestor, Width = 280, Height = 240 };
         try
         {
-            window.Show(); Dispatcher.UIThread.RunJobs();
+            window.Show();
+            Layout();
             await Until(() => model.AnimationActive, "The loop starts once the model is loaded in a visible window.");
-            var before = model.CameraUpdateCount;
-            await Task.Delay(40); Dispatcher.UIThread.RunJobs();
-            Check(model.CameraUpdateCount == before, "The initial automatic-rotation wait does not submit camera updates.");
-            // Idle rotation starts 0.65 s after activation; tick through that pause first.
-            var clock = System.Diagnostics.Stopwatch.StartNew();
-            while (clock.Elapsed < TimeSpan.FromSeconds(ModelOrbitMotion.IdleDelaySeconds + .2)) await Tick();
-            before = model.CameraUpdateCount;
-            for (var frame = 0; frame < 6; frame++) await Tick();
-            Check(model.CameraUpdateCount >= before + 4, "Spaced display frames advance the idle rotation; got "
-                + (model.CameraUpdateCount - before) + " updates for 6 frames.");
-            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
-            int oldGeneration = (int)typeof(DeviceModelView).GetField("_loopGeneration", flags)!.GetValue(model)!;
-            window.Hide(); Dispatcher.UIThread.RunJobs();
-            Check(!model.AnimationActive && !model.Motion.IsActive, "Hiding the window stops the loop.");
-            var hidden = model.CameraUpdateCount;
-            for (var frame = 0; frame < 3; frame++) await Tick();
-            Check(model.CameraUpdateCount == hidden, "A hidden window receives no camera updates.");
-            window.Show(); Dispatcher.UIThread.RunJobs();
-            Check(model.AnimationActive, "Showing the window resumes the loop.");
-            long callbacks = model.AnimationCallbackCount;
-            typeof(DeviceModelView).GetMethod("OnFrame", flags)!.Invoke(model, [TimeSpan.FromDays(1), oldGeneration]);
-            Check(model.AnimationCallbackCount == callbacks, "A callback from before hiding cannot revive its old chain after restore.");
+            var renderer = factory.Instances.Single();
+            Advance(0);
+            Check(model.PresentedFrameCount > 0 && !model.LoadingIndicatorVisible, "The startup frame is presented.");
+            Layout();
+            Advance();
+            Layout();
+
+            var initialYaw = model.Motion.Yaw;
+            var initialPitch = model.Motion.Pitch;
+            var requests = renderer.FrameRequests;
+            for (var frame = 0; frame < 3; frame++) Advance();
+            Check(PoseUnchanged() && renderer.FrameRequests == requests,
+                "The first 300 ms of the idle wait do not rotate or request a frame.");
+
+            var width = renderer.Configuration.Width;
+            model.Width = model.Bounds.Width / 2;
+            Layout();
+            Check(renderer.Configuration.Width < width && renderer.FrameRequests > requests && PoseUnchanged(),
+                "Resizing during the idle wait requests a frame for the new viewport without rotating the model.");
+            Advance(0);
+            Layout();
+
+            requests = renderer.FrameRequests;
+            for (var frame = 0; frame < 3; frame++) Advance();
+            Check(PoseUnchanged() && renderer.FrameRequests == requests,
+                "Through 600 ms the idle pose does not change or request another frame after layout.");
+            Advance();
+            Check(model.Motion.Yaw > initialYaw && model.Motion.Pitch == initialPitch &&
+                renderer.Configuration.YawRadians == (float)model.Motion.Yaw && renderer.FrameRequests == requests + 1,
+                "By 700 ms the model rotates and the renderer receives the new pose.");
+
+            window.Hide();
+            Layout();
+            CheckStopped(renderer, "A hidden window");
+            window.Show();
+            Layout();
+            Check(model.AnimationActive && pending.Count == 1, "Showing the window resumes one loop.");
+
             window.WindowState = WindowState.Minimized;
-            Dispatcher.UIThread.RunJobs();
-            Check(!model.AnimationActive && !model.Motion.IsActive, "Minimizing the window stops model work.");
-            hidden = model.CameraUpdateCount;
-            for (var frame = 0; frame < 3; frame++) await Tick();
-            Check(model.CameraUpdateCount == hidden, "A minimized window receives no queued camera updates.");
+            Layout();
+            CheckStopped(renderer, "A minimized window");
             window.WindowState = WindowState.Normal;
-            Dispatcher.UIThread.RunJobs();
-            Check(model.AnimationActive, "Restoring the window resumes the model loop.");
+            Layout();
+            Check(model.AnimationActive && pending.Count == 1, "Restoring the window resumes one loop.");
+
             ancestor.IsVisible = false;
-            await Tick();
-            Check(!model.AnimationActive && !model.Motion.IsActive, "Hiding an ancestor container stops model work.");
-            hidden = model.CameraUpdateCount;
-            for (var frame = 0; frame < 3; frame++) await Tick();
-            Check(model.CameraUpdateCount == hidden, "An invisible ancestor prevents queued camera updates.");
+            Layout();
+            CheckStopped(renderer, "An invisible ancestor");
             ancestor.IsVisible = true;
-            Dispatcher.UIThread.RunJobs();
-            await Until(() => model.AnimationActive, "Showing an ancestor restarts the model frame loop.");
+            Layout();
+            Check(model.AnimationActive && pending.Count == 1, "Showing an ancestor resumes one loop.");
+
             model.Width = model.Height = 0;
-            await Tick();
-            await Until(() => !model.AnimationActive, "A zero-sized model viewport stops the loop.");
-            hidden = model.CameraUpdateCount;
-            for (var frame = 0; frame < 3; frame++) await Tick();
-            Check(model.CameraUpdateCount == hidden, "A zero-sized viewport submits no queued camera updates.");
+            Layout();
+            CheckStopped(renderer, "A zero-sized viewport");
             model.Width = model.Height = double.NaN;
-            await Tick();
-            await Until(() => model.AnimationActive, "Restoring the model allocation resumes the loop.");
+            Layout();
+            Check(model.AnimationActive && pending.Count == 1, "Restoring the viewport resumes one loop.");
+
+            window.Hide();
+            Layout();
+            window.Show();
+            Layout();
+            Check(model.AnimationActive && pending.Count == 2, "A delayed old callback precedes the resumed loop's callback.");
+            var callbacks = model.AnimationCallbackCount;
+            requests = renderer.FrameRequests;
+            Advance();
+            Check(model.AnimationCallbackCount == callbacks && renderer.FrameRequests == requests && pending.Count == 1,
+                "A callback from before hiding cannot revive its old chain after restore.");
+            Advance();
+            Check(model.AnimationCallbackCount == callbacks + 1 && pending.Count == 1, "Only the resumed callback chain continues.");
+
+            bool PoseUnchanged() => model.Motion.Yaw == initialYaw && model.Motion.Pitch == initialPitch &&
+                renderer.Configuration.YawRadians == (float)initialYaw && renderer.Configuration.PitchRadians == (float)initialPitch;
         }
         finally { window.Close(); }
+
+        void Advance(int milliseconds = 100)
+        {
+            Check(pending.TryDequeue(out var callback), "The model has a queued animation callback to advance.");
+            timestamp += TimeSpan.FromMilliseconds(milliseconds);
+            callback!(timestamp);
+        }
+
+        void Layout()
+        {
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+        }
+
+        void CheckStopped(RecordingFilamentRenderer renderer, string state)
+        {
+            Check(!model.AnimationActive && !model.Motion.IsActive && pending.Count == 1,
+                state + " stops the loop, leaving only its previously queued callback.");
+            var callbacks = model.AnimationCallbackCount;
+            var requests = renderer.FrameRequests;
+            Advance();
+            Check(model.AnimationCallbackCount == callbacks && renderer.FrameRequests == requests && pending.Count == 0,
+                state + " prevents a queued callback from submitting work or scheduling another frame.");
+        }
     }
 
     private static async Task ChangeRateAsync()
@@ -139,6 +194,9 @@ internal static class FrameLoopTests
         {
             window.Show(); Dispatcher.UIThread.RunJobs();
             await Until(() => model.AnimationActive, "The rate-change fixture finishes loading.");
+            var callbacks = model.AnimationCallbackCount;
+            await Until(() => model.AnimationCallbackCount >= callbacks + 2,
+                "Consecutive Avalonia animation callbacks drive the default frame loop.");
             var renderer = factory.Instances.Single();
             foreach (var rate in new[] { ModelFrameRate.Fps30, ModelFrameRate.Fps60, ModelFrameRate.Unlimited })
             {

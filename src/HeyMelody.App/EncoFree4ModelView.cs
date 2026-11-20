@@ -70,6 +70,7 @@ public class DeviceModelView : UserControl
     private Task _rendererRetirement = Task.CompletedTask;
     private FilamentBackend? _requestedBackend;
     private ModelOrbitMotion.SavedMotion? _motionToRestore;
+    private readonly Action<Action<TimeSpan>>? _requestAnimationFrame;
     private TopLevel? _frameSource;
     private bool _loopActive;
     private int _loopGeneration;
@@ -130,9 +131,14 @@ public class DeviceModelView : UserControl
     }
 
     public DeviceModelView(DeviceModelVisual visual, IFilamentRendererFactory? rendererFactory = null)
+        : this(visual, rendererFactory, requestAnimationFrame: null) { }
+
+    internal DeviceModelView(DeviceModelVisual visual, IFilamentRendererFactory? rendererFactory,
+        Action<Action<TimeSpan>>? requestAnimationFrame)
     {
         _visual = visual;
         _factory = rendererFactory ?? DefaultFactoryOverride ?? NativeFilamentRendererFactory.Instance;
+        _requestAnimationFrame = requestAnimationFrame;
         ClipToBounds = true;
         _root = new Grid
         {
@@ -588,7 +594,14 @@ public class DeviceModelView : UserControl
         _framePacer.Reset(ModelRenderingPreferences.FrameRate);
         ++_loopGeneration;
     }
-    private void RequestFrame(int generation) => _frameSource?.RequestAnimationFrame(time => OnFrame(time, generation));
+    private void RequestFrame(int generation)
+    {
+        if (_frameSource is not { } source) return;
+        void Advance(TimeSpan time) => OnFrame(time, generation);
+        if (_requestAnimationFrame is { } request) request(Advance);
+        else source.RequestAnimationFrame(Advance);
+    }
+
     private void OnFrame(TimeSpan time, int generation)
     {
         if (generation != _loopGeneration || !_loopActive) return;
