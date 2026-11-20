@@ -62,6 +62,8 @@ public sealed class DailyCapabilities
     public bool GameMode { get; set; }
     public bool SpatialMode { get; set; }
     public bool HiRes { get; set; }
+    public bool FindHeadphonesTone { get; set; }
+    public bool FindHeadphonesWearCheck { get; set; }
     public bool SpatialHiResMutex { get; set; }
     public byte? GameFeatureId { get; set; }
     public string SpatialRoute { get; set; } = "unavailable";
@@ -106,6 +108,13 @@ public sealed class DailySnapshot
     public bool? GameMode { get; set; }
     public byte? SpatialMode { get; set; }
     public bool? HiRes { get; set; }
+    public long FindHeadphonesToneSession { get; set; }
+    public DailyFindHeadphonesTonePhase FindHeadphonesTonePhase { get; set; }
+    internal long LeftWearSession { get; set; }
+    internal long RightWearSession { get; set; }
+    public bool FindHeadphonesWorn => Capabilities.FindHeadphonesWearCheck && FindHeadphonesToneSession > 0
+        && (LeftInEar == true && LeftWearSession == FindHeadphonesToneSession
+            || RightInEar == true && RightWearSession == FindHeadphonesToneSession);
     public DailyCapabilities Capabilities { get; set; } = new();
     public Dictionary<byte, byte> RawFeatures { get; set; } = [];
     public BassEngineRange? BassEngine { get; set; }

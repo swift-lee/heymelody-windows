@@ -155,7 +155,14 @@ internal sealed partial class BackendPipeServer(BackendSupervisor supervisor, st
                 case "setDeviceLocationRecording":
                     GenerationCheck();
                     data = await supervisor.SetDeviceLocationRecordingAsync(Identity(), FindHeadphonesEnabled(), client.Lifetime.Token); break;
-                case "select": case "connect": data = supervisor.Select(Identity(), rememberSelection: client.Role == "main"); break;
+                case "findHeadphonesTone":
+                    if (client.Role != "main") throw new InvalidOperationException("仅主界面可操作查找提示音。");
+                    data = await supervisor.SetFindHeadphonesToneAsync(client.Key, Identity(), Generation(),
+                        request.Action.Deserialize<FindHeadphonesToneArgs>(RpcWire.Json) ?? throw new InvalidDataException(), client.Lifetime.Token);
+                    break;
+                case "select": case "connect":
+                    data = supervisor.Select(Identity(), rememberSelection: client.Role == "main", clientKey: client.Role == "main" ? client.Key : null);
+                    break;
                 case "pause": data = supervisor.Pause(Identity()); break;
                 case "resume": data = supervisor.Resume(Identity()); break;
                 case "refresh": data = await supervisor.RefreshAsync(Identity(), request.RefreshScope ?? RefreshScope.Full, client.Lifetime.Token); break;

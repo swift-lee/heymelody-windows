@@ -8,6 +8,7 @@ public sealed class DeviceProfile : SourceMetadata
     {
         ProductId = ValidProductId(source);
         Name = ProfileJson.Text(source, "name") ?? ProductId;
+        Brand = ProfileJson.Text(source, "brand");
         Aliases = Array.AsReadOnly(ProfileJson.Array(source, "children").Select(x => ProfileJson.Text(x, "name")).OfType<string>().Where(x => x.Length > 0).ToArray());
         Uuid = Guid.TryParse(ProfileJson.Text(source, "uuid"), out var parsed) ? parsed : Guid.Empty;
         SupportSpp = ProfileJson.Property(source, "supportSpp", out var spp) && spp.ValueKind == JsonValueKind.True;
@@ -42,6 +43,7 @@ public sealed class DeviceProfile : SourceMetadata
     private readonly JsonElement _rawFunctions;
     public string ProductId { get; }
     public string Name { get; }
+    public string? Brand { get; }
     public IReadOnlyList<string> Aliases { get; }
     public Guid Uuid { get; }
     public bool SupportSpp { get; }

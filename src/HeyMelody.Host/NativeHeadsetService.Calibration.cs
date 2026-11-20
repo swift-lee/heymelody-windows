@@ -95,6 +95,8 @@ public sealed partial class NativeHeadsetService
     }
     internal UiCalibrationState CreateCalibration(string handle, string kind)
     {
+        if (_client?.FindHeadphonesToneActive == true)
+            throw new InvalidOperationException("请先停止查找耳机提示音。");
         if (kind is not ("fit" or "hearing") || !CalibrationAvailable(kind) || handle.Length != 32)
             throw new InvalidOperationException("当前设备不支持此测试，或必要的控制指令不可用。");
         if (_calibrationState is { Stage: not ("Completed" or "Failed" or "Cancelled") })

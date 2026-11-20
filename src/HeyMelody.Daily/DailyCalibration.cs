@@ -38,6 +38,8 @@ public sealed partial class DailyClient : ICalibrationTransport
         await _gate.WaitAsync(token);
         try
         {
+            if (command == FindHeadphonesToneCodec.Command || FindHeadphonesToneActive)
+                throw new InvalidOperationException("查找提示音须通过独立操作；播放期间不能提交测试指令。");
             if (!IsConnected || _commands?.Supports(command) != true)
                 throw new InvalidOperationException("耳机连接或能力已变化。");
             bool cleanup = command switch

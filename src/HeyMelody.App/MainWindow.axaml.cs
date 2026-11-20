@@ -452,6 +452,13 @@ internal sealed class WindowConfirmationService(TopLevel owner) : IConfirmationS
     public Task<bool> ConfirmAsync(string title, string message, CancellationToken token) =>
         ShowConfirmationAsync(title, message, "继续", token);
 
+    public async Task<bool> ConfirmFindHeadphonesToneAsync(string message, CancellationToken token) =>
+        await ShowDialogAsync(CreateFindHeadphonesToneConfirmation(message), token) == FAContentDialogResult.Primary
+            && !token.IsCancellationRequested;
+
+    internal static FAContentDialog CreateFindHeadphonesToneConfirmation(string message) =>
+        CreateConfirmation("⚠️警告：可能会造成听力受损！", message, "我已取下，播放");
+
     public Task<bool> ConfirmRetryAsync(string title, string message, CancellationToken token) =>
         ShowConfirmationAsync(title, message, "确认", token);
 

@@ -186,9 +186,9 @@ dotnet run --project tests/HeyMelody.Calibration.UI.Tests -c Release -- --native
 
 ### 查找耳机验收
 
-位置记录的定向离线入口为 `dotnet run --project tests/HeyMelody.Host.Tests -c Release -- --find-headphones-tests` 和 `dotnet run --project tests/HeyMelody.App.Tests -c Release -- --find-headphones-tests`。Client.Tests 与 Diagnostics.Tests 的完整入口分别覆盖共享 IPC schema 5、序列化及坐标脱敏。平台提供者可注入，普通测试不请求系统权限或读取真实坐标。
+位置与响铃的定向离线入口为 `dotnet run --project tests/HeyMelody.Host.Tests -c Release -- --find-headphones-tests` 和 `dotnet run --project tests/HeyMelody.App.Tests -c Release -- --find-headphones-tests`。`dotnet run --project tests/HeyMelody.Daily.Tests -c Release -- --find-headphones-tone-tests` 使用模拟 SPP 与可控时钟核对帧、ACK、佩戴门控和 50 秒停播。Client.Tests 与 Diagnostics.Tests 的完整入口分别覆盖共享 IPC schema 5、序列化及坐标脱敏。普通测试不请求系统权限、不读取真实坐标或连接耳机。
 
-本机原生窗口验收使用 `dotnet run --project tests/HeyMelody.App.Tests -c Release -- --native-find-headphones-smoke --output-dir <新目录>`，展示 fixture 位置并输出截图，不启动真实地图或耳机操作。显式原生权限检查使用已构建的 `src/HeyMelody.Host/bin/Release/net10.0-windows10.0.19041.0/HeyMelody.Host.exe --check-location-permission`：在真正 Host 进程的 UI 线程调用系统授权 API，可能显示系统提示；不创建自有窗口、不获取坐标、不保存设置、不启动蓝牙后台。Host.Tests 的 `--native-location-permission-status` 入口则只作静默状态观察，不请求权限。
+本机原生窗口验收使用 `dotnet run --project tests/HeyMelody.App.Tests -c Release -- --native-find-headphones-smoke --output-dir <新目录>`，展示模拟位置和两种播放警告并输出截图，不启动真实地图或耳机操作。显式原生权限检查使用已构建的 `src/HeyMelody.Host/bin/Release/net10.0-windows10.0.19041.0/HeyMelody.Host.exe --check-location-permission`：在真正 Host 进程的 UI 线程调用系统授权 API，可能显示系统提示；不创建自有窗口、不获取坐标、不保存设置、不启动蓝牙后台。Host.Tests 的 `--native-location-permission-status` 入口则只作静默状态观察，不请求权限。
 
 2026-11-14 查找耳机轮原生检查仅覆盖当前本机 Windows x64 Build 26300.9974。macOS 桥接仅检查托管构建和打包配置，未验证 macOS 原生编译、TCC 或后台位置读取；本机权限未允许，实际定位成功路径仍以模拟测试验证。完整 App 验收中的模型帧复制断言失败另记入优化待办，不以定位定向通过替代完整套件通过。
 

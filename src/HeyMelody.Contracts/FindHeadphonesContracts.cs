@@ -21,3 +21,23 @@ public interface IFindHeadphonesService
     Task<UiFindHeadphonesState> SetFindHeadphonesEnabledAsync(bool enabled, CancellationToken token);
     Task<UiFindHeadphonesState> SetDeviceLocationRecordingAsync(string identity, bool enabled, CancellationToken token);
 }
+
+public enum FindHeadphonesTonePhase { Idle, Starting, Ringing, Stopping, Unconfirmed }
+
+public sealed record UiFindHeadphonesToneState(long Session, FindHeadphonesTonePhase Phase, bool CanStart, bool Worn)
+{
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsActive => Phase is FindHeadphonesTonePhase.Starting or FindHeadphonesTonePhase.Ringing or FindHeadphonesTonePhase.Stopping;
+}
+
+public sealed record FindHeadphonesToneArgs(long Session, bool? Play, bool Confirmed = false, bool ConfirmedWorn = false);
+
+public sealed record FindHeadphonesToneTarget(string BackendInstanceId, string Identity, long DeviceGeneration, long Session);
+
+public sealed record UiFindHeadphonesToneResult(bool Submitted, byte? AckStatus, string Message, UiSnapshot? After = null);
+
+public interface IFindHeadphonesToneService
+{
+    Task<UiFindHeadphonesToneResult> SetFindHeadphonesToneAsync(FindHeadphonesToneTarget target, bool play,
+        bool confirmed, bool confirmedWorn, CancellationToken token);
+}

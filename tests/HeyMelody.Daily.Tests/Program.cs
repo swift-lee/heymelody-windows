@@ -16,6 +16,12 @@ void Check(bool test, string message = "assertion") { if (!test) throw new Excep
 void Bad(Action test) { try { test(); } catch (FormatException) { return; } throw new Exception("expected strict rejection"); }
 async Task Test(string name, Func<Task> action)
 { await action(); passed++; Console.WriteLine("PASS " + name); }
+if (args is ["--find-headphones-tone-tests"])
+{
+    await FindHeadphonesToneTests.RunAsync(Test);
+    Console.WriteLine($"Find headphones tone: {passed} offline tests passed.");
+    return;
+}
 await Test("battery component pairs and charging bit", () =>
 {
     var b = DailyParsers.ParseBattery([0, 4, 1, 0xE4, 2, 54, 3, 0, 8, 17]);
@@ -601,6 +607,7 @@ await CodecCompatibilityRecoveryTests.RunAsync(Test);
 await CodecRecoveryPublicationTests.RunAsync(Test);
 await ConnectionDiagnosticTests.RunAsync(Test);
 await Air4ProProfileTests.Run(Test, (value, message) => Check(value, message));
+await FindHeadphonesToneTests.RunAsync(Test);
 Console.WriteLine($"Daily tests: {passed} passed; no native devices accessed.");
 
 sealed class Fake : IControlConnector
@@ -627,6 +634,7 @@ sealed class Fake : IControlConnector
     public Dictionary<int,List<byte>> SequenceSets = [];
     private Transport? _currentTransport;
     public void Push(ushort command, byte[] payload, byte sequence = 240) => _currentTransport!.Push(command, payload, sequence);
+    public void Disconnect() => _currentTransport!.Disconnect();
     public Packet? NotificationBeforeNextBatteryReply;
     public Packet? NotificationWithNextSetReply;
     public bool LegacyRegistration;
@@ -747,6 +755,7 @@ sealed class Fake : IControlConnector
     {
         private readonly Channel<byte[]> _received=Channel.CreateUnbounded<byte[]>();
         public void Push(ushort command, byte[] payload, byte sequence = 240) => _received.Writer.TryWrite(PacketEncoder.Encode(command, sequence, payload));
+        public void Disconnect() => _received.Writer.TryComplete();
         public async Task SendAsync(ReadOnlyMemory<byte> bytes,CancellationToken token)
         {
             token.ThrowIfCancellationRequested();int concurrent=Interlocked.Increment(ref owner._activeSend);

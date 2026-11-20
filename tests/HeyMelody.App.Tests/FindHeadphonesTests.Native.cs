@@ -32,13 +32,13 @@ internal static partial class FindHeadphonesTests
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         if (!thread.Join(TimeSpan.FromSeconds(45))) _nativeLocation.Error ??= "Native location smoke timed out.";
-        var success = _nativeLocation.Error is null && _nativeLocation.Closed && _nativeLocation.Screenshots.Count == 10;
+        var success = _nativeLocation.Error is null && _nativeLocation.Closed && _nativeLocation.Screenshots.Count == 12;
         var report = JsonSerializer.Serialize(new
         {
             success, nativeBluetoothCalls = 0, headsetSetCalls = _nativeLocation.Service.HeadsetWrites,
-            systemPermissionRequests = 0, windowClosed = _nativeLocation.Closed,
+            systemPermissionRequests = 0, fakeToneCommands = _nativeLocation.Service.ToneCalls.Count, windowClosed = _nativeLocation.Closed,
             screenshots = _nativeLocation.Screenshots, failure = _nativeLocation.Error,
-            scope = "Real Win32 window, native compositor screenshots and light/dark layout with an isolated fake location service; no Host, Bluetooth, device writes, real position, system permissions or external map launch."
+            scope = "Real Win32 window, compositor screenshots and light/dark layout with fake location and tone services; no Host, Bluetooth, device writes, real position, permission calls or external maps."
         }, new JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(Path.Combine(output, "report.json"), report);
         Console.WriteLine(report);
@@ -114,7 +114,19 @@ internal static partial class FindHeadphonesTests
                 dialog.Hide();
                 await operation;
             }
-            Check(_nativeLocation.Service.HeadsetWrites == 0 && _nativeLocation.Service.GlobalWrites == 0,
+            _nativeLocation.Service.ToneEnabled = true;
+            foreach (var worn in new[] { false, true })
+            {
+                Application.Current!.RequestedThemeVariant = worn ? ThemeVariant.Dark : ThemeVariant.Light;
+                vm.AdoptBackendEvent(ToneEvent(_nativeLocation.Service.ToneSnapshot("unknown-a", worn)));
+                var tone = vm.ToggleFindHeadphonesToneAsync();
+                var warning = await CapturedToneDialogAsync(window);
+                await Task.Delay(300);
+                CaptureNativeLocation(window, worn ? "tone-confirmation-worn.png" : "tone-confirmation.png");
+                warning.Hide();
+                await tone;
+            }
+            Check(_nativeLocation.Service.HeadsetWrites == 0 && _nativeLocation.Service.GlobalWrites == 0 && _nativeLocation.Service.ToneCalls.Count == 0,
                 "Native layout verification performs no location or headset writes.");
         }
         catch (Exception error) { _nativeLocation.Error = error.ToString(); }

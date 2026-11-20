@@ -145,6 +145,7 @@ public sealed partial class DailyClient
         lock (_stateGate)
         {
             if (!ReferenceEquals(_session, source) || _disposed || _latest is null) return;
+            InterruptFindToneLocked(source);
             _latest = Clone(_latest); _latest.Connected = false;
             _latest.Error = $"耳机控制连接已中断（{DailySession.DescribeFailure(failure)}）。";
             _latest.Revision = ++_revision; _latest.ObservedAtUtc = DateTimeOffset.UtcNow;
@@ -152,7 +153,7 @@ public sealed partial class DailyClient
         }
         Publish(snapshot);
     }
-    private void OnNotification(DailySession source, Packet packet)
+    private void OnNotification(DailySession source, long findToneSession, Packet packet)
     {
         if (!ReferenceEquals(_session, source)) return;
         foreach (Action<Packet> handler in Notification?.GetInvocationList() ?? [])
@@ -181,7 +182,7 @@ public sealed partial class DailyClient
                     foreach (var pair in NotificationParsers.ParseComponentPairs(data))
                     {
                         byte component = pair.Key, raw = pair.Value;
-                        updates[$"placement:{component}"] = s => ApplyPlacement(s, component, raw, placementObserved);
+                        updates[$"placement:{component}"] = s => ApplyPlacement(s, component, raw, placementObserved, findToneSession);
                     }
                     break;
                 case DeviceNotificationKind.Anc:
@@ -238,6 +239,7 @@ public sealed partial class DailyClient
             updates.Clear();
         }
         DailySnapshot? changed = null;
+        FindToneAttempt? wearStop = null;
         lock (_stateGate)
         {
             if (!ReferenceEquals(_session, source) || _disposed) return;
@@ -252,10 +254,13 @@ public sealed partial class DailyClient
                     ResolveCapabilities(next);
                     next.ObservedAtUtc = DateTimeOffset.UtcNow; next.Revision = ++_revision;
                     _latest = next; changed = Clone(next);
+                    if (notification!.Kind == DeviceNotificationKind.Placement)
+                        wearStop = FindToneWearStopLocked(source, next);
                 }
             }
         }
         if (changed is not null) Publish(changed);
+        if (wearStop is not null) _ = StopFindToneInBackgroundAsync(wearStop);
         foreach (var scope in refreshes) QueueRefresh(scope);
     }
 
@@ -270,11 +275,19 @@ public sealed partial class DailyClient
         else if (component == 2) { snapshot.Battery.Right = part.Right; snapshot.RightBatteryObservedAtUtc = observed; }
         else if (component == 3) { snapshot.Battery.Case = part.Case; snapshot.CaseBatteryObservedAtUtc = observed; }
     }
-    private static void ApplyPlacement(DailySnapshot s, byte component, byte raw, DateTimeOffset observed)
+    private static void ApplyPlacement(DailySnapshot s, byte component, byte raw, DateTimeOffset observed, long findToneSession)
     {
         s.RawStatusComponents[component] = raw;
-        if (component == 1) { s.LeftInCase = (raw & 1) == 0; s.LeftInEar = (raw & 2) != 0; s.LeftPlacementObservedAtUtc = observed; }
-        else if (component == 2) { s.RightInCase = (raw & 1) == 0; s.RightInEar = (raw & 2) != 0; s.RightPlacementObservedAtUtc = observed; }
+        if (component == 1)
+        {
+            s.LeftInCase = (raw & 1) == 0; s.LeftInEar = (raw & 2) != 0;
+            s.LeftPlacementObservedAtUtc = observed; s.LeftWearSession = findToneSession;
+        }
+        else if (component == 2)
+        {
+            s.RightInCase = (raw & 1) == 0; s.RightInEar = (raw & 2) != 0;
+            s.RightPlacementObservedAtUtc = observed; s.RightWearSession = findToneSession;
+        }
         else if (component == 3) { s.CaseOpen = (raw & 4) != 0; s.CaseObservedAtUtc = observed; }
     }
 
@@ -284,6 +297,7 @@ public sealed partial class DailyClient
         {
             if (!_monitoringRequested || _disposed) return;
             _invalidated.Add(scope);
+            if (_findTone is not null) return;
             if (Interlocked.CompareExchange(ref _refreshRunner, 1, 0) != 0) return;
             _notificationRefresh = Task.Run(RefreshNotificationsAsync);
         }
@@ -303,6 +317,7 @@ public sealed partial class DailyClient
                     DailyRefreshScope[] scopes;
                     lock (_stateGate)
                     {
+                        if (_findTone is not null) return;
                         scopes = _invalidated.Contains(DailyRefreshScope.Full) ? [DailyRefreshScope.Full] : _invalidated.ToArray();
                         _invalidated.Clear();
                     }
@@ -319,7 +334,7 @@ public sealed partial class DailyClient
             lock (_stateGate)
             {
                 Interlocked.Exchange(ref _refreshRunner, 0);
-                if (_invalidated.Count != 0 && !_disposed) QueueRefresh(_invalidated.First());
+                if (_invalidated.Count != 0 && !_disposed && _findTone is null) QueueRefresh(_invalidated.First());
             }
         }
     }

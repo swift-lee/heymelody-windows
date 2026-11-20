@@ -6,10 +6,11 @@ using HeyMelody.Platform;
 using HeyMelodyWindows.App;
 using HeyMelodyWindows.Host;
 
-internal static class FindHeadphonesTests
+internal static partial class FindHeadphonesTests
 {
     internal static async Task RunAsync(Func<string, Func<Task>, Task> test, string scratch)
     {
+        await RunToneAsync(test, scratch);
         await test("find headphones defaults and permission preparation never enable recording", async () =>
         {
             await using var fixture = await Fixture.Create(scratch);
@@ -415,7 +416,7 @@ internal static class FindHeadphonesTests
         internal BackendSupervisor Backend = null!;
         internal string Identity => Backend.Devices().Single().Identity;
         internal static async Task<Fixture> Create(string scratch, bool direct = false, FindHeadphonesStore? store = null,
-            bool secondDevice = false, TimeProvider? time = null)
+            bool secondDevice = false, TimeProvider? time = null, Func<IPeerWorker>? workerFactory = null)
         {
             var result = new Fixture();
             if (secondDevice) result.Devices.Add(new(2, "另一副耳机", true, true, true, 0x404));
@@ -424,7 +425,7 @@ internal static class FindHeadphonesTests
             whitelist.Save(result.Devices.Select(device => DeviceWhitelistStore.KeyFor(device.Address)));
             result.Backend = new(whitelist, token => result.Enumeration?.Invoke(token)
                 ?? Task.FromResult<IReadOnlyList<BluetoothCandidate>>(result.Devices.ToArray()),
-                () => new UnsupportedWorker(), time ?? result.Time, locationProvider: result.Location, findHeadphonesStore: store);
+                workerFactory ?? (() => new UnsupportedWorker()), time ?? result.Time, locationProvider: result.Location, findHeadphonesStore: store);
             await result.Backend.InitializeAsync(default);
             return result;
         }

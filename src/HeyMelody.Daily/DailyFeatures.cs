@@ -169,6 +169,7 @@ public sealed partial class DailyClient
         try
         {
             if (_disposed) return Reject(result, "客户端已关闭。");
+            if (FindHeadphonesToneActive) return Reject(result, "请先停止查找耳机提示音。", DailyApplyFailure.StateUnavailable);
             var before = await ReadFreshAsync(token); result.Before = before;
             var control = before.FeatureSections.SelectMany(x => x.Controls).SingleOrDefault(x => x.Id == id);
             if (control is null || !control.CanWrite || !control.Value.HasValue || !GeneralAllowed(before))

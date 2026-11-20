@@ -241,7 +241,7 @@ public sealed partial class ClientBridge : IHeadsetEventService, IDeviceManageme
             DiagnosticLog.Error("client.ipc", "unavailable", "Backend RPC did not complete", failure,
                 new { request.Id, request.Operation, submitted, recordWritten });
             if (submitted && !recordWritten) connection?.Close(failure);
-            throw new BackendUnavailableException(submitted && request.Operation == "apply",
+            throw new BackendUnavailableException(submitted && request.Operation is "apply" or "findHeadphonesTone",
                 _versionMismatch ? "后台与界面版本不一致，请从托盘退出后台后重新打开完整客户端。" : "蓝牙后台暂时不可用，请等待重连。", failure);
         }
         finally { connection?.Pending.TryRemove(request.Id, out _); }

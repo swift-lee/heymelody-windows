@@ -93,6 +93,7 @@ public sealed class UiSnapshot
     public bool CanSetGameMode { get; set; }
     public bool CanSetSpatial { get; set; }
     public bool CanSetHiRes { get; set; }
+    public UiFindHeadphonesToneState? FindHeadphonesTone { get; set; }
     public bool SpatialHiResMutex { get; set; }
     public IReadOnlyList<UiOption> AncOptions { get; set; } = Array.Empty<UiOption>();
     public IReadOnlyList<UiOption> EqualizerOptions { get; set; } = Array.Empty<UiOption>();

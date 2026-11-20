@@ -191,7 +191,7 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
         if (!Enum.IsDefined(scope)) throw new ArgumentOutOfRangeException(nameof(scope));
         if (_client is null) throw new InvalidOperationException("请先连接耳机。");
         var state = await _client.RefreshAsync((DailyRefreshScope)scope, token);
-        if (scope is RefreshScope.Full or RefreshScope.Features && CalibrationAvailable("hearing"))
+        if (scope is RefreshScope.Full or RefreshScope.Features && !_client.FindHeadphonesToneActive && CalibrationAvailable("hearing"))
             try { await ReadHearingProfilesAsync(token); }
             catch (Exception error) when (!token.IsCancellationRequested)
             { DiagnosticLog.Error("host.hearing", "profileRefreshFailed", "Hearing profiles could not be refreshed", error); }
@@ -371,6 +371,7 @@ public sealed partial class NativeHeadsetService : IHeadsetService, IDeviceManag
             CanSetGameMode = valid && caps.GameMode && snapshot.GameMode is not null,
             CanSetSpatial = valid && caps.SpatialMode && snapshot.SpatialMode is not null,
             CanSetHiRes = valid && caps.HiRes && snapshot.HiRes is not null,
+            FindHeadphonesTone = MapFindHeadphonesTone(snapshot, valid),
             SpatialHiResMutex = caps.SpatialHiResMutex,
             AncOptions = snapshot.AncOptions.Select(option => new UiOption((option.Primary << 8) | option.Level, option.Name)).ToArray(),
             EqualizerOptions = snapshot.Presets.Select(option => new UiOption(option.ProtocolId, option.Name)).ToArray(),

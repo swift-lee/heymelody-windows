@@ -358,9 +358,11 @@
                   </StackPanel>
                 </StackPanel>
               </Border>
-              <fa:FASettingsExpanderItem Content="播放查找耳机提示音" Description="暂未支持">
+              <fa:FASettingsExpanderItem Content="播放查找耳机提示音" Description="{Binding FindHeadphonesToneDescription}"
+                                        AutomationProperties.LiveSetting="Polite">
                 <fa:FASettingsExpanderItem.Footer>
-                  <Button x:Name="PlayFindHeadphonesButton" Content="播放" IsEnabled="False" />
+                  <Button x:Name="PlayFindHeadphonesButton" Content="{Binding FindHeadphonesToneButtonText, FallbackValue=播放}"
+                          Click="PlayFindHeadphones_Click" IsEnabled="{Binding CanToggleFindHeadphonesTone, FallbackValue=False}" />
                 </fa:FASettingsExpanderItem.Footer>
               </fa:FASettingsExpanderItem>
             </fa:FASettingsExpander>

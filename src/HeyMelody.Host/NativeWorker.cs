@@ -18,6 +18,7 @@ internal sealed class WorkerRequest
     public string Name { get; set; } = "";
     public RefreshScope Scope { get; set; }
     public UiAction? Action { get; set; }
+    public FindHeadphonesToneArgs? FindHeadphonesTone { get; set; }
     public string? CatalogGzip { get; set; }
     public long ResourceRevision { get; set; }
     public long AppMarker { get; set; } = 17006004;
@@ -125,6 +126,8 @@ internal static class NativeWorker
                     {
                         "refresh" => await service.RefreshAsync(request.Scope, budget.Token),
                         "apply" => await service.ApplyAsync(request.Action ?? throw new InvalidDataException(), budget.Token),
+                        "findHeadphonesTone" => await service.SetFindHeadphonesToneAsync(request.Identity, request.Generation,
+                            request.FindHeadphonesTone ?? throw new InvalidDataException(), budget.Token),
                         "diagnostics" => service.Diagnostics(),
                         "createCalibration" => service.CreateCalibration(request.Handle, request.CalibrationKind),
                         "getCalibration" => service.GetCalibration(request.Handle),
@@ -197,6 +200,8 @@ internal interface IPeerWorker : IAsyncDisposable
     Task<UiSnapshot> InitializeAsync(ulong address, string identity, string name, CancellationToken token);
     Task<UiSnapshot> RefreshAsync(RefreshScope scope, CancellationToken token);
     Task<UiApplyResult> ApplyAsync(UiAction action, CancellationToken token);
+    Task<UiFindHeadphonesToneResult> SetFindHeadphonesToneAsync(string identity, long generation, FindHeadphonesToneArgs args,
+        CancellationToken token) => Task.FromResult(new UiFindHeadphonesToneResult(false, null, "当前设备后台不支持播放查找提示音。"));
 }
 
 internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = null, TimeSpan? testBudget = null) : IPeerWorker, IResourcePeerWorker, ICalibrationPeerWorker
@@ -221,6 +226,9 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
         => RequestAsync<UiSnapshot>(new() { Operation = "refresh", Scope = scope }, token);
     public Task<UiApplyResult> ApplyAsync(UiAction action, CancellationToken token)
         => RequestAsync<UiApplyResult>(new() { Operation = "apply", Action = action }, token);
+    public Task<UiFindHeadphonesToneResult> SetFindHeadphonesToneAsync(string identity, long generation, FindHeadphonesToneArgs args,
+        CancellationToken token) => RequestAsync<UiFindHeadphonesToneResult>(new()
+        { Operation = "findHeadphonesTone", Identity = identity, Generation = generation, FindHeadphonesTone = args }, token);
 
     private async Task<T> RequestAsync<T>(WorkerRequest request, CancellationToken token)
     {
@@ -277,6 +285,8 @@ internal sealed partial class PeerWorker(Func<ProcessStartInfo>? startFactory = 
                 SubmissionAttempted = submitted, AcknowledgementUnknown = submitted, PartialEffects = submitted,
                 Message = submitted ? "未收到完整操作结果。设置可能已生效，后台不会重复提交。" : "设置尚未提交，蓝牙后台暂不可用。"
             };
+            if (request.Operation == "findHeadphonesTone") return (T)(object)new UiFindHeadphonesToneResult(submitted, null,
+                submitted ? "未确认耳机是否仍在响铃，请勿佩戴。" : "设备后台不可用，未提交指令。");
             throw new IOException("设备后台操作未完成。");
         }
         finally { _pending.TryRemove(request.Id, out _); _commands.Release(); }

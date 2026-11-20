@@ -4,7 +4,8 @@ namespace HeyMelodyWindows.Daily;
 /// <summary>Daily OPPO controls are serialized; constructing a client never opens or writes a device.</summary>
 public sealed partial class DailyClient(IControlConnector connector,
     Func<string, HeyMelodyWindows.Devices.DeviceProfile?>? profileResolver = null,
-    long appVersionMarker = 17006004, string? observedProductId = null, byte? observedColor = null) : IAsyncDisposable
+    long appVersionMarker = 17006004, string? observedProductId = null, byte? observedColor = null,
+    TimeProvider? timeProvider = null) : IAsyncDisposable
 {
     private readonly IControlConnector _connector = connector ?? throw new ArgumentNullException(nameof(connector));
     private readonly Func<string, HeyMelodyWindows.Devices.DeviceProfile?> _profileResolver = profileResolver ?? HeyMelodyWindows.Devices.DeviceModelResolver.FindByProductId;
@@ -46,7 +47,12 @@ public sealed partial class DailyClient(IControlConnector connector,
         if (Interlocked.Exchange(ref _disposeStarted, 1) != 0) return;
         _monitorLifetime.Cancel();
         await _gate.WaitAsync();
-        try { _disposed = true; await DropSessionAsync(); }
+        try
+        {
+            if (_findTone is { } tone) await StopFindHeadphonesToneCoreAsync(tone, CancellationToken.None);
+            _disposed = true;
+            await DropSessionAsync();
+        }
         finally { _gate.Release(); }
         await _notificationRefresh;
         _monitorLifetime.Dispose();

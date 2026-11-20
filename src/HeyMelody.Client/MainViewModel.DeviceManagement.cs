@@ -115,6 +115,8 @@ public sealed partial class MainViewModel
             device = current;
         }
         AdvanceSession();
+        await StopFindToneForDeviceSwitchAsync();
+        if (Closing) return false;
         var hadSession = _sessionIdentity is not null;
         var previousWasDemo = IsDemoSelected;
         CaptureDemoDraft();

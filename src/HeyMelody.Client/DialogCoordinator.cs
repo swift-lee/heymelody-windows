@@ -3,6 +3,8 @@ namespace HeyMelodyWindows.App;
 public interface IConfirmationService
 {
     Task<bool> ConfirmAsync(string title, string message, CancellationToken cancellationToken);
+    Task<bool> ConfirmFindHeadphonesToneAsync(string message, CancellationToken cancellationToken)
+        => ConfirmAsync("⚠️警告：可能会造成听力受损！", message, cancellationToken);
     Task<bool> ConfirmRetryAsync(string title, string message, CancellationToken cancellationToken)
         => ConfirmAsync(title, message, cancellationToken);
     Task AlertAsync(string title, string message, CancellationToken cancellationToken)

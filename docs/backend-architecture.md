@@ -47,6 +47,14 @@ Windows 不保留常驻 `Geolocator` 或 `StatusChanged` 订阅。空闲时的�
 
 Windows 在 Host UI 线程请求 Geolocator 系统权限；macOS 通过主 RunLoop 的 Core Location 桥及 Host bundle 的 `NSLocationUsageDescription` 请求。自动记录只作静默权限检查和一次性位置读取，不申请权限、不持续追踪。系统未上报的停机或休眠断开不能补造；定位采样时间与断开观测时间分别保留。
 
+## 查找耳机的提示音
+
+响铃与位置记录独立。新增 schema 5 `findHeadphonesTone`，只接受主界面的明确播放确认；请求固定后台实例、设备身份、连接代次与 worker 内的 SPP 会话编号。Host 和 worker 都复核当前目标。能力来自当前欢律配置（`findDevice` 或 `heyFindDevice` 等于 `1`）、App 条件和设备位图 bit 5；固件条件仍仅提示。响铃状态不持久化，离线展示和 BLE 不提供写权限或佩戴判断。
+
+worker 在原会话的单一读泵上发送 `0x0400` / `01`（启动）或 `00`（停止）。同序号 `0x8400` 的状态 `00` 只是 ACK，无音量控制或发声回读。活动期间保留停止所需序号，阻止冲突写入和会话轮换。启动 ACK 后 50 秒、手动停止、界面切换或断开、正常关闭 worker，均通过同一受限结束路径尽力停播。仅对配置支持佩戴（`wearDetection` 1/2 或 realme）且声明 `0x0109` 的耳机，当前 SPP 的戴入通知可结束本次已授权任务；明确覆盖佩戴警告的本次播放不因此中断。通知不启动或恢复播放。连接中断或缺失回执不跨会话补发，也不宣称已经静音。
+
+协议与门控依据本地欢律 17.6.5；ColorOS「无线耳机」17.6.3 仅对照佩戴流程，不参与运行时配置。样本、入口与验证边界见本地 `research/find-headphones-tone-2026-11-21/`。
+
 ## 暂停、写入与退出
 
 现有连接/断开按钮恢复或暂停所选耳机的 RFCOMM 控制监听。暂停跨主界面退出和 Windows 重新连接保留，手动恢复或 Host 重启才解除。OS 和 BLE 观测继续。

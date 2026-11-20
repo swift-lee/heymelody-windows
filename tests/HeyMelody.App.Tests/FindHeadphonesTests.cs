@@ -29,6 +29,7 @@ internal static partial class FindHeadphonesTests
                 await CopyFeedbackAsync();
                 await MainPageAsync(directory);
                 await SettingsAsync();
+                await ToneDialogAsync();
                 return true;
             }, CancellationToken.None).GetAwaiter().GetResult();
         }
@@ -38,7 +39,8 @@ internal static partial class FindHeadphonesTests
         Console.WriteLine("PASS find headphones copy toggle confirms for five seconds and retires late clipboard results");
         Console.WriteLine("PASS find headphones coordinates, map confirmation and cancellation use only the selected device");
         Console.WriteLine("PASS find headphones permission drafts and asynchronous save failures retain settings");
-        return 5;
+        Console.WriteLine("PASS find headphones tone confirmation, target changes, wear warnings and stop");
+        return 6;
     }
 
     private static void Preferences()
@@ -141,7 +143,7 @@ internal static partial class FindHeadphonesTests
             var stack = view.FindControl<StackPanel>("ControlStack")!;
             Check(stack.Children[^3] == panel && stack.Children[^2] == view.FindControl<FASettingsExpander>("DeviceInfoPanel")
                 && IconTests.Matches(panel.IconSource, AppIcon.Location) && !view.FindControl<Button>("PlayFindHeadphonesButton")!.IsEnabled,
-                "Find headphones precedes device information, uses a location icon and keeps playback disabled.");
+                "Find headphones precedes device information, uses a location icon and keeps playback disabled for an offline unknown model.");
             panel.IsExpanded = true; Dispatcher.UIThread.RunJobs();
             Check(!view.FindControl<ToggleSwitch>("DeviceLocationRecordingSwitch")!.IsEnabled,
                 "The device switch remains disabled while global recording is off.");
@@ -338,7 +340,7 @@ internal static partial class FindHeadphonesTests
         public Task<bool> LaunchUriAsync(Uri uri) { Uris.Add(uri); return Task.FromResult(Success); }
         public Task<bool> LaunchFileAsync(IStorageItem file) => throw new InvalidOperationException("No file launch expected.");
     }
-    private sealed class LocationService : IHeadsetEventService, IFindHeadphonesService
+    private sealed partial class LocationService : IHeadsetEventService, IFindHeadphonesService, IFindHeadphonesToneService
     {
         internal UiFindHeadphonesState State { get; set; } = new(false, new("unknown", ""),
             [new("unknown-a", false, null, "idle", ""), new("unknown-b", false, null, "idle", "")], 1);
@@ -350,9 +352,10 @@ internal static partial class FindHeadphonesTests
         private static readonly UiDevice[] Devices = [new("unknown-a", "Unknown Headset A", false), new("unknown-b", "Unknown Headset B", false)];
         public Task<IReadOnlyList<UiDevice>> EnumerateAsync(CancellationToken token) => Task.FromResult<IReadOnlyList<UiDevice>>(Devices);
         public Task<BackendSubscription> SubscribeAsync(string role, CancellationToken token) =>
-            Task.FromResult(new BackendSubscription { BackendInstanceId = "location-backend", Devices = Devices, FindHeadphones = State });
-        public Task<UiSnapshot> ConnectAsync(string identity, CancellationToken token) => Task.FromResult(new UiSnapshot
-            { Identity = identity, DeviceName = identity, BackendInstanceId = "location-backend", SupportedModel = false, Connected = false });
+            Task.FromResult(new BackendSubscription { BackendInstanceId = ToneBackend, Devices = Devices, FindHeadphones = State });
+        public Task<UiSnapshot> ConnectAsync(string identity, CancellationToken token) => Task.FromResult(ToneEnabled
+            ? ToneSnapshot(identity) : new UiSnapshot
+            { Identity = identity, DeviceName = identity, BackendInstanceId = ToneBackend, SupportedModel = false, Connected = false });
         public Task<UiSnapshot> SelectAsync(string identity, CancellationToken token) => ConnectAsync(identity, token);
         public Task<UiSnapshot> PauseAsync(string identity, CancellationToken token) => ConnectAsync(identity, token);
         public Task<UiSnapshot> ResumeAsync(string identity, CancellationToken token) => ConnectAsync(identity, token);

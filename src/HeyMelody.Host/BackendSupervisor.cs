@@ -40,6 +40,8 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
         internal DateTimeOffset? LastLidObservationTime;
         internal UiSnapshot Published = new();
         internal IPeerWorker? Worker;
+        internal FindToneLease? FindTone;
+        internal bool FindToneInterrupted;
         internal BroadcastObservation? Broadcast;
         // Display-only memory of the model and color, persisted per whitelist key.
         internal string? AppearanceProductId;
@@ -250,15 +252,18 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
         return new(true);
     }
 
-    public UiSnapshot Select(string identity, bool rememberSelection = false)
+    public UiSnapshot Select(string identity, bool rememberSelection = false, string? clientKey = null)
     {
+        UiSnapshot selected;
         lock (_sync)
         {
             var peer = FindLocked(identity);
             if (rememberSelection && _deviceState.RememberSelection(DeviceWhitelistStore.KeyFor(peer.Candidate.Address)))
                 PublishCatalogLocked();
-            return Copy(peer.Published);
+            selected = Copy(peer.Published);
         }
+        if (clientKey is not null) StopOwnedFindTones(clientKey, identity);
+        return selected;
     }
     public UiSnapshot Pause(string identity)
     {
@@ -348,6 +353,7 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
     {
         if (_disposed || snapshot.Revision != 0 && snapshot.Revision <= peer.SppRevision) return;
         peer.SppRevision = snapshot.Revision; peer.Spp = Copy(snapshot); peer.Diagnostic = null;
+        if (snapshot.ControlReady) peer.FindToneInterrupted = false;
         if (snapshot.ProductId is { Length: > 0 } product)
         {
             peer.VerifiedProductId = product;
@@ -398,6 +404,9 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
     private void StopPeerLocked(Peer peer)
     {
         InvalidateCalibrationLocked(peer);
+        peer.FindToneInterrupted |= HasActiveFindToneLocked(peer)
+            || peer.Spp?.FindHeadphonesTone?.Phase == FindHeadphonesTonePhase.Unconfirmed;
+        peer.FindTone = null;
         peer.Generation++; peer.SppRevision = 0; peer.PublicSppRevisions.Clear(); peer.Spp = null; peer.Diagnostic = null; peer.Initializing = false;
         peer.Lifetime.Cancel(); peer.Lifetime.Dispose(); peer.Lifetime = new();
         var worker = peer.Worker; peer.Worker = null;
@@ -433,7 +442,8 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
             IPeerWorker worker; CancellationToken token; long initialRevision;
             lock (_sync)
             {
-                if (generation != peer.Generation || !EligibleLocked(peer) || !peer.Published.ControlReady || peer.Worker is null || HasCalibrationLocked(peer) || _resourceTransition)
+                if (generation != peer.Generation || !EligibleLocked(peer) || !peer.Published.ControlReady || peer.Worker is null
+                    || HasCalibrationLocked(peer) || HasActiveFindToneLocked(peer) || _resourceTransition)
                     return new() { BackendReceiptReceived = true, FailureKind = ApplyFailure.StateUnavailable,
                         ConnectionState = peer.Published.ConnectionState, After = Copy(peer.Published), Message = "耳机连接或状态已变化，未提交设置。" };
                 worker = peer.Worker; token = peer.Lifetime.Token; initialRevision = peer.Revision;
@@ -621,6 +631,11 @@ internal sealed partial class BackendSupervisor : IAsyncDisposable
         snapshot.ControlReady = EligibleLocked(peer) && verifiedSpp && !HasCalibrationLocked(peer) && !_resourceTransition;
         snapshot.MonitoringState = peer.Paused ? MonitoringState.Paused : peer.State;
         if (!snapshot.ControlReady)
+        {
+            snapshot.FindHeadphonesTone = peer.FindToneInterrupted || peer.Spp?.FindHeadphonesTone?.Phase == FindHeadphonesTonePhase.Unconfirmed
+                ? new(0, FindHeadphonesTonePhase.Unconfirmed, false, false) : null;
+        }
+        if (!snapshot.ControlReady || snapshot.FindHeadphonesTone?.IsActive == true)
         {
             snapshot.CanSetAncMode = snapshot.CanSetAnc = snapshot.CanSetEqualizer = snapshot.CanSetCustomEqualizer = snapshot.CanSetDualConnection = false;
             snapshot.CanSetGameMode = snapshot.CanSetSpatial = snapshot.CanSetHiRes = false;

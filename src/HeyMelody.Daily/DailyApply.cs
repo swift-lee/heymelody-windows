@@ -18,6 +18,7 @@ public sealed partial class DailyClient
         try
         {
             if (_disposed) return Reject(result, "客户端已关闭。");
+            if (FindHeadphonesToneActive) return Reject(result, "请先停止查找耳机提示音。", DailyApplyFailure.StateUnavailable);
             DailySnapshot before = await ReadFreshAsync(token); result.Before = before;
             if (!before.Connected || !before.ProfileVerified || before.Error is not null)
                 return Reject(result, "新鲜设备状态不可用，没有发送设置。", DailyApplyFailure.StateUnavailable);

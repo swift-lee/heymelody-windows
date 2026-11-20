@@ -26,6 +26,7 @@ public sealed partial class DailyClient
         lock (_stateGate)
         {
             previous = _session; _session = null; _commands = null; _profile = null;
+            InterruptFindToneLocked(previous);
             _registeredSession = null; _monitoringWarning = null; _changes.Clear(); _invalidated.Clear();
             _registeredEvents.Clear(); _advertisedEvents.Clear();
         }
@@ -41,8 +42,14 @@ public sealed partial class DailyClient
         }
         await DropSessionAsync();
         var session = new DailySession(await _connector.OpenAsync(token));
-        lock (_stateGate) _session = session;
-        session.Notification += packet => OnNotification(session, packet);
+        long findToneSession;
+        lock (_stateGate)
+        {
+            _session = session;
+            findToneSession = ++_findToneSession;
+            _findTonePhase = DailyFindHeadphonesTonePhase.Idle;
+        }
+        session.Notification += packet => OnNotification(session, findToneSession, packet);
         session.Ended += failure => OnSessionEnded(session, failure);
         session.StartReader();
     }
@@ -53,6 +60,8 @@ public sealed partial class DailyClient
         try
         {
             if (_disposed) return new() { Error = "客户端已关闭。" };
+            lock (_stateGate)
+                if (_findTone is not null && _latest is { } monitored) return Clone(monitored);
             return await ReadFreshAsync(token, scope);
         }
         finally { _gate.Release(); }
@@ -129,6 +138,8 @@ public sealed partial class DailyClient
                         if (change.Value.Version > readVersion) change.Value.Apply(s);
                     }
                     ResolveCapabilities(s);
+                    s.FindHeadphonesToneSession = _findToneSession;
+                    s.FindHeadphonesTonePhase = _findTonePhase;
                     s.ObservedAtUtc = DateTimeOffset.UtcNow; s.Revision = ++_revision;
                     _latest = Clone(s);
                 }
@@ -307,7 +318,7 @@ public sealed partial class DailyClient
                     if (data.Length < 1 || data[0] != 0) throw new FormatException();
                     DateTimeOffset observed = DateTimeOffset.UtcNow;
                     foreach (var pair in NotificationParsers.ParseComponentPairs(data.AsSpan(1)))
-                        ApplyPlacement(s, pair.Key, pair.Value, observed);
+                        ApplyPlacement(s, pair.Key, pair.Value, observed, _findToneSession);
                 });
                 break;
             case DailyRefreshScope.Features:
@@ -380,6 +391,10 @@ public sealed partial class DailyClient
             GameMode = allowed && Declared("gameMode") && Commands(0x010D, 0x0403) && s.GameMode is not null,
             HiRes = allowed && Declared("highToneQuality") && Commands(0x010D, 0x0403) && s.HiRes is not null,
             SpatialMode = allowed && _profile.SpatialTypes.Count > 0 && s.SpatialMode is not null && (modern ? Commands(0x012A, 0x0422) : Commands(0x010D, 0x0403)),
+            FindHeadphonesTone = allowed && (_profile.FunctionVersion("findDevice") == 1 || _profile.FunctionVersion("heyFindDevice") == 1)
+                && _commands.Supports(FindHeadphonesToneCodec.Command),
+            FindHeadphonesWearCheck = _commands.Supports(0x0109) && (_profile.FunctionVersion("wearDetection") is 1 or 2
+                || string.Equals(_profile.Brand, "realme", StringComparison.OrdinalIgnoreCase)),
             SpatialHiResMutex = _profile.SpatialHiResMutex == 1,
             GameFeatureId = resolved.GameMode.FeatureId,
             SpatialRoute = modern ? "modern" : legacy ? "legacy" : "unavailable"
@@ -411,6 +426,8 @@ public sealed partial class DailyClient
             Selected = x.Selected, MinimumGain = x.MinimumGain, MaximumGain = x.MaximumGain, Bands = x.Bands.ToList() }).ToList(),
         CustomEqualizersRead = s.CustomEqualizersRead, EqualizerFrequencies = s.EqualizerFrequencies.ToArray(),
         DualConnection = s.DualConnection, GameMode = s.GameMode, SpatialMode = s.SpatialMode, HiRes = s.HiRes,
+        FindHeadphonesToneSession = s.FindHeadphonesToneSession, FindHeadphonesTonePhase = s.FindHeadphonesTonePhase,
+        LeftWearSession = s.LeftWearSession, RightWearSession = s.RightWearSession,
         RawFeatures = new(s.RawFeatures), Warnings = s.Warnings.ToList(), Error = s.Error,
         BassEngine = s.BassEngine, PromptVolume = s.PromptVolume,
         GameSound = s.GameSound is null ? null : new(s.GameSound.SelectedType, Array.AsReadOnly(s.GameSound.SupportedTypes.ToArray())),
@@ -420,6 +437,7 @@ public sealed partial class DailyClient
         Capabilities = new() { Battery = s.Capabilities.Battery, Anc = s.Capabilities.Anc, Preset = s.Capabilities.Preset,
             CustomEqualizer = s.Capabilities.CustomEqualizer, DualConnection = s.Capabilities.DualConnection,
             GameMode = s.Capabilities.GameMode, SpatialMode = s.Capabilities.SpatialMode, HiRes = s.Capabilities.HiRes,
+            FindHeadphonesTone = s.Capabilities.FindHeadphonesTone, FindHeadphonesWearCheck = s.Capabilities.FindHeadphonesWearCheck,
             SpatialHiResMutex = s.Capabilities.SpatialHiResMutex, GameFeatureId = s.Capabilities.GameFeatureId,
             SpatialRoute = s.Capabilities.SpatialRoute }
     };

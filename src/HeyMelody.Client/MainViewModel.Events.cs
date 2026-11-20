@@ -31,6 +31,7 @@ public sealed partial class MainViewModel
         { PresentFindHeadphones(notification.FindHeadphones); return; }
         if (notification.Kind == "unavailable")
         {
+            RememberInterruptedFindTone();
             InvalidateFindHeadphones(clear: false);
             _subscribed = false;
             BackendStartupDevices = null;
@@ -99,6 +100,7 @@ public sealed partial class MainViewModel
         if (_backendInstanceId == instance) return true;
         if (_backendInstanceId is { } previous)
         {
+            RememberInterruptedFindTone();
             InvalidateFindHeadphones(clear: true);
             _retiredBackends.Add(previous);
             _backendSnapshots.Clear(); _artworkRevision = 0;

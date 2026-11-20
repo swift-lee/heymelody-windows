@@ -32,6 +32,8 @@ namespace HeyMelodyWindows.Host;
 [JsonSerializable(typeof(UiFindHeadphonesDeviceState))]
 [JsonSerializable(typeof(UiFindHeadphonesState))]
 [JsonSerializable(typeof(FindHeadphonesEnabledArgs))]
+[JsonSerializable(typeof(FindHeadphonesToneArgs))]
+[JsonSerializable(typeof(UiFindHeadphonesToneResult))]
 [JsonSerializable(typeof(UiPreviewAudioOutput[]))]
 [JsonSerializable(typeof(List<UiPreviewAudioOutput>))]
 [JsonSerializable(typeof(UiResourceSettings))]

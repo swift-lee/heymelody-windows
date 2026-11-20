@@ -19,6 +19,11 @@ public partial class MainView
     private CancellationTokenSource? _mapCancellation;
     private FAContentDialog? _mapDialog;
 
+    private async void PlayFindHeadphones_Click(object? sender, RoutedEventArgs e)
+    {
+        if (!_closingWindow && ViewModel is { } vm) await vm.ToggleFindHeadphonesToneAsync();
+    }
+
     private void InitializeFindHeadphones()
     {
         DeviceLocationRecordingSwitch.PropertyChanged += async (_, change) =>

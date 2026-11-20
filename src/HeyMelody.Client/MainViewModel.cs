@@ -194,6 +194,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private void NotifyCommands() { foreach (var command in _commands) command.NotifyCanExecuteChanged(); }
     private void NotifyState()
     {
+        UpdateFindTonePresentation();
         foreach (var control in _featureSections.SelectMany(s => s.Controls).Concat(_equalizerFeatures)) control.RefreshPermissions();
         foreach (var property in PresentationProperties)
         {
@@ -442,6 +443,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         // A current backend snapshot can combine cached settings with fresh BLE
         // telemetry. Keep that observation, but IsVerifiedControl rejects its cache flag.
         _liveSnapshot = snapshot;
+        if (_findToneInterruptedIdentity == snapshot.Identity && IsVerifiedControl(snapshot)) _findToneInterruptedIdentity = null;
         _displaying = true;
         UpdateResourcePresentation(snapshot);
         _title = snapshot.DeviceName;

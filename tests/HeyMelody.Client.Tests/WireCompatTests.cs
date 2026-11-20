@@ -19,7 +19,8 @@ internal static class WireCompatTests
         typeof(bool), typeof(UiDevice[]), typeof(List<UiDevice>), typeof(UiHearingProfile[]), typeof(List<UiHearingProfile>),
         typeof(HearingSelectionArgs), typeof(CalibrationCreateArgs), typeof(ArtworkAcquireArgs), typeof(ArtworkReleaseArgs),
         typeof(ArtworkLeaseReply), typeof(UiLocationPermission), typeof(UiRecordedLocation),
-        typeof(UiFindHeadphonesDeviceState), typeof(UiFindHeadphonesState), typeof(FindHeadphonesEnabledArgs)
+        typeof(UiFindHeadphonesDeviceState), typeof(UiFindHeadphonesState), typeof(FindHeadphonesEnabledArgs),
+        typeof(FindHeadphonesToneArgs), typeof(UiFindHeadphonesToneResult)
     ];
 
     // Sparse or legacy inputs per root; "{}" is always added. Names are case-sensitive on the wire.

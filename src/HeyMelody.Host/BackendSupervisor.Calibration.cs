@@ -47,7 +47,7 @@ internal sealed partial class BackendSupervisor
             lock (_sync)
             {
                 if (generation != peer.Generation || !EligibleLocked(peer) || !peer.Published.ControlReady
-                    || peer.Worker is not ICalibrationPeerWorker worker || HasCalibrationLocked(peer) || _resourceTransition)
+                    || peer.Worker is not ICalibrationPeerWorker worker || HasCalibrationLocked(peer) || HasActiveFindToneLocked(peer) || _resourceTransition)
                     throw new InvalidOperationException("耳机正在执行其他测试，或当前连接不可用。");
                 if (kind == "fit" ? !peer.Published.CanFitTest : !peer.Published.CanSetupHearing)
                     throw new InvalidOperationException("当前设备未声明此测试的必要能力。");
@@ -211,7 +211,8 @@ internal sealed partial class BackendSupervisor
             ICalibrationPeerWorker worker;
             lock (_sync)
             {
-                if (generation != peer.Generation || peer.Worker is not ICalibrationPeerWorker target || !peer.Published.ControlReady || HasCalibrationLocked(peer) || _resourceTransition)
+                if (generation != peer.Generation || peer.Worker is not ICalibrationPeerWorker target || !peer.Published.ControlReady
+                    || HasCalibrationLocked(peer) || HasActiveFindToneLocked(peer) || _resourceTransition)
                     throw new InvalidOperationException("后台或连接已变化，未提交设置。"); worker = target;
             }
             var result = await worker.SelectHearingAsync(uid, peer.Lifetime.Token);
@@ -225,6 +226,7 @@ internal sealed partial class BackendSupervisor
     }
     public void ClientDetached(string owner)
     {
+        StopOwnedFindTones(owner);
         CalibrationLease[] leases;
         lock (_sync)
         {
